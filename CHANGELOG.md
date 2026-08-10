@@ -13,6 +13,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A loopback HTTP integration regression for the watcher: it starts the real
+  server on an ephemeral port and verifies allowed GET/POST handling plus
+  rejected DNS-rebinding Host headers.
+
 ### Fixed
 
 - `load_config()` now expands `~` and environment variables (`%USERPROFILE%`, `$HOME`) in configured `roots[].path`, `caches[].path` and `caches[].filter_prefix`. Previously such entries stayed literal strings, `Path.exists()` returned False and the root was skipped **silently** — no exception, no warning, just fewer results. Observed 2026-08-01 on a consumer whose `lock_roots.json` referenced all OneDrive roots via `%USERPROFILE%`: the watcher reported 2 instead of 12 active locks. A lock watcher that misses locks is worse than none, because it reports false safety. Regression tests in `tests/test_config_path_expansion.py`.

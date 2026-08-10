@@ -24,9 +24,9 @@
   jetzt fnmatchcase+casefold (überall case-insensitiv) + Wortgrenze.
 - [x] **(niedrig)** lock_scan filter_prefix ohne Segmentgrenze; rooms.py
   match→fullmatch; web_server limit-Parsing → 400.
-- [ ] **(Folge)** Watcher-Tests decken weiter nur Helper/Module ab — ein
-  Integrationstest, der den HTTP-Server wirklich startet (echte GET/POST gegen
-  127.0.0.1), fehlt noch.
+- [x] **(Folge)** Watcher-Tests deckten nur Helper/Module ab — ein
+  Integrationstest startet jetzt einen kurzlebigen HTTP-Server und prüft echte
+  GET/POST-Anfragen gegen 127.0.0.1 sowie Host-/Origin-Gates (2026-08-10).
 - [x] **(Folge — erledigt 2026-07-04, User-Direktive „immer Verbesserungen
   rückangleichen")** Dieselben Funde in der privaten Live-Instanz
   (`_control-center/_lock_watcher`) bestätigt und portiert: CHECK-Constraint

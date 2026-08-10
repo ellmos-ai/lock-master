@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![Multi-Agent Lock Protokoll](https://img.shields.io/badge/multi--agent-file%20locking-green.svg)](#features)
-[![Pytest 81 passed](https://img.shields.io/badge/pytest-81%20passed-brightgreen.svg)](#)
+[![Pytest 82 passed](https://img.shields.io/badge/pytest-82%20passed-brightgreen.svg)](#)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
 [![ellmos-ai](https://img.shields.io/badge/Ökosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Dachorganisation-open--bricks-orange.svg)](https://github.com/open-bricks)

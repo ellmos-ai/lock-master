@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import http.client
+import json
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,3 +67,49 @@ def test_canonical_allowed_origin_never_reflects_untrusted_header():
     )
     assert web_server._canonical_allowed_origin(8095, "http://evil.test:8095") is None
     assert web_server._canonical_allowed_origin(8095, "http://127.0.0.1:8095\r\nX-Bad: 1") is None
+
+
+def test_loopback_http_server_enforces_host_and_origin_gates(monkeypatch, tmp_path: Path):
+    """Exercise actual HTTP request handling instead of only handler helpers."""
+    monkeypatch.setattr(web_server.config, "DB_PATH", tmp_path / "watcher.db")
+    server = web_server.WatcherServer(0)
+    port = server.server_port
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def request(method: str, path: str, **headers: str):
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        try:
+            connection.request(method, path, body="{}", headers=headers)
+            response = connection.getresponse()
+            return response.status, dict(response.getheaders()), response.read()
+        finally:
+            connection.close()
+
+    try:
+        allowed_host = f"127.0.0.1:{port}"
+        origin = f"http://127.0.0.1:{port}"
+
+        status, headers, body = request("GET", "/api/stats", Host=allowed_host)
+        assert status == 200
+        assert headers["Content-Type"] == "application/json; charset=utf-8"
+        assert "scan_stale" in json.loads(body)
+
+        status, headers, body = request(
+            "POST",
+            "/api/lock",
+            Host=allowed_host,
+            Origin=origin,
+            **{"Content-Type": "application/json"},
+        )
+        assert status == 400
+        assert json.loads(body) == {"error": "project_dir required"}
+        assert headers["Access-Control-Allow-Origin"] == origin
+
+        status, _, body = request("GET", "/api/stats", Host="evil.invalid")
+        assert status == 403
+        assert json.loads(body) == {"error": "Forbidden host"}
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
