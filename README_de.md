@@ -184,6 +184,13 @@ pure-locking\watcher\START.bat
 http://127.0.0.1:8095
 ```
 
+Die lokale UI bietet unter **Sperren/Rechte** jetzt das Anlegen und Entfernen
+geschützter User-Locks sowie Vorschau und bestätigte Bulk-Sperrung/-Entsperrung.
+Bulk-Aktionen verlangen eine ausdrückliche Bestätigung; User-Locks werden weder
+von Bulk-Entsperren noch vom Stale-Cleanup entfernt. Für eine optionale einzelne
+JSON-Webhooksendung nach echten Bereinigungen kann
+`LOCK_MASTER_PRUNE_WEBHOOK_URL` oder `--webhook-url <http(s)-URL>` verwendet werden.
+
 Runtime-Daten liegen standardmäßig außerhalb des Repos in
 `~/.lock_master_watcher` und können mit `LOCK_MASTER_WATCHER_DATA` umgeleitet
 werden. Details zu API und Daemon stehen in

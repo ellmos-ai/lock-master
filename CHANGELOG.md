@@ -18,6 +18,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - A loopback HTTP integration regression for the watcher: it starts the real
   server on an ephemeral port and verifies allowed GET/POST handling plus
   rejected DNS-rebinding Host headers.
+- Watcher UI controls for protected user-lock creation/removal and guarded
+  bulk-lock/bulk-unlock preview and commit flows.
+- An opt-in stale-lock notification hook: `LOCK_MASTER_PRUNE_WEBHOOK_URL` or
+  `--webhook-url` sends one JSON event after real removals.
 
 ### Fixed
 

@@ -92,10 +92,23 @@ python watcher/cli.py watch --update-cache
 | `POST /api/scan` | immediate full scan |
 | `POST /api/prune` | run `prune_stale_locks.py` |
 | `POST /api/lock` | create a lock inside configured roots |
+| `POST /api/user-lock` | create a protected user lock inside configured roots |
+| `POST /api/user-lock/remove` | remove a protected user lock through the user channel |
+| `POST /api/bulk-lock` | preview or commit a guarded bulk lock (`commit` flag) |
+| `POST /api/bulk-unlock` | preview or commit removal of bulk-created locks |
 | `GET /api/room-stats` | cached directory statistics |
 | `POST /api/room-stats/refresh` | refresh directory statistics |
 
 Write endpoints are intended for local browser use and validate local origins.
+The `Sperren/Rechte` button in the browser UI exposes the user-lock and guarded
+bulk-lock endpoints. Bulk actions show a dry-run first; committing requires an
+explicit confirmation and never touches user locks.
+
+When `prune_stale_locks.py` removes one or more expired locks, an optional
+single JSON notification can be sent by setting
+`LOCK_MASTER_PRUNE_WEBHOOK_URL` or passing `--webhook-url <http(s)-URL>`.
+Notifications are sent only after real removals; dry-runs and failed
+notifications do not change cleanup semantics.
 
 ## Scan Model
 

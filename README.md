@@ -189,6 +189,13 @@ Open:
 http://127.0.0.1:8095
 ```
 
+The local UI also exposes protected user-lock creation/removal and guarded
+bulk-lock/bulk-unlock actions under **Permissions/Locks**. Bulk actions offer a
+dry-run and require explicit confirmation before writing; user locks are never
+removed by bulk unlock or stale cleanup. To receive one JSON webhook event after
+real stale-lock removals, set `LOCK_MASTER_PRUNE_WEBHOOK_URL` or pass
+`--webhook-url <http(s)-URL>` to `prune_stale_locks.py`.
+
 Runtime data is stored outside the repository by default in
 `~/.lock_master_watcher` and can be redirected with `LOCK_MASTER_WATCHER_DATA`.
 See [pure-locking/watcher/README.md](pure-locking/watcher/README.md) for API and daemon details.

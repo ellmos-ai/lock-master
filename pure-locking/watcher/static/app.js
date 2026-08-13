@@ -646,6 +646,106 @@ async function saveLockName(lockId) {
   loadRoomMap();
 }
 
+// ── User-Locks & Bulk-Lock ───────────────────────
+function showPermissions() {
+  openModal('Sperren & Rechte', `
+    <div class="detail-section">
+      <h3>User-Lock anlegen</h3>
+      <p class="permission-hint">Ein User-Lock bleibt bestehen, bis du ihn
+        ausdrücklich wieder entfernst. Agenten und Prune fassen ihn nicht an.</p>
+      <div class="form-group">
+        <label>Projektordner</label>
+        <input id="user-lock-dir" type="text" placeholder="C:\\...\\Projekt" />
+      </div>
+      <div class="form-group">
+        <label>Scope (optional)</label>
+        <input id="user-lock-scope" type="text" placeholder="leer = gesamtes Projekt" />
+      </div>
+      <div class="form-group">
+        <label>Zweck (optional)</label>
+        <input id="user-lock-purpose" type="text" placeholder="Warum wird gesperrt?" />
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-danger" onclick="createUserLock()">User-Lock anlegen</button>
+        <button class="btn btn-ghost" onclick="removeUserLock()">User-Lock entfernen</button>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h3>Sofortsperrung aller Roots</h3>
+      <p class="permission-hint">Die Vorschau schreibt nichts. User-Locks werden
+        beim Sperren und Entsperren nie verändert.</p>
+      <div class="form-group">
+        <label>Grund</label>
+        <input id="bulk-lock-reason" type="text" placeholder="z. B. Wartung oder Migration" />
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="runBulk('lock', false)">Vorschau sperren</button>
+        <button class="btn btn-danger" onclick="runBulk('lock', true)">Alle sperren</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="runBulk('unlock', false)">Vorschau entsperren</button>
+        <button class="btn btn-primary" onclick="runBulk('unlock', true)">Alle entsperren</button>
+      </div>
+      <pre id="bulk-lock-result" class="bulk-result" aria-live="polite"></pre>
+    </div>
+  `);
+}
+
+async function createUserLock() {
+  const result = await apiPost('/api/user-lock', {
+    project_dir: document.getElementById('user-lock-dir').value,
+    scope: document.getElementById('user-lock-scope').value,
+    purpose: document.getElementById('user-lock-purpose').value,
+  });
+  if (result.error) {
+    toast('Fehler: ' + result.error);
+    return;
+  }
+  toast('User-Lock erstellt: ' + result.filename);
+  loadRoomMap();
+  loadStats();
+}
+
+async function removeUserLock() {
+  const result = await apiPost('/api/user-lock/remove', {
+    project_dir: document.getElementById('user-lock-dir').value,
+    scope: document.getElementById('user-lock-scope').value,
+  });
+  if (result.error) {
+    toast('Fehler: ' + result.error);
+    return;
+  }
+  toast('User-Lock entfernt');
+  loadRoomMap();
+  loadStats();
+}
+
+async function runBulk(action, commit) {
+  if (commit) {
+    const prompt = action === 'lock'
+      ? 'Wirklich alle angebundenen Roots sperren?'
+      : 'Wirklich alle zentralen Bulk-Sperren entfernen?';
+    if (!window.confirm(prompt)) return;
+  }
+  const path = action === 'lock' ? '/api/bulk-lock' : '/api/bulk-unlock';
+  const result = await apiPost(path, {
+    commit,
+    reason: document.getElementById('bulk-lock-reason').value,
+  });
+  const output = document.getElementById('bulk-lock-result');
+  if (!output) return;
+  if (result.error) {
+    output.textContent = 'Fehler: ' + result.error;
+    return;
+  }
+  output.textContent = JSON.stringify(result, null, 2);
+  if (commit) {
+    toast(action === 'lock' ? 'Sofortsperrung gesetzt' : 'Bulk-Sperren entfernt');
+    loadRoomMap();
+    loadStats();
+  }
+}
+
 // ── Central Files / Bibliothek ───────────────────
 async function showCentralFiles() {
   const files = await api('/api/central-files');

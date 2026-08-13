@@ -40,7 +40,9 @@
 
 - [x] Additional language versions (es, ja, ru, zh-Hans) -- done: README_es.md, README_ja.md, README_ru.md, README_zh-Hans.md added with language switcher in all READMEs
 - [x] `lock_create.py` -- convenience script to stamp a new LOCK*.txt from the template (done 2026-07-04: exclusive/scoped/team/user/condition, Validierung, Überschreibschutz, 9 Tests, README-Zeile EN/DE — Locale-READMEs es/ja/ru/zh noch ohne die neue Zeile)
-- [ ] Optional Telegram/webhook notification on lock expiry (prune hook)
+- [x] Optional HTTP(S) webhook notification on lock expiry (prune hook) -- done 2026-08-13:
+      opt-in `LOCK_MASTER_PRUNE_WEBHOOK_URL` / `--webhook-url`, one JSON event per
+      real cleanup run, dry-runs and notification failures remain non-destructive
 - [x] GitHub Actions CI: run smoke tests on push (done 2026-07-04: pytest-Matrix 3.10–3.13 auf ubuntu+windows)
 - [ ] Watcher UI polish after longer real-world daemon runs: empty roots, very large roots, stale daemon messaging, mobile layout
 - [x] **Drift check 2026-07-03, closed 2026-07-04 (T-20260704-05 audit):** Ported the
@@ -52,9 +54,9 @@
       both tied to private, user-specific tracking systems, not generic. `pure-locking/watcher/config.py`
       stays divergent by design (portable `LOCK_MASTER_WATCHER_DATA`/`REPO_ROOT` vs. private
       auto-discovery).
-- [ ] **Follow-up (medium):** `pure-locking/watcher/static/` has no UI for the new bulk-lock/user-lock
-      endpoints yet (private instance's `static/app.js` has buttons/handlers for both); the
-      backend routes above are usable via direct API calls but not yet from the Web UI.
+- [x] **Follow-up (medium, erledigt 2026-08-13):** `pure-locking/watcher/static/`
+      enthält jetzt die lokale UI für User-Lock anlegen/entfernen sowie Dry-Run-
+      und Commit-Aktionen für Bulk-Lock/Bulk-Unlock.
 
 ## Ideas / Backlog
 
