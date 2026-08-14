@@ -13,12 +13,8 @@ Run:
   python -m pytest tests/test_smoke.py -v
 """
 
-import json
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-
-import pytest
 
 import lock_utils
 from lock_scan import collect_locks, render_cache

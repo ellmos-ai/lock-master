@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![Multi-Agent Lock Protokoll](https://img.shields.io/badge/multi--agent-file%20locking-green.svg)](#features)
-[![Pytest 82 passed](https://img.shields.io/badge/pytest-82%20passed-brightgreen.svg)](#)
+[![Pytest 88 passed](https://img.shields.io/badge/pytest-88%20passed-brightgreen.svg)](#)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
 [![ellmos-ai](https://img.shields.io/badge/Ökosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Dachorganisation-open--bricks-orange.svg)](https://github.com/open-bricks)
@@ -15,7 +15,7 @@
 **Portables, config-gesteuertes Datei-Sperrsystem für Multi-Agenten-Projektkoordination.**
 
 > [!NOTE]
-> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **04.08.2026**.
+> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **14.08.2026**.
 
 lock-master bietet ein leichtgewichtiges, abhängigkeitsfreies Sperrprotokoll auf Basis von Klartextdateien. Eine `LOCK*.txt`-Datei in einem Projektordner signalisiert, dass das Projekt oder eine Komponente gerade in Bearbeitung ist -- kein Agent, keine Automation und kein autonomer Loop verändert diesen Bereich, solange eine gültige, nicht abgelaufene Sperre existiert.
 

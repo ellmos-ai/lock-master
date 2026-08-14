@@ -18,14 +18,12 @@ import subprocess
 import sys
 import urllib.parse
 from datetime import datetime
-from http import HTTPStatus
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
 import rooms
-import scanner
 import storage
 import lock_utils  # noqa: E402
 import bulk_lock  # noqa: E402
@@ -326,7 +324,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
 
         for r in room_list:
             r["lock_count"] = sum(
-                1 for l in active_locks if rooms.room_for_path(l["path"]) == r["key"]
+                1 for lock_item in active_locks if rooms.room_for_path(lock_item["path"]) == r["key"]
             )
 
         self._json_response(room_list)
@@ -342,17 +340,17 @@ class WatcherHandler(BaseHTTPRequestHandler):
             all_locks = db.get_all_locks(status)
 
         result = []
-        for l in all_locks:
-            l["room"] = rooms.room_for_path(l["path"])
-            if room_key and l["room"] != room_key:
+        for lock_item in all_locks:
+            lock_item["room"] = rooms.room_for_path(lock_item["path"])
+            if room_key and lock_item["room"] != room_key:
                 continue
-            if l.get("team_data") and isinstance(l["team_data"], str):
+            if lock_item.get("team_data") and isinstance(lock_item["team_data"], str):
                 try:
-                    l["team_data"] = json.loads(l["team_data"])
+                    lock_item["team_data"] = json.loads(lock_item["team_data"])
                 except json.JSONDecodeError:
                     pass
-            l["remaining"] = self._calc_remaining(l.get("expires_at"))
-            result.append(l)
+            lock_item["remaining"] = self._calc_remaining(lock_item.get("expires_at"))
+            result.append(lock_item)
 
         self._json_response(result)
 
@@ -391,9 +389,9 @@ class WatcherHandler(BaseHTTPRequestHandler):
         db = self.server.db
         active_locks = db.get_active_locks()
         room["locks"] = [
-            {**l, "room": room_key, "remaining": self._calc_remaining(l.get("expires_at"))}
-            for l in active_locks
-            if rooms.room_for_path(l["path"]) == room_key
+            {**lock_item, "room": room_key, "remaining": self._calc_remaining(lock_item.get("expires_at"))}
+            for lock_item in active_locks
+            if rooms.room_for_path(lock_item["path"]) == room_key
         ]
         self._json_response(room)
 

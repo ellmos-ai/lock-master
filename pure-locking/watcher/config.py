@@ -26,7 +26,7 @@ CHECK_INTERVAL: int = 20
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import lock_scan as _lock_scan
+import lock_scan as _lock_scan  # noqa: E402
 
 ROOTS_FILE_ENV = "LOCK_MASTER_ROOTS_FILE"
 

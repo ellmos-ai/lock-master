@@ -32,6 +32,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Cleaned up unused imports and ambiguous variable names across pure-locking/watcher and test suites (`ruff check` 100% clean). Synchronized Pytest test badges (88 passed) in `README.md` & `README_de.md` and updated `llms.txt` verification timestamp to `2026-08-14`. [2026-08-14]
 - Refreshed `llms.txt` `Last-checked` timestamp to `2026-08-04`, synchronized Pytest badges (81 passed) and added organisation (`ellmos-ai`) & umbrella (`open-bricks`) badges in `README.md` & `README_de.md`. [2026-08-04]
 
 ## [1.5.0] - 2026-07-27

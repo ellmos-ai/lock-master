@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import csv
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -170,8 +168,8 @@ def _write_detail_cache(locks: list[dict], scanned_at: datetime) -> None:
     if not locks:
         lines.append("Keine aktiven Locks.")
     else:
-        exclusive = [l for l in locks if l.get("lock_type", "exclusive") != "team"]
-        team = [l for l in locks if l.get("lock_type") == "team"]
+        exclusive = [lock_item for lock_item in locks if lock_item.get("lock_type", "exclusive") != "team"]
+        team = [lock_item for lock_item in locks if lock_item.get("lock_type") == "team"]
 
         if exclusive:
             lines.append(f"## Exclusive Locks ({len(exclusive)})")

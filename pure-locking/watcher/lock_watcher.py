@@ -14,12 +14,10 @@ Ohne Argumente: Daemon-Modus (Endlosloop).
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import signal
 import socket
-import subprocess
 import sys
 import threading
 import time

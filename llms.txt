@@ -2,7 +2,7 @@
 
 > Portable, config-driven multi-agent file-lock system for project coordination.
 
-## Last-checked: 2026-08-04
+## Last-checked: 2026-08-14
 
 ## What it does
 
