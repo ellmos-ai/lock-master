@@ -64,6 +64,28 @@
 - [ ] Integration example for cron-based stale cleanup
 - [ ] Optional installer/launcher wrapper for `pure-locking/watcher/` on non-Windows systems
 
+## Claim-Härtung nach Bandmaster-/ArenaOS-Vergleich (2026-08-15)
+
+> Modulgrenze: Die folgenden Punkte betreffen ausschließlich Sperren, Claims und
+> deren Nachweise. `lock-master` verwaltet weiterhin **keine Aufgaben**, keine
+> Abhängigkeiten, keine Validierungen und keine Git-Commits.
+
+- [ ] In `team-lock` ein transaktionales `claim_many` entwerfen: Eine Menge
+  normalisierter Ressourcen wird entweder vollständig und atomar beansprucht
+  oder gar nicht; Teilclaims werden bei Konflikten zurückgerollt.
+- [ ] Konflikte nicht nur auf identische Namen, sondern auf überlappende
+  Pfadbereiche prüfen (`a/` kollidiert mit `a/b`), mit dokumentierter
+  Plattform- und Groß-/Kleinschreibungssemantik.
+- [ ] Einen unveränderlichen Claim-Snapshot mit Claim-ID, Besitzer, Ressourcen,
+  Erstellungszeit, Ablaufzeit und optionalem Ressourcen-Fingerprint vorsehen.
+  Der Fingerprint erkennt Drift, erteilt aber keine Schreibberechtigung.
+- [ ] Handoff-/Recovery-Belege ergänzen: Übernahme, Verlängerung, Freigabe,
+  Ablauf und erzwungene Bereinigung sollen als append-only Ereignisse
+  nachvollziehbar sein, ohne daraus einen Workflow- oder Task-Manager zu machen.
+- [ ] Konkurrenz-, Crash- und Wiederanlaufstests für `claim_many` ergänzen:
+  genau ein Gewinner, keine Teilclaims, keine fremde Claim-ID im Fehlerpfad,
+  idempotente Freigabe und konservatives Verhalten bei beschädigtem Zustand.
+
 ## Done
 
 - [x] Portable `watcher/` integration added: localhost daemon, REST API, Web UI, SQLite runtime outside the repo (2026-06-25)
