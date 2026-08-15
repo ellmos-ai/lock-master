@@ -19,6 +19,8 @@ Zero dependencies (Python 3.10+). See LOCK-SYSTEM.md for the semantics.
 from __future__ import annotations
 
 import argparse
+
+import contested
 import platform
 import sys
 from datetime import datetime
@@ -62,7 +64,10 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
     """Render the key: value body of the lock file."""
     lines = [
         f"owner: {args.owner}",
-        f"created: {datetime.now().strftime('%Y-%m-%dT%H:%M')}",
+        # Sekundengenau: Bei Minutengenauigkeit landen zwei fast gleichzeitige
+        # Anspruechen im Host-Tiebreak, und dort verliert derselbe Host
+        # strukturell immer. lock_utils._parse_created liest Sekunden bereits.
+        f"created: {datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}",
         f"host: {args.host}",
     ]
     if args.user:
@@ -107,6 +112,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="free-text: why the area is locked")
     parser.add_argument("--release-condition", default=None,
                         help="free-text release condition (required for --condition)")
+    parser.add_argument("--contested", action="store_true",
+                        help="Konfliktverfahren erzwingen (Quarantaene + Entscheid)")
+    parser.add_argument("--no-contest", action="store_true",
+                        help="Konfliktverfahren unterdruecken, auch im Cloud-Ordner")
+    parser.add_argument("--quarantine", type=int,
+                        default=contested.DEFAULT_QUARANTINE_SECONDS,
+                        help="Wartezeit des Konfliktverfahrens in Sekunden")
+    parser.add_argument("--verbose-contest", action="store_true",
+                        help="auch melden, wenn das Verfahren uebersprungen wird")
     parser.add_argument("--force", action="store_true",
                         help="overwrite an existing lock file of the same name")
     args = parser.parse_args(argv)
@@ -126,15 +140,57 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"error: generated name {name!r} is not a valid lock name")
 
     lock_path = project_dir / name
-    if lock_path.exists() and not args.force:
-        raise SystemExit(
-            f"error: {lock_path} already exists (use --force to overwrite)"
-        )
-
     scope_label = args.scope or "project"
-    lock_path.write_text(build_lock_body(args, scope_label), encoding="utf-8")
+    body = build_lock_body(args, scope_label)
+
+    # Exklusiv anlegen statt exists()-pruefen-dann-schreiben: Zwischen Pruefung
+    # und Schreiben liegt sonst ein Fenster, in dem ein zweiter Prozess dieselbe
+    # Datei anlegt -- beide halten sich fuer den Inhaber. "x" laesst das
+    # Dateisystem entscheiden, atomar und ohne Fenster.
+    if args.force:
+        lock_path.write_text(body, encoding="utf-8")
+    else:
+        try:
+            with lock_path.open("x", encoding="utf-8") as handle:
+                handle.write(body)
+        except FileExistsError:
+            raise SystemExit(
+                f"error: {lock_path} already exists (use --force to overwrite)"
+            ) from None
     print(f"created: {lock_path}")
-    return 0
+
+    # --- Stufe 2: gleichzeitiger Anspruch ueber einen Sync-Ordner ----------
+    # Exklusives Anlegen schuetzt nur lokal. Liegt der Bereich in einem
+    # synchronisierten Ordner, sehen zwei Hosts einander beim Anlegen gar nicht
+    # -- dafuer gibt es das Verfahren in contested.py. Es laeuft nicht immer,
+    # sondern wenn es sich rechnet.
+    decision = contested.should_contest(
+        project_dir,
+        force=True if args.contested else (False if args.no_contest else None),
+    )
+    if not decision.contest:
+        if args.contested or args.verbose_contest:
+            print(f"contest: uebersprungen ({decision.reason})")
+        return 0
+
+    print(
+        f"contest: {decision.reason}; Quarantaene {args.quarantine}s, "
+        "danach Entscheidung"
+    )
+    result = contested.contest(project_dir, lock_path, quarantine_seconds=args.quarantine)
+    if result.won:
+        print(f"contest: gewonnen ({result.reason})")
+        return 0
+
+    # Verlierer geben den Bereich frei -- sonst blockieren zwei Locks einander
+    # bis zum Verfall, und der Gewinner arbeitet gegen einen fremden Anspruch.
+    try:
+        lock_path.unlink()
+    except OSError as exc:  # pragma: no cover - Freigabe soll nie hart scheitern
+        print(f"contest: verloren, Lock konnte nicht entfernt werden: {exc}")
+        return 1
+    print(f"contest: verloren ({result.reason}) -- eigener Lock entfernt")
+    return 3
 
 
 if __name__ == "__main__":
