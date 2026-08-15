@@ -73,9 +73,18 @@
 - [ ] In `team-lock` ein transaktionales `claim_many` entwerfen: Eine Menge
   normalisierter Ressourcen wird entweder vollständig und atomar beansprucht
   oder gar nicht; Teilclaims werden bei Konflikten zurückgerollt.
-- [ ] Konflikte nicht nur auf identische Namen, sondern auf überlappende
-  Pfadbereiche prüfen (`a/` kollidiert mit `a/b`), mit dokumentierter
-  Plattform- und Groß-/Kleinschreibungssemantik.
+- [x] **Teilweise erledigt (2026-08-15, `contested.scopes_overlap`):** Konflikte
+  werden auf überlappende Scopes statt auf Namensgleichheit geprüft — mit
+  Segmentgrenze (`assets` überlappt `assets.images`, aber nicht
+  `assets-backup`) und gefalteter Groß-/Kleinschreibung im Vergleich.
+  **Offen bleibt** die Ausweitung auf Ressourcen*mengen* in `claim_many`:
+  Heute vergleicht die Regel den Scope eines einzelnen Locks, nicht eine Menge
+  beanspruchter Pfade.
+- [ ] **Neu daraus (2026-08-15):** Die Verlierer-Regel aus `contested.py`
+  (frühestes `created`, Host-Reihenfolge als Tiebreak) ist der natürliche
+  Konfliktentscheid für `claim_many` — beim Entwurf dort wiederverwenden statt
+  neu erfinden. Ebenso die Quarantäne: Ohne Wartezeit liest ein Recheck über
+  einen Sync-Ordner dieselbe unsynchronisierte Sicht wie zuvor.
 - [ ] Einen unveränderlichen Claim-Snapshot mit Claim-ID, Besitzer, Ressourcen,
   Erstellungszeit, Ablaufzeit und optionalem Ressourcen-Fingerprint vorsehen.
   Der Fingerprint erkennt Drift, erteilt aber keine Schreibberechtigung.

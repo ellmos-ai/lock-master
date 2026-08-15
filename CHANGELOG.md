@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`pure-locking/contested.py`** — resolution of simultaneous claims over a
+  synced folder: quarantine, recheck, deterministic loser rule (earliest
+  `created`, host order as tiebreak). Three-stage cloud detection: an optional
+  external prober (FileCommander-style, *asked* rather than required), Windows
+  placeholder attributes, path hints. The procedure does not run always but when
+  it pays off (cloud folder **and** automation) — attempt rather than abstain.
+- `lock_create.py`: `--contested`, `--no-contest`, `--quarantine`,
+  `--verbose-contest`. Exit code 3 = claim lost, own lock removed.
+- 26 tests in `tests/test_contested.py`, including the invariant "exactly one
+  winner across a shared view" and "an expired own claim never wins".
+
+### Changed
+
+- **`lock_create.py` creates locks exclusively** (`open("x")`) instead of
+  `exists()`-check-then-write. Between check and write there was a window in
+  which two processes create the same file and both consider themselves the
+  holder. `--force` still overwrites.
+- `created` is now written with seconds. At minute granularity near-simultaneous
+  claims land in the host tiebreak, where the same host loses structurally every
+  time. `_parse_created` has always accepted seconds, so this is not a format
+  break.
+- `LOCK-SYSTEM.md`: new section "Contested Locks: Simultaneous Claims Over a
+  Synced Folder".
+
+Origin: moved here from `ellmos-ai/system-auditor` (audit host lock). There
+exclusion was unwanted — parallel audits are the product — while here exclusion
+is the purpose.
+
 ## [1.5.1] - 2026-07-28
 
 ### Added

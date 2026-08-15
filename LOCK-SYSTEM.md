@@ -294,6 +294,95 @@ a custom scope name.
 
 ---
 
+## Contested Locks: Simultaneous Claims Over a Synced Folder
+
+"Two Tiers of Enforcement" already names the problem: two agents starting at the
+same time both see an empty folder. Solved so far is only the case where one was
+demonstrably first. With cloud sync at 30 s – 5 min latency **both** see an empty
+folder, both create, and both consider themselves the holder. This is not an edge
+case: scheduled automations start on several hosts at the same clock time.
+
+**Stage 1 — exclusive creation (always on).** `lock_create.py` creates the lock
+file exclusively (`open("x")`) instead of checking and then writing. Between the
+check and the write there used to be a window in which a second process creates
+the same file. `--force` still overwrites deliberately.
+
+**Stage 2 — contest procedure (attempted when it pays off).**
+
+```
+1. CREATE      write the lock exclusively
+2. QUARANTINE  wait (default 300 s) for the sync to align both views
+3. RECHECK     read the directory again
+4. DECIDE      earliest `created` wins; exact tie -> lexicographically smaller host
+5. LOSER       remove own lock (exit code 3), release the area
+```
+
+Both sides compute the same result from the same files — no server, no database,
+no real-time channel. The wait *is* the mechanism, not decoration: without it the
+recheck reads the same unsynchronised view as before.
+
+**When it runs.** Not always. Minutes of lead time are expensive for a short edit
+and cheap for an automation run that then works for hours. `should_contest()`
+therefore asks two questions: is the area in a cloud folder at all, and is this an
+automation? Only then.
+
+> **This deliberately inverts a common reflex.** When cloud pressure is detected
+> (e.g. via the placeholder attributes that FileCommander also inspects), tools
+> often skip the work entirely to avoid conflicts. That is safe but expensive —
+> work that could have happened does not. A protocol is the better answer than
+> abstention: attempt it rather than give up.
+
+**Cloud detection, three stages** (`contested.cloud_pressure`): an optional
+external prober (e.g. a FileCommander call) is *asked*, never required; otherwise
+the Windows placeholder attributes (`FILE_ATTRIBUTE_OFFLINE`, `RECALL_ON_OPEN`,
+`RECALL_ON_DATA_ACCESS`, reparse point); otherwise known cloud folder names in the
+path.
+
+**What the decision rule applies to.** It needs two *visible* claims — that means
+**team locks**: they carry the host in the name, so they coexist in the directory,
+and they act like an exclusive lock towards foreign systems. For equal or
+overlapping scopes it was previously undefined who wins. Exclusive locks carry no
+host; there Stage 1 applies, and on true simultaneity the cloud service produces a
+conflict copy that stays visible instead of silently overwriting. **User and
+condition locks are never overruled** — protected categories do not take part.
+
+**Scope overlap** (`contested.scopes_overlap`): a project lock overlaps
+everything; otherwise containment with a segment boundary — `assets` overlaps
+`assets.images` but **not** `assets-backup`. A mere character prefix is not an
+ancestor relation.
+
+**Time resolution:** `created` is now written with seconds
+(`%Y-%m-%dT%H:%M:%S`). At minute granularity two near-simultaneous claims
+regularly land in the host tiebreak, where the same host loses structurally every
+time. `lock_utils._parse_created` has always read seconds ("seconds optional"), so
+this is not a format break.
+
+**An expired own lock never wins.** Other systems filtered it out long ago;
+without that check it would see itself as the earliest claim while nobody else
+still sees it — two winners against identical data, with no sync delay involved.
+
+**Honest limit:** if a second system starts *after* the first one's quarantine has
+elapsed but before its lock has synced, the rule does not apply. The residual risk
+is in the range of seconds instead of, as without the procedure, a total failure of
+coordination. Hard exclusion would require a shared transactional instance.
+
+**Invocation:**
+
+```
+python lock_create.py <project> --team <HOST>              # procedure on demand
+python lock_create.py <project> --team <HOST> --contested  # force it
+python lock_create.py <project> --team <HOST> --no-contest # suppress it
+python lock_create.py <project> --team <HOST> --quarantine 120
+```
+
+Exit code **3** = claim lost, own lock removed.
+
+Origin: the procedure comes from `ellmos-ai/system-auditor` (audit host lock,
+2026-08-15). There exclusion was *unwanted* — parallel audits are the product —
+which is why it moved here, where exclusion is the purpose.
+
+---
+
 ## Scripts
 
 Place all scripts in the same directory as `lock_roots.json`.
