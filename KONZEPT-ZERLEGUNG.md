@@ -152,6 +152,20 @@ führenden Slash und greifen daher in jeder Tiefe — geprüft).
   das vermischt beide Teile. **Nachzuziehen nach der Zerlegung:** `pure-locking`
   liefert die Leases, `permission-control` die Auswertungsordnung.
 
+## Dauerhafte Modulgrenze von `team-lock`
+
+Bandmaster und ArenaOS zeigen nützliche Muster für atomare Claims,
+Zustandssnapshots, Ereignisbelege und deterministische Wiederaufnahme. Übernommen
+wird davon nur die Koordinationsschicht: Ressourcenmengen atomar beanspruchen,
+Überlappungen erkennen und den Claim-Lebenszyklus nachvollziehbar machen.
+
+`team-lock` kennt bewusst keine Aufgabenbeschreibung, Priorität,
+Abhängigkeitsgrafen, Testausführung, Ergebnisbewertung, Commit-Erzeugung oder
+Workflow-Finalisierung. Solche Informationen dürfen höchstens als opake
+`reference` auf den eigentlichen Besitzer zeigen. Damit bleibt die Richtung
+eindeutig: Task-/Workflow-Systeme konsumieren Locks; Lock-Systeme werden nicht
+zu Task-/Workflow-Systemen.
+
 ## Umsetzungsstand
 
 Stand 2026-07-26, Lauf „lockmaster-split" (Auftrag
