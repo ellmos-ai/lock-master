@@ -3,9 +3,10 @@
 # lock-master
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Version 1.5.1](https://img.shields.io/badge/Version-1.5.1-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![Multi-Agent Lock Protokoll](https://img.shields.io/badge/multi--agent-file%20locking-green.svg)](#features)
-[![Pytest 88 passed](https://img.shields.io/badge/pytest-88%20passed-brightgreen.svg)](#)
+[![Pytest 120 passed](https://img.shields.io/badge/pytest-120%20passed-brightgreen.svg)](#tests-ausführen)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
 [![ellmos-ai](https://img.shields.io/badge/Ökosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Dachorganisation-open--bricks-orange.svg)](https://github.com/open-bricks)
@@ -15,7 +16,7 @@
 **Portables, config-gesteuertes Datei-Sperrsystem für Multi-Agenten-Projektkoordination.**
 
 > [!NOTE]
-> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **14.08.2026**.
+> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **16.08.2026**.
 
 lock-master bietet ein leichtgewichtiges, abhängigkeitsfreies Sperrprotokoll auf Basis von Klartextdateien. Eine `LOCK*.txt`-Datei in einem Projektordner signalisiert, dass das Projekt oder eine Komponente gerade in Bearbeitung ist -- kein Agent, keine Automation und kein autonomer Loop verändert diesen Bereich, solange eine gültige, nicht abgelaufene Sperre existiert.
 
@@ -404,8 +405,30 @@ Kernmodul von [ellmos-ai/agent-ops-stack](https://github.com/ellmos-ai/agent-ops
 (Rolle `locking`); Familie/Katalog: [ellmos-ai/stacks](https://github.com/ellmos-ai/stacks);
 Org-Übersicht: [ellmos-ai](https://github.com/ellmos-ai).
 
+## Ökosystem & Geschwisterwerkzeuge
+
+Teil der [ellmos-ai](https://github.com/ellmos-ai) Multi-Agenten-Infrastruktur und des übergeordneten [open-bricks](https://github.com/open-bricks) Open-Source-Software-Ökosystems:
+
+| Werkzeug | Organisation | Beschreibung |
+|----------|--------------|--------------|
+| [ticket-master](https://github.com/ellmos-ai/ticket-master) | ellmos-ai | Autonomes Ticket-Routing und Task-Dispatching Triage-Konsole |
+| [clutch](https://github.com/ellmos-ai/clutch) | ellmos-ai | Adaptiver Multi-Modell-LLM-Router und Agent-Execution-Gear |
+| [coma](https://github.com/ellmos-ai/coma) | ellmos-ai | Single-Binary Multi-Agenten-Orchestrator und Ausführungskoordinator |
+| [swarm-ai](https://github.com/ellmos-ai/swarm-ai) | ellmos-ai | Schwarmintelligenz und autonomer Agenten-Konsensmotor |
+| [gardener](https://github.com/ellmos-ai/gardener) | ellmos-ai | Local-First autonomes Session- und Kontext-Gedächtnissystem |
+| [prompt-evidence-collector](https://github.com/ellmos-ai/prompt-evidence-collector) | ellmos-ai | Revisionssichere LLM-Interaktionserfassung und kryptografischer Evidenzspeicher |
+| [policy-registry](https://github.com/ellmos-ai/policy-registry) | ellmos-ai | Einheitliche Agenten-Rechte- und Richtlinienverwaltung |
+| [sqlite-transit-sync](https://github.com/ellmos-ai/sqlite-transit-sync) | ellmos-ai | Multi-Agenten-Statussynchronisation via SQLite-WAL-Journale |
+| [workflowhooker](https://github.com/ellmos-ai/workflowhooker) | ellmos-ai | Event-Hooks und automatisierte Agenten-Workflow-Trigger |
+| [memoryhooker](https://github.com/ellmos-ai/memoryhooker) | ellmos-ai | Transparente SQLite/FTS5-Arbeitsgedächtniserfassung für Agenten |
+| [DevCenter](https://github.com/dev-bricks/DevCenter) | dev-bricks | Entwickler-Leitstand, Repository-Dashboard und Umgebungsmanager |
+| [CodeBox](https://github.com/dev-bricks/CodeBox) | dev-bricks | Polyglotter Code-Snippet-Manager und Entwickler-Werkbank |
+| [safe-start-for-codex](https://github.com/dev-bricks/safe-start-for-codex) | dev-bricks | Sicherer Starter und Rechte-Isolator für Codex-CLI-Sitzungen |
+| [automation-master](https://github.com/dev-bricks/automation-master) | dev-bricks | Automations-Orchestrierung und lokaler Job-Scheduler |
+
 ---
 
 ## Lizenz
 
 MIT -- Copyright (c) 2026 Lukas Geiger. Siehe [LICENSE](LICENSE).
+

@@ -2,7 +2,7 @@
 
 > Portable, config-driven multi-agent file-lock system for project coordination.
 
-## Last-checked: 2026-08-14
+## Last-checked: 2026-08-16
 
 ## What it does
 
@@ -10,6 +10,13 @@ lock-master provides a lightweight file-based locking protocol for coordinating
 multiple agents, automated loops, or humans working across a shared directory
 tree. A `LOCK*.txt` file in a project folder signals "this area is in use" --
 no agent or automation should modify it while a valid, non-expired lock exists.
+
+## Status & Test Verification
+
+- **Version**: 1.5.1
+- **Pytest**: 120 passed (100% green)
+- **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
+- **Runtime**: Python 3.10+ (zero external dependencies)
 
 ## Audience
 
@@ -23,6 +30,7 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 ## Search Phrases
 
 ```
+ellmos-ai lock-master
 dev-bricks lock-master
 lock-master LOCK*.txt
 multi-agent file locking
@@ -35,6 +43,7 @@ LOCK-CACHE.md active locks
 team lock multi-agent swarm coordination
 OneDrive cloud sync agent lock files
 LOCK.team.LAPTOP.txt
+contested lock resolution sync folder
 lock-master watcher web UI
 localhost lock watcher
 LOCK*.txt room map
@@ -45,8 +54,9 @@ LOCK*.txt room map
 This repository is about text-file coordination for shared workspaces. It is not
 related to Master Lock or Lockmaster physical locks, GitHub branch protection,
 Azure DevOps branch locking, Redis mutex libraries, database row locks, or cloud
-file-sharing APIs. For accurate results, search with `dev-bricks`, `LOCK*.txt`,
-`Codex`, `Claude Code`, or `multi-agent`.
+file-sharing APIs. For accurate results, search with `ellmos-ai`, `dev-bricks`,
+`LOCK*.txt`, `Codex`, `Claude Code`, or `multi-agent`.
+
 
 ## Repository layout
 

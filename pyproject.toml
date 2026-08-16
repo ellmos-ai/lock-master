@@ -45,3 +45,13 @@ classifiers = [
 Homepage = "https://github.com/ellmos-ai/lock-master#readme"
 Repository = "https://github.com/ellmos-ai/lock-master.git"
 Issues = "https://github.com/ellmos-ai/lock-master/issues"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+

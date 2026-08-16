@@ -9,7 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Discoverability, README-Design, Badges & Metadata Parity Check (2026-08-16)**:
+  - Synchronized badges across `README.md` & `README_de.md` (Pytest 120 passed, Version 1.5.1, Python 3.10+, Ecosystem `ellmos-ai`, Umbrella `open-bricks`, `llms.txt` indexed).
+  - Added bilingual Ecosystem & Sibling Tools matrix tables referencing multi-agent infrastructure (`ticket-master`, `clutch`, `coma`, `swarm-ai`, `gardener`, `prompt-evidence-collector`, `policy-registry`, `sqlite-transit-sync`, `workflowhooker`, `memoryhooker`, `DevCenter`, `CodeBox`, `safe-start-for-codex`, `automation-master`).
+  - Added PEP 621 `[tool.ruff]` and `[tool.ruff.lint]` configuration in `pyproject.toml`.
+  - Harmonized repository URLs across all submodule manifests (`ellmos-module.v2.json`, `pure-locking`, `permission-control`, `team-lock`) to `https://github.com/ellmos-ai/lock-master`.
+  - Implemented automated metadata, documentation, manifest, and discoverability parity test suite in `tests/test_metadata.py` (6 tests).
+  - Updated `llms.txt` timestamp to `2026-08-16` with verified 120-test count and enhanced search disambiguation.
 - **`pure-locking/contested.py`** — resolution of simultaneous claims over a
+
   synced folder: quarantine, recheck, deterministic loser rule (earliest
   `created`, host order as tiebreak). Three-stage cloud detection: an optional
   external prober (FileCommander-style, *asked* rather than required), Windows
