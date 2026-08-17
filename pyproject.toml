@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
   { name = "Lukas Geiger" }
 ]
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.10"
 keywords = [
   "agent-coordination",
@@ -33,7 +33,6 @@ keywords = [
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -54,4 +53,13 @@ target-version = "py310"
 select = ["E", "F", "W"]
 ignore = ["E501"]
 
-
+[tool.setuptools]
+py-modules = [
+  "bulk_lock",
+  "lock_create",
+  "lock_scan",
+  "lock_status",
+  "lock_utils",
+  "permissions",
+  "prune_stale_locks"
+]

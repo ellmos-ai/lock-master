@@ -50,3 +50,6 @@ tests/*.lock.txt
 
 # Konfliktkopien-Archiv (Verfahren: .SYNC/AUFTRAG_ALLE-DESKTOP-APPS_KONFLIKTKOPIEN-WARTUNG)
 _archive/
+
+# Mobile Icons
+mobile_icons/

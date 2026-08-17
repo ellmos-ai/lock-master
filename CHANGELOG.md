@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Package Metadata & Build Hardening (PEP 621 / PEP 639)**:
+  - Updated `pyproject.toml` to standard SPDX string license definition `license = "MIT"` and removed deprecated `License :: OSI Approved :: MIT License` classifier to eliminate setuptools deprecation warnings.
+  - Added explicit `[tool.setuptools]` configuration with `py-modules` to support modern flat-layout builds without collision.
+  - Added `MANIFEST.in` ensuring complete source distribution bundles with all stack submodules (`pure-locking`, `permission-control`, `team-lock`, `assets`).
+  - Added `mobile_icons/` to `.gitignore` to prevent generated mobile icon artifacts from polluting git working tree.
+  - Added `tests/test_package_metadata.py` with 4 automated regression tests.
 - **Discoverability, README-Design, Badges & Metadata Parity Check (2026-08-16)**:
   - Synchronized badges across `README.md` & `README_de.md` (Pytest 120 passed, Version 1.5.1, Python 3.10+, Ecosystem `ellmos-ai`, Umbrella `open-bricks`, `llms.txt` indexed).
   - Added bilingual Ecosystem & Sibling Tools matrix tables referencing multi-agent infrastructure (`ticket-master`, `clutch`, `coma`, `swarm-ai`, `gardener`, `prompt-evidence-collector`, `policy-registry`, `sqlite-transit-sync`, `workflowhooker`, `memoryhooker`, `DevCenter`, `CodeBox`, `safe-start-for-codex`, `automation-master`).

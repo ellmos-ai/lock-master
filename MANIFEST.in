@@ -1,0 +1,8 @@
+include LICENSE README*.md CHANGELOG.md pyproject.toml pytest.ini
+graft pure-locking
+graft permission-control
+graft team-lock
+graft assets
+prune tests
+prune _archive
+global-exclude *.py[cod] __pycache__ *.so *.dylib *.dll
