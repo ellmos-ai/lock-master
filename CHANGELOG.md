@@ -7,6 +7,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- CI metadata tests now use the `tomli` compatibility import on Python 3.10,
+  matching the repository's declared `>=3.10` support.
+
 ### Added
 
 - **Package Metadata & Build Hardening (PEP 621 / PEP 639)**:
