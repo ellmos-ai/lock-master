@@ -64,6 +64,30 @@
 - [ ] Integration example for cron-based stale cleanup
 - [ ] Optional installer/launcher wrapper for `pure-locking/watcher/` on non-Windows systems
 
+## Cloud-Sync-Preflight vor dem Lock-Check (Ticket T-20260816-998265218, 2026-08-17)
+
+> Anlass: zwei belegte Cross-Host-Claim-Kollisionen am 2026-08-15 (ticket-master, gleiche
+> Ticketnummer auf zwei Hosts). Konzept + Empfehlung (kein Code):
+> `KONZEPT-CLOUD-SYNC-PREFLIGHT_2026-08-17.md`.
+
+- [ ] `contested.cloud_pressure()`/`looks_like_automation()` vor dem **Anlegen** eines neuen
+  Locks anwenden (heute nur danach, in `contest()`) — kurzer Preflight-Recheck (Sekunden bis
+  niedrige zweistellige Sekundenzahl, deutlich kürzer als die 300 s Post-Claim-Quarantäne),
+  gated auf Cloud-Ordner + Automation wie beim bestehenden Contest-Gate, damit interaktive
+  Sitzungen nie warten.
+- [ ] Neuer Verdict-Wert (z. B. `"clear_after_preflight"`) statt bloßem `"clear"`, wenn ein
+  Preflight lief — dieselbe fail-closed-Sprache wie `controlroom_bridge.py`
+  (`verdict: unknown`, `safe_to_proceed: false` bei Unsicherheit): „kein Fremd-Lock sichtbar
+  nach N s Nachbeobachtung" ist eine andere Aussage als „nachweislich frei".
+- [ ] Geprüft und verworfen: `fc_check_cloud_lock` (FileCommander) beantwortet
+  Schreib-/Rename-Blockierungsrisiko des `cldflt.sys`-Treibers, nicht die Aktualität eines
+  Verzeichnis-Listings gegenüber dem Server — kein Ersatz für den Preflight-Recheck.
+- [ ] Ein zuverlässiger, provider-übergreifender „erzwinge frische Server-Sicht"-Trigger
+  existiert nicht öffentlich dokumentiert (weder OneDrive/`cldflt.sys` für unbekannte neue
+  Dateien noch Dropbox/Google Drive/iCloud) — deshalb Preflight als **Recheck nach
+  Wartezeit**, nicht als Ping, konzipiert; deckungsgleich mit der bereits getroffenen
+  Design-Entscheidung in `contested.py`.
+
 ## Claim-Härtung nach Bandmaster-/ArenaOS-Vergleich (2026-08-15)
 
 > Modulgrenze: Die folgenden Punkte betreffen ausschließlich Sperren, Claims und
