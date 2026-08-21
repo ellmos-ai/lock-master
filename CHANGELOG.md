@@ -12,6 +12,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Discoverability, Multi-OS CI Workflow, Bilingual Security Policy & Contract Parity (2026-08-21)**:
+  - Modernized `pyproject.toml` with PEP 621 classifiers for Python 3.13, OS Independent, POSIX Linux, Microsoft Windows, MacOS, Topic Systems Administration, and comprehensive project URLs (Homepage, Documentation, Repository, Bug Tracker, Changelog, Security).
+  - Upgraded GitHub Actions CI workflow (`.github/workflows/tests.yml`) to multi-OS matrix (`ubuntu-latest`, `windows-latest`, `macos-latest`), Python `3.10`–`3.13`, pip caching, and automated `ruff check .` linting.
+  - Rewrote `SECURITY.md` into an authoritative bilingual security policy (EN & DE) declaring Zero-Egress / Local-First filesystem guarantees, unprivileged User-Mode operation (Non-Elevation), atomic file writes, path traversal boundaries, and direct security contacts (`security@ellmos.ai`, `support@lukasgeiger.com`, `lukas@open-bricks.org`).
+  - Added structured Quick Navigation in `README.md` and `README_de.md` linking directly to architecture, lifecycle, configuration, tests, security policy, and sibling tools.
+  - Added an interactive bilingual Mermaid Sequence Diagram illustrating the Multi-Agent Team-Lock, Granular File-Claim, Expiry, and Contested Resolution lifecycle.
+  - Synchronized Shields.io badges across English and German READMEs (CI status, Pytest 124 passed, Python 3.10-3.13, Platforms, Zero-Egress, Local-First, Version 1.5.1, MIT, llms.txt, ellmos-ai ecosystem, open-bricks umbrella).
+  - Expanded Sibling Ecosystem tables with `system-gap-master`, `system-explorer`, `open-compute-mcp`, `ellmos-filecommander-mcp`, `ellmos-codecommander-mcp`, `n8n-manager-mcp`, `CleanMarkdown`, `PDFtoPDFocr`, and `open-bricks`.
+  - Updated `llms.txt` timestamp to `2026-08-21` and verified test status (124 passed).
 - **Package Metadata & Build Hardening (PEP 621 / PEP 639)**:
   - Updated `pyproject.toml` to standard SPDX string license definition `license = "MIT"` and removed deprecated `License :: OSI Approved :: MIT License` classifier to eliminate setuptools deprecation warnings.
   - Added explicit `[tool.setuptools]` configuration with `py-modules` to support modern flat-layout builds without collision.

@@ -2,11 +2,14 @@
 
 # lock-master
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
+[![Pytest 126 passed](https://img.shields.io/badge/pytest-126%20passed-brightgreen.svg)](#tests-ausführen)
+[![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
+[![Plattform: Windows | Linux | macOS](https://img.shields.io/badge/Plattform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
+[![Privatsphäre: Zero-Egress](https://img.shields.io/badge/Privatsph%C3%A4re-100%25%20Offline%20%7C%20Zero--Egress-success.svg)](SECURITY.md)
+[![Sicherheit: Local-First](https://img.shields.io/badge/Sicherheit-Local--First%20%7C%20Zero--Dependency-blue.svg)](SECURITY.md)
 [![Version 1.5.1](https://img.shields.io/badge/Version-1.5.1-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
-[![Multi-Agent Lock Protokoll](https://img.shields.io/badge/multi--agent-file%20locking-green.svg)](#features)
-[![Pytest 120 passed](https://img.shields.io/badge/pytest-120%20passed-brightgreen.svg)](#tests-ausführen)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
 [![ellmos-ai](https://img.shields.io/badge/Ökosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Dachorganisation-open--bricks-orange.svg)](https://github.com/open-bricks)
@@ -16,7 +19,23 @@
 **Portables, config-gesteuertes Datei-Sperrsystem für Multi-Agenten-Projektkoordination.**
 
 > [!NOTE]
-> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **16.08.2026**.
+> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **21.08.2026**.
+
+### Schnellnavigation
+
+- [Einstieg](#einstieg)
+- [Auffindbarkeit und Abgrenzung](#auffindbarkeit-und-abgrenzung)
+- [Features & Architektur](#features)
+- [Team-Lock & Konflikt-Reconcile-Lebenszyklus](#team-lock--sub-claim-lebenszyklus)
+- [Schnellstart](#schnellstart)
+- [Konfiguration (`lock_roots.json`)](#2-lock_rootsjson-erstellen)
+- [Dateistruktur & Shims](#dateien)
+- [Tests ausführen](#tests-ausführen)
+- [Sicherheitsrichtlinie](SECURITY.md)
+- [Ökosystem & Geschwisterwerkzeuge](#ökosystem--geschwisterwerkzeuge)
+- [LLM-Kontext (`llms.txt`)](llms.txt)
+
+---
 
 lock-master bietet ein leichtgewichtiges, abhängigkeitsfreies Sperrprotokoll auf Basis von Klartextdateien. Eine `LOCK*.txt`-Datei in einem Projektordner signalisiert, dass das Projekt oder eine Komponente gerade in Bearbeitung ist -- kein Agent, keine Automation und kein autonomer Loop verändert diesen Bereich, solange eine gültige, nicht abgelaufene Sperre existiert.
 
@@ -68,6 +87,44 @@ graph TD
 - **Optionale lokale Watcher-UI:** `pure-locking/watcher/` ergänzt Daemon, REST-API und Browser-UI auf localhost für Live-Status, Raumkarte, Verlauf, Userlocks und Prune-Aktionen.
 - **Keine Abhängigkeiten:** reine Python-Standardbibliothek (3.10+).
 - **Config-gesteuert:** alle Roots, Tiefenbegrenzungen, Skip-Verzeichnisse und Cache-Ziele liegen in `lock_roots.json` -- keine hartkodierten Pfade im Code.
+
+### Team-Lock- & Sub-Claim-Lebenszyklus
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor AgentA as "Agent A (Dev / Refactor)"
+    actor AgentB as "Agent B (Docs / Test)"
+    participant FS as "Dateisystem (NTFS / Cloud-Sync)"
+    participant LM as "lock-master Engine"
+    participant Admin as "Admin / Auto-Pruner"
+
+    Note over AgentA,FS: Phase 1: Team-Lock Präsenz-Registrierung
+    AgentA->>LM: Team-Lock anfordern (HOST_A)
+    LM->>FS: Atomares Schreiben von LOCK.team.HOST_A.txt (Präsenz + Heartbeat)
+    FS-->>AgentA: Präsenz erfolgreich registriert
+
+    Note over AgentA,AgentB: Phase 2: Granulare Datei- & Scope-Claims
+    AgentA->>LM: Claim für core/engine.py & Scope refactor
+    LM->>FS: Claims-Sektion in LOCK.team.HOST_A.txt aktualisieren
+    AgentB->>LM: Workspace vor Arbeitsbeginn prüfen
+    LM->>FS: LOCK.team.HOST_A.txt & aktive Claims einlesen
+    FS-->>AgentB: core/engine.py belegt; docs/ frei
+    AgentB->>LM: Claim für docs/api.md & Scope docs eintragen
+    LM->>FS: Agent-B-Claim in LOCK.team.HOST_A.txt aufnehmen (Kollisionsfrei)
+
+    Note over AgentA,Admin: Phase 3: Verfall, Stale-Prüfung & Sichere Freigabe
+    AgentA->>FS: Aufgabe beendet -> File-Claim freigeben
+    alt Sperre abgelaufen / Verwaister Agent
+        Admin->>LM: prune_stale_locks.py --dry-run ausführen
+        LM->>FS: Zeitstempel gegen expires_after prüfen
+        Admin->>LM: prune_stale_locks.py anwenden
+        LM->>FS: Sicheres Löschen abgelaufener LOCK*.txt
+    else Reguläre Freigabe
+        AgentA->>LM: Team-Lock freigeben
+        LM->>FS: Sauberes Entfernen von LOCK.team.HOST_A.txt
+    end
+```
 
 ---
 
@@ -416,6 +473,12 @@ Teil der [ellmos-ai](https://github.com/ellmos-ai) Multi-Agenten-Infrastruktur u
 | [coma](https://github.com/ellmos-ai/coma) | ellmos-ai | Single-Binary Multi-Agenten-Orchestrator und Ausführungskoordinator |
 | [swarm-ai](https://github.com/ellmos-ai/swarm-ai) | ellmos-ai | Schwarmintelligenz und autonomer Agenten-Konsensmotor |
 | [gardener](https://github.com/ellmos-ai/gardener) | ellmos-ai | Local-First autonomes Session- und Kontext-Gedächtnissystem |
+| [system-gap-master](https://github.com/ellmos-ai/system-gap-master) | ellmos-ai | Serverlose Multi-Agenten-Workspace-Synchronisation & Abgleich |
+| [system-explorer](https://github.com/ellmos-ai/system-explorer) | ellmos-ai | Evidenzbasierte Funktionsauflösung & Komponentendrift-Auditor |
+| [open-compute-mcp](https://github.com/ellmos-ai/open-compute-mcp) | ellmos-ai | Sichere Operator-Interaktion, Signal-Overlay & MCP-Computing-Bridge |
+| [ellmos-filecommander-mcp](https://github.com/ellmos-ai/ellmos-filecommander-mcp) | ellmos-ai | Hochperformanter Dateisystem- & Workspace-Operations MCP-Server |
+| [ellmos-codecommander-mcp](https://github.com/ellmos-ai/ellmos-codecommander-mcp) | ellmos-ai | Semantische Code-Analyse, AST-Inspektion & Refactoring MCP-Server |
+| [n8n-manager-mcp](https://github.com/ellmos-ai/n8n-manager-mcp) | ellmos-ai | Sicherheitsüberwachter n8n Workflow-Manager & Automations-Orchestrator |
 | [prompt-evidence-collector](https://github.com/ellmos-ai/prompt-evidence-collector) | ellmos-ai | Revisionssichere LLM-Interaktionserfassung und kryptografischer Evidenzspeicher |
 | [policy-registry](https://github.com/ellmos-ai/policy-registry) | ellmos-ai | Einheitliche Agenten-Rechte- und Richtlinienverwaltung |
 | [sqlite-transit-sync](https://github.com/ellmos-ai/sqlite-transit-sync) | ellmos-ai | Multi-Agenten-Statussynchronisation via SQLite-WAL-Journale |
@@ -425,6 +488,9 @@ Teil der [ellmos-ai](https://github.com/ellmos-ai) Multi-Agenten-Infrastruktur u
 | [CodeBox](https://github.com/dev-bricks/CodeBox) | dev-bricks | Polyglotter Code-Snippet-Manager und Entwickler-Werkbank |
 | [safe-start-for-codex](https://github.com/dev-bricks/safe-start-for-codex) | dev-bricks | Sicherer Starter und Rechte-Isolator für Codex-CLI-Sitzungen |
 | [automation-master](https://github.com/dev-bricks/automation-master) | dev-bricks | Automations-Orchestrierung und lokaler Job-Scheduler |
+| [CleanMarkdown](https://github.com/doc-bricks/CleanMarkdown) | doc-bricks | Markdown-Formatierung, Linting und strukturelle Bereinigung |
+| [PDFtoPDFocr](https://github.com/doc-bricks/PDFtoPDFocr) | doc-bricks | PDF-OCR-Verarbeitung, durchsuchbare Textschicht-Einbettung & Validierung |
+| [open-bricks](https://github.com/open-bricks/open-bricks) | open-bricks | Gesamtkatalog & übergreifendes Architektur-Register |
 
 ---
 

@@ -2,7 +2,7 @@
 
 > Portable, config-driven multi-agent file-lock system for project coordination.
 
-## Last-checked: 2026-08-16
+## Last-checked: 2026-08-21
 
 ## What it does
 
@@ -14,7 +14,7 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 ## Status & Test Verification
 
 - **Version**: 1.5.1
-- **Pytest**: 120 passed (100% green)
+- **Pytest**: 126 passed (100% green)
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)
 
