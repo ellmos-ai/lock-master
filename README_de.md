@@ -3,7 +3,7 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Pytest 126 passed](https://img.shields.io/badge/pytest-126%20passed-brightgreen.svg)](#tests-ausführen)
+[![Pytest 127 passed](https://img.shields.io/badge/pytest-127%20passed-brightgreen.svg)](#tests-ausführen)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Plattform: Windows | Linux | macOS](https://img.shields.io/badge/Plattform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Privatsphäre: Zero-Egress](https://img.shields.io/badge/Privatsph%C3%A4re-100%25%20Offline%20%7C%20Zero--Egress-success.svg)](SECURITY.md)
@@ -497,4 +497,3 @@ Teil der [ellmos-ai](https://github.com/ellmos-ai) Multi-Agenten-Infrastruktur u
 ## Lizenz
 
 MIT -- Copyright (c) 2026 Lukas Geiger. Siehe [LICENSE](LICENSE).
-

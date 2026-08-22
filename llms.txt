@@ -14,7 +14,7 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 ## Status & Test Verification
 
 - **Version**: 1.5.1
-- **Pytest**: 126 passed (100% green)
+- **Pytest**: 127 passed (100% green)
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)
 

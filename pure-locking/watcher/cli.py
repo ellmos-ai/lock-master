@@ -2,12 +2,12 @@
 CLI für den Lock-File-Watcher — für LLMs und Menschen.
 
 Aufruf:
-  PYTHONIOENCODING=utf-8 python cli.py status [--json]
-  PYTHONIOENCODING=utf-8 python cli.py history [--path PFAD] [--type TYPE] [--limit N]
-  PYTHONIOENCODING=utf-8 python cli.py scan [--full] [--update-cache]
-  PYTHONIOENCODING=utf-8 python cli.py stats [--json]
-  PYTHONIOENCODING=utf-8 python cli.py cache
-  PYTHONIOENCODING=utf-8 python cli.py watch [--update-cache]
+  python cli.py status [--json]
+  python cli.py history [--path PFAD] [--type TYPE] [--limit N]
+  python cli.py scan [--full] [--update-cache]
+  python cli.py stats [--json]
+  python cli.py cache
+  python cli.py watch [--update-cache]
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config
+from lock_watcher import _ensure_utf8_stdio
 import storage
 
 
@@ -190,6 +191,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    _ensure_utf8_stdio()
     parser = argparse.ArgumentParser(
         description="Lock-File-Watcher CLI — Status, History, Scan, Cache."
     )

@@ -79,6 +79,9 @@ python watcher/cli.py cache
 python watcher/cli.py watch --update-cache
 ```
 
+The CLI configures stdout and stderr as tolerant UTF-8 streams internally, so
+Windows callers do not need to set `PYTHONIOENCODING` for Unicode lock data.
+
 ## API
 
 | Endpoint | Purpose |

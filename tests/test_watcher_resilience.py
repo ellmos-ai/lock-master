@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -33,6 +34,92 @@ import lock_utils  # noqa: E402
 import lock_watcher  # noqa: E402
 import storage  # noqa: E402
 import web_server  # noqa: E402
+
+
+def test_cli_status_json_uses_utf8_without_pythonioencoding(tmp_path: Path):
+    """The real CLI must emit UTF-8 even when its parent stream is CP1252."""
+    project = tmp_path / "projekt-äöü"
+    project.mkdir()
+    lock_path = project / "LOCK.txt"
+    lock_path.write_text(
+        "owner: κäöü\n"
+        f"created: {datetime.now().isoformat(timespec='seconds')}\n"
+        "expires_after: 24h\n"
+        "purpose: κ und äöü\n",
+        encoding="utf-8",
+    )
+    roots_file = tmp_path / "lock_roots.json"
+    roots_file.write_text(
+        json.dumps(
+            {
+                "default_max_depth": 4,
+                "shallow_depth": 2,
+                "skip_dirs": [],
+                "roots": [{"path": str(project)}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    data_dir = tmp_path / "watcher-data"
+
+    env = os.environ.copy()
+    env.pop("PYTHONIOENCODING", None)
+    env["PYTHONUTF8"] = "0"
+    env["LOCK_MASTER_ROOTS_FILE"] = str(roots_file)
+    env["LOCK_MASTER_WATCHER_DATA"] = str(data_dir)
+
+    cli_path = WATCHER / "cli.py"
+    if sys.platform == "win32":
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "utf8=0",
+                "-c",
+                "import sys; print(sys.stdout.encoding)",
+            ],
+            env=env,
+            capture_output=True,
+            check=False,
+        )
+        assert probe.returncode == 0
+        assert probe.stdout.strip().lower() == b"cp1252"
+
+        def cli_command(*args: str) -> list[str]:
+            return [sys.executable, "-X", "utf8=0", str(cli_path), *args]
+    else:
+        # Keep the same regression active in non-Windows CI by giving the real
+        # CLI process the strict CP1252 streams that Windows supplies natively.
+        def cli_command(*args: str) -> list[str]:
+            argv = [str(cli_path), *args]
+            bootstrap = (
+                "import runpy,sys; "
+                "sys.stdout.reconfigure(encoding='cp1252', errors='strict'); "
+                "sys.stderr.reconfigure(encoding='cp1252', errors='strict'); "
+                f"sys.argv={argv!r}; "
+                f"runpy.run_path({str(cli_path)!r}, run_name='__main__')"
+            )
+            return [sys.executable, "-c", bootstrap]
+
+    scan = subprocess.run(
+        cli_command("scan"), env=env, capture_output=True, check=False
+    )
+    assert scan.returncode == 0, scan.stderr.decode("utf-8", errors="replace")
+
+    result = subprocess.run(
+        cli_command("status", "--json"),
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    payload = json.loads(result.stdout.decode("utf-8"))
+    assert len(payload) == 1
+    assert payload[0]["path"] == str(lock_path)
+    assert payload[0]["owner"] == "κäöü"
+    assert payload[0]["purpose"] == "κ und äöü"
+    assert "κ und äöü" in payload[0]["raw_content"]
 
 
 def test_external_roots_file_is_resolved(monkeypatch, tmp_path: Path):

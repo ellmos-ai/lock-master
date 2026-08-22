@@ -7,6 +7,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Fixed the watcher CLI to reuse the daemon's UTF-8 stdio hardening. On Windows,
+  `status --json` now emits parseable UTF-8 without `PYTHONIOENCODING`, including
+  lock data with Greek characters and German umlauts.
 - CI metadata tests now use the `tomli` compatibility import on Python 3.10,
   matching the repository's declared `>=3.10` support.
 
