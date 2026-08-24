@@ -89,3 +89,12 @@ def test_expansion_makes_an_existing_root_scannable(tmp_path: Path, monkeypatch)
 
     dirs = list(lock_scan.iter_lock_dirs(config))
     assert workspace in dirs, "expanded root must be scanned, not skipped"
+
+
+def test_missing_roots_file_uses_example_or_defaults(tmp_path: Path):
+    """When lock_roots.json is absent, load_config falls back to example or safe defaults."""
+    non_existent = tmp_path / "does_not_exist_lock_roots.json"
+    config = lock_scan.load_config(non_existent)
+    assert isinstance(config, dict)
+    assert "default_max_depth" in config
+    assert "roots" in config

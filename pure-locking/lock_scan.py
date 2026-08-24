@@ -55,6 +55,23 @@ def _expand_path(raw: str) -> str:
 
 
 def load_config(roots_file: Path) -> dict:
+    if not roots_file.exists():
+        example_file = roots_file.with_name("lock_roots.example.json")
+        if example_file.exists():
+            roots_file = example_file
+        else:
+            return {
+                "default_max_depth": 4,
+                "shallow_depth": 2,
+                "skip_dirs": [
+                    ".git", ".venv", "venv", "env", "node_modules",
+                    "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache",
+                    "build", "dist", "releases", "_archive",
+                ],
+                "roots": [],
+                "caches": [],
+            }
+
     with open(roots_file, "r", encoding="utf-8") as f:
         config = json.load(f)
 
