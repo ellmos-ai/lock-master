@@ -15,7 +15,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -193,9 +192,12 @@ def test_storage_does_not_expire_protected_rows(tmp_path: Path):
 
 def test_heartbeat_advances_while_scan_is_in_progress(monkeypatch, tmp_path: Path):
     counter = {"n": 0}
+    four_heartbeats = threading.Event()
 
     def fake_now_iso() -> str:
         counter["n"] += 1
+        if counter["n"] >= 4:
+            four_heartbeats.set()
         return f"2026-07-27T21:{counter['n']:02d}:00"
 
     status_path = tmp_path / "daemon_status.json"
@@ -222,9 +224,10 @@ def test_heartbeat_advances_while_scan_is_in_progress(monkeypatch, tmp_path: Pat
         daemon=True,
     )
     thread.start()
-    time.sleep(0.15)
+    assert four_heartbeats.wait(timeout=2), "heartbeat thread did not advance four times"
     stop_event.set()
     thread.join(timeout=2)
+    assert not thread.is_alive()
 
     status = json.loads(status_path.read_text(encoding="utf-8"))
     assert counter["n"] > 3

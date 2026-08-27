@@ -10,6 +10,23 @@
 | Integration | READY | Fits `.MODULES` as a standalone, zero-dependency coordination module for shared agent workspaces. |
 | Known follow-ups | OPEN | Convenience scripts, CI and watcher polish remain backlog items below. |
 
+## Testzuverlässigkeit 2026-08-27 (T-20260827-413607999)
+
+- [x] **Heartbeat-Test plattformneutral synchronisiert:** Der Test wartete bisher
+  pauschal 150 ms und verlangte in diesem Fenster mehr als drei Schedulerläufe.
+  Unter Last auf macOS/Python 3.11 und 3.13 waren nur drei Läufe sichtbar. Der
+  Test wartet jetzt mit `threading.Event` gezielt auf den vierten Heartbeat und
+  behält ein separates 2-s-Fehlergate sowie die unveränderte Zählerassertion.
+- [x] **Windows-Loopback-Test ohne ungelesenen GET-Body:** Der HTTP-Helper schickte
+  auch bei `GET` den Body `{}`. Der frühe Host-403 liest diesen Body bewusst nicht;
+  Windows konnte den Socket beim Schließen deshalb per TCP-Reset abbrechen
+  (`WinError 10053`), bevor der Client den 403-Status las. GET sendet nun keinen
+  Body, POST/PUT weiterhin `{}`. Host-, Origin-, Status- und Timeout-Gates bleiben
+  unverändert.
+- **Prävention:** Nebenläufige Tests synchronisieren auf beobachtbare Zustände
+  statt auf feste Schlafzeiten. HTTP-Integrationstests senden Request-Bodies nur
+  für Methoden, deren Handler sie im getesteten Pfad konsumiert.
+
 ## Review 2026-07-04 (Modul-Review-Loop, Subagent-Review — alle Funde gefixt, v1.4.1)
 
 - [x] **(hoch)** Watcher-Daemon crashte bei jedem Scan mit existierendem Lock —

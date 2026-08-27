@@ -80,7 +80,11 @@ def test_loopback_http_server_enforces_host_and_origin_gates(monkeypatch, tmp_pa
     def request(method: str, path: str, **headers: str):
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
         try:
-            connection.request(method, path, body="{}", headers=headers)
+            # A rejected GET does not consume a request body. On Windows, closing
+            # that socket with unread inbound bytes can surface as WinError 10053
+            # before the client receives the intended 403 response.
+            body = "{}" if method in {"POST", "PUT"} else None
+            connection.request(method, path, body=body, headers=headers)
             response = connection.getresponse()
             return response.status, dict(response.getheaders()), response.read()
         finally:
