@@ -124,3 +124,32 @@
 - [x] Portable `watcher/` integration added: localhost daemon, REST API, Web UI, SQLite runtime outside the repo (2026-06-25)
 - [x] `.MODULES/README.md` entry registered for module discoverability (2026-06-21)
 - [x] Initial release v1.0.0 (2026-06-14)
+
+## Rückspiegelung aus sentinel-fleet + FolderHome (T-20260830-294539438, 2026-08-30)
+
+Quellen (beide unter Judging-Lock, nur gelesen, öffentlich auf GitHub):
+`ellmos-ai/sentinel-fleet` @ `e7f9c74` — `core/permissions.py`, `core/binding_rules.py`;
+`ellmos-ai/FolderHome` @ `f9fdb6a` — `src/folderhome/contracts/resources.py`.
+Herkunft bei jeder Übernahme im Code-Kommentar mitführen (Repo, Commit, Datei::Symbol).
+
+- [ ] **`permissions.evaluate` gibt ein Verdict-Objekt zurück** (Vorbild
+      `PermissionVerdict`/`BindingVerdict`): `action` + `reason` + `matched_rule` +
+      `applied_rules` + `decisive_rule`, statt nur `'allow'|'deny'|'ask'`. Rückwärts-
+      kompatibel als `evaluate_verdict()` neben `evaluate()`. Grund: Sofortsperrung,
+      Watcher-UI und Ticket-Router zeigen heute die Entscheidung, aber nicht die Regel,
+      die sie ausgelöst hat.
+- [ ] **Fail-closed-Default prüfen**: sentinel-fleet setzt `DEFAULT_ACTION = DENY` mit
+      benanntem `DEFAULT_REASON` für Werkzeuge ohne Regel; lock-master nutzt
+      `perm.get("default", "allow")`. Bewusst so belassen (LOCK.permissions.json ist
+      opt-in), aber `DEFAULT_REASON`-Muster übernehmen: ein Verdict, das nur aus dem
+      Default stammt, soll das sagen — sonst sieht „allow" nach Regel aus.
+- [ ] **team-lock / `claim_many`: ressourcengebundene, pfadfreie Claims** (Vorbild
+      `LogicalResource` + `ResourceRegistry.resolve`): Ressourcen werden dem Agenten nur
+      per stabiler ID mit `kind`, `operations`, `purposes`, `profile_ids` gezeigt; der
+      physische Locator bleibt beim Resolver. `resolve()` prüft Profil-, Zweck- und
+      Operationsbindung (least privilege) bevor ein Pfad herausgegeben wird. Das ist genau
+      die im TODO oben offene Frage „Scope einer *Menge* beanspruchter Pfade" — statt Pfade
+      zu vergleichen, Ressourcen-IDs mit erlaubten Operationen claimen. Passt zum bereits
+      geplanten Claim-Snapshot (Claim-ID, Ressourcen, Fingerprint).
+- **Verworfen (beitragsspezifisch):** `cloud_context`-Policies (`synthetic_only`,
+  `minimized_with_approval` — AWS/Bedrock-Demo-Kontext), Organisations-Rollenmatrix R1–R7.
