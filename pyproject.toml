@@ -54,6 +54,9 @@ Repository = "https://github.com/ellmos-ai/lock-master.git"
 Changelog = "https://github.com/ellmos-ai/lock-master/blob/main/CHANGELOG.md"
 Security = "https://github.com/ellmos-ai/lock-master/blob/main/SECURITY.md"
 
+[project.scripts]
+lock-master-team = "team_lock:main"
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"
@@ -70,5 +73,8 @@ py-modules = [
   "lock_status",
   "lock_utils",
   "permissions",
-  "prune_stale_locks"
+  "prune_stale_locks",
+  "team_lock"
 ]
+packages = ["_lock_master_team"]
+package-dir = { "_lock_master_team" = "team-lock/_lock_master_team" }

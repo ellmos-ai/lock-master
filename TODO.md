@@ -94,30 +94,36 @@
 > deren Nachweise. `lock-master` verwaltet weiterhin **keine Aufgaben**, keine
 > Abhängigkeiten, keine Validierungen und keine Git-Commits.
 
-- [ ] In `team-lock` ein transaktionales `claim_many` entwerfen: Eine Menge
+- [x] In `team-lock` ein transaktionales `claim_many` entwerfen: Eine Menge
   normalisierter Ressourcen wird entweder vollständig und atomar beansprucht
   oder gar nicht; Teilclaims werden bei Konflikten zurückgerollt.
 - [x] **Teilweise erledigt (2026-08-15, `contested.scopes_overlap`):** Konflikte
   werden auf überlappende Scopes statt auf Namensgleichheit geprüft — mit
   Segmentgrenze (`assets` überlappt `assets.images`, aber nicht
   `assets-backup`) und gefalteter Groß-/Kleinschreibung im Vergleich.
-  **Offen bleibt** die Ausweitung auf Ressourcen*mengen* in `claim_many`:
-  Heute vergleicht die Regel den Scope eines einzelnen Locks, nicht eine Menge
-  beanspruchter Pfade.
-- [ ] **Neu daraus (2026-08-15):** Die Verlierer-Regel aus `contested.py`
-  (frühestes `created`, Host-Reihenfolge als Tiebreak) ist der natürliche
-  Konfliktentscheid für `claim_many` — beim Entwurf dort wiederverwenden statt
-  neu erfinden. Ebenso die Quarantäne: Ohne Wartezeit liest ein Recheck über
-  einen Sync-Ordner dieselbe unsynchronisierte Sicht wie zuvor.
+  `team-lock` prüft seit 2026-09-01 lokale Ressourcenmengen atomar. **Offen
+  bleibt** die Ausweitung des hostübergreifenden `contested`-Verfahrens: Dort
+  wird weiterhin der Scope eines Locks statt einer Ressourcenmenge verglichen.
+- [ ] **Hostübergreifende Ressourcenmengen:** Falls `contested.py` später
+  mehrere Ressourcen pro Host vermittelt, müssen die vorhandene Verlierer-Regel
+  (frühestes `created`, Host-Reihenfolge als Tiebreak) und die Quarantäne
+  wiederverwendet werden. Das lokale FIFO in `team-lock` ist dafür kein
+  Ersatz, weil ein Recheck im Sync-Ordner zunächst dieselbe unsynchronisierte
+  Sicht lesen kann.
 - [ ] Einen unveränderlichen Claim-Snapshot mit Claim-ID, Besitzer, Ressourcen,
   Erstellungszeit, Ablaufzeit und optionalem Ressourcen-Fingerprint vorsehen.
   Der Fingerprint erkennt Drift, erteilt aber keine Schreibberechtigung.
 - [ ] Handoff-/Recovery-Belege ergänzen: Übernahme, Verlängerung, Freigabe,
   Ablauf und erzwungene Bereinigung sollen als append-only Ereignisse
   nachvollziehbar sein, ohne daraus einen Workflow- oder Task-Manager zu machen.
-- [ ] Konkurrenz-, Crash- und Wiederanlaufstests für `claim_many` ergänzen:
+- [ ] Konkurrenz-, Crash- und Wiederanlaufstests für `claim_many` vollständig ergänzen:
   genau ein Gewinner, keine Teilclaims, keine fremde Claim-ID im Fehlerpfad,
   idempotente Freigabe und konservatives Verhalten bei beschädigtem Zustand.
+  **Teilnachweis 2026-09-01:** Multiprozess-Test mit genau einem Gewinner,
+  Freigabe des OS-Guards nach abruptem Prozessende, unveränderte Zieldatei bei
+  fehlgeschlagenem Replace, atomare Bundles und fail-closed bei beschädigten
+  Claim-Zeilen. Offen bleiben Claim-ID-basierte Recovery, Ablauf/Verlängerung,
+  Handoff-Ereignisse und ein belastbarer Wiederanlaufvertrag.
 
 ## Done
 

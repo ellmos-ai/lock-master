@@ -83,7 +83,42 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
     if args.purpose:
         lines.append(f"purpose: {args.purpose}")
     lines.append(f"scope: {scope_label}")
-    return "\n".join(lines) + "\n"
+
+    body = "\n".join(lines) + "\n"
+
+    if args.team:
+        team_sections = """
+# ============================================================================
+# SECTION 1 -- PRESENCE LOG
+# Format: [loop-id] | [agent-name] | role | main task | start time
+# ============================================================================
+# PRESENCE:
+
+# ============================================================================
+# SECTION 2 -- FILE / FOLDER CLAIMS + QUEUE
+# One line is one atomic bundle. "order" is a file-local FIFO ordinal.
+# Format: [agent-name] EDITING order=000001 | path | second/path
+#         [agent-name] WAITING order=000002 | path | second/path
+# ============================================================================
+# FILE-CLAIMS:
+
+# ============================================================================
+# SECTION 3 -- TOOL / SOFTWARE / MCP CLAIMS + QUEUE
+# One line is one atomic bundle. Shared read-only tools need no claim.
+# Format: [agent-name] USING   order=000001 | tool-id | second-tool-id
+#         [agent-name] WAITING order=000002 | tool-id | second-tool-id
+# ============================================================================
+# TOOL-CLAIMS:
+
+# ============================================================================
+# SECTION 4 -- MESSAGES / TIPS / LESSONS LEARNED
+# Format: [YYYY-MM-DDTHH:MM:SS] [agent-name]: message
+# ============================================================================
+# MESSAGES:
+"""
+        body += team_sections
+
+    return body
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,7 +167,12 @@ def main(argv: list[str] | None = None) -> int:
     if not project_dir.is_dir():
         raise SystemExit(f"error: not a directory: {project_dir}")
 
-    args.host = args.host or platform.node() or "unknown"
+    if args.team:
+        if args.host is not None and args.host.casefold() != args.team.casefold():
+            parser.error("--host must match --team because the Team-Lock filename is authoritative")
+        args.host = args.team
+    else:
+        args.host = args.host or platform.node() or "unknown"
     args.owner = args.owner or f"lock_create/{args.host}"
 
     name = build_lock_name(args.scope, args.team, args.user, args.condition)

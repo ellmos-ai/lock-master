@@ -17,7 +17,7 @@ class LockCreateCase(unittest.TestCase):
 
     def _run(self, *extra: str) -> int:
         return lock_create.main([str(self.project), "--owner", "test-agent",
-                                 "--host", "TESTHOST", *extra])
+                                 *extra])
 
     def test_default_creates_project_lock(self):
         self.assertEqual(self._run("--purpose", "unit test"), 0)
@@ -35,11 +35,17 @@ class LockCreateCase(unittest.TestCase):
 
     def test_team_lock_names(self):
         self._run("--team", "LAPTOP")
-        self.assertTrue((self.project / "LOCK.team.LAPTOP.txt").exists())
+        project_lock = self.project / "LOCK.team.LAPTOP.txt"
+        self.assertTrue(project_lock.exists())
+        self.assertEqual(lock_utils.parse_lock_file(project_lock)["host"], "LAPTOP")
         self._run("--team", "LAPTOP", "--scope", "assets")
         team_scoped = self.project / "LOCK.team.assets.LAPTOP.txt"
         self.assertTrue(team_scoped.exists())
         self.assertTrue(lock_utils.is_team_lock(team_scoped.name))
+
+    def test_team_lock_rejects_mismatched_explicit_host(self):
+        with self.assertRaises(SystemExit):
+            self._run("--team", "LAPTOP", "--host", "OTHER")
 
     def test_user_lock(self):
         self._run("--user")

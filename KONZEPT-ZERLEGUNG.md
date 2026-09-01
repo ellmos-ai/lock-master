@@ -1,7 +1,7 @@
 # KONZEPT — lock-master wird ein Stack aus drei Teilmodulen
 
 > Entscheidung Lukas Geiger, 2026-07-26. Erarbeitet in Session „OPUS WORKSTATION".
-> Status: **beschlossen, Umsetzung begonnen.** Diese Datei ist die Begründung;
+> Status: **beschlossen und umgesetzt.** Diese Datei ist die Begründung;
 > der Umsetzungsstand steht am Ende.
 
 ## Beschluss
@@ -10,7 +10,7 @@
 lock-master  (Stack — wird als EIN Modul ausgeliefert)
   ├─ pure-locking        LOCK*.txt: Anlegen, Scannen, Prunen, Watcher/GUI
   ├─ permission-control  permissions.py, LOCK.permissions.json
-  └─ team-lock           atomare O_EXCL-Claims (herausgelöst aus swarm-ai)
+  └─ team-lock           atomare Ressourcen-Bundles und lokale FIFO-Warteschlangen
 ```
 
 Abgeleitete Stacks:
@@ -18,7 +18,7 @@ Abgeleitete Stacks:
 ```
 comalock      = lock-master + coma        (lokal, offline, heute)
 comaroshambo  = roshambo    + coma        (verteilt, Cloud, später)
-swarm-ai      = Skilldokumente + team-lock (wird mitausgeliefert)
+swarm-ai      = Skilldokumente + Nutzung von team-lock
 ```
 
 **Die Funktion ändert sich nicht.** Es ändert sich die Kapselung: Teilbereiche werden
@@ -185,11 +185,12 @@ Stand 2026-07-26, Lauf „lockmaster-split" (Auftrag
 - [x] Doku-Pfade nachgezogen (8 Dateien, ~50 Stellen) — Commit `1379dce`.
       Vorher tot: der Link `watcher/README.md` in `README.md`.
 - [x] Tests grün nach jedem Teilschritt: **64 passed**, unverändert zur Basis.
-- [ ] `team-lock` aus `swarm-ai/tools/team_lock.py` herauslösen (vorher dort
-      `git status` prüfen — Fremdänderungen bekommen einen eigenen Commit).
-      **In diesem Lauf ausdrücklich nicht getan; `swarm-ai` wurde nicht
-      angefasst.** Der Ordner enthält nur README + Manifest, `provides` ist
-      leer, `status: planned`.
+- [x] **Nachtrag 2026-09-01:** `team-lock` als eigenständige CLI/Bibliothek
+      umgesetzt. Die frühere `swarm-ai`-Quelle wurde nur als Legacy-Referenz
+      gelesen und nicht verändert. Das neue Teilmodul verwaltet atomare
+      Ressourcen-Bundles, lokale FIFO-Warteschlangen, Anwesenheit und
+      Nachrichten direkt in `LOCK.team.*.txt`; Manifest und README beschreiben
+      die bewusst engeren Grenzen ohne Claim-ID-/Recovery-Vertrag.
 - [ ] `modules.catalog.json` neu erzeugen — **war nicht Teil des Auftrags und
       ist auch nicht nötig.** Geprüft statt vermutet:
       `build_catalog.discover_manifests()` setzt nach einem Fund
@@ -218,11 +219,12 @@ Stand 2026-07-26, Lauf „lockmaster-split" (Auftrag
   120 Sekunden (OneDrive-Vollbegehung), läuft dann aber sauber durch: 17 aktive
   Locks, leeres stderr, Exit 0. Das ist eine Laufzeiteigenschaft, kein Defekt.
   Wer ihn in einem Timeout-Kontext aufruft, sollte das wissen.
-- **Versionsangaben divergieren:** `VERSION` sagt `1.4.1`, `pyproject.toml`
-  sagt `1.4.2`. Bestand vor diesem Lauf; Versionsarbeit war ausgeschlossen.
-- **`pyproject.toml` hat keine explizite setuptools-Paketkonfiguration.** Wie
-  die Flat-Layout-Autodiscovery mit den bindestrich-benannten Ordnern umgeht,
-  ist ungetestet. `pip install .` gehörte nicht zur Abnahme.
+- **Erledigt:** `VERSION` und `pyproject.toml` stehen inzwischen beide auf
+  `1.5.1`.
+- **Erledigt 2026-09-01:** `pyproject.toml` deklariert die flachen Module, das
+  installierbare `_lock_master_team`-Paket und den Konsolenbefehl
+  `lock-master-team` explizit. Ein Wheel-Smoke in einer isolierten virtuellen
+  Umgebung hat Import und CLI-Einstieg geprüft.
 - **`visibility` steht überall auf `public-candidate`**, gespiegelt vom
   Root-Manifest. `.MODULES/TODO.md` führt die Korrektur als eigenen Sweep mit
   begründetem Verzicht auf stückweises Vorgehen — hier nicht vorgegriffen.

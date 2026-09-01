@@ -15,6 +15,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Team-Lock CLI (`team-lock/team_lock.py`)**: Atomic management of presence, file, tool, and message claims inside `LOCK.team.<host>.txt` files.
+  - Command-line interface with `claim-presence`, `claim-file`, `claim-tool`, `add-message` and their respective `release-*` counterparts.
+  - Introduces atomic resource bundles for files and tools: validation and conflicts are resolved before the single-file transaction is persisted.
+  - Preserves FIFO priority for overlapping waiters and keeps consecutive bundles from the same agent distinct through a file-local order number.
+  - Serializes local writers with `msvcrt.locking` on Windows or `flock` on POSIX, then uses a unique, flushed and synced temporary file plus `os.replace`.
+  - The persistent `.guard` sibling contains no state and is intentionally not unlinked; the operating system releases its advisory lock when the process exits.
+  - Public API and CLI reject invalid agents, separators, absolute/traversing paths, non-contained lock paths, and malformed active sections before writing.
+  - Root shim, installable package and `lock-master-team` console entry point added.
+
 - **Discoverability, Multi-OS CI Workflow, Bilingual Security Policy & Contract Parity (2026-08-21)**:
   - Modernized `pyproject.toml` with PEP 621 classifiers for Python 3.13, OS Independent, POSIX Linux, Microsoft Windows, MacOS, Topic Systems Administration, and comprehensive project URLs (Homepage, Documentation, Repository, Bug Tracker, Changelog, Security).
   - Upgraded GitHub Actions CI workflow (`.github/workflows/tests.yml`) to multi-OS matrix (`ubuntu-latest`, `windows-latest`, `macos-latest`), Python `3.10`–`3.13`, pip caching, and automated `ruff check .` linting.

@@ -2,23 +2,31 @@
   "schema": "ellmos.module.v2",
   "id": "lock-master.team-lock",
   "display_name": "team-lock",
-  "description": "Platzhalter. Vorgesehen fuer atomare O_EXCL-Claims, die spaeter aus swarm-ai herausgeloest werden. Enthaelt heute keinen Code; provides ist bewusst leer.",
+  "description": "Atomare, dateilokale Verwaltung von Anwesenheit, Ressourcen-Bundles, FIFO-Warteschlangen und Nachrichten in LOCK.team.*.txt.",
   "category": "control",
   "kind": "protocol",
-  "status": "planned",
+  "status": "active",
   "visibility": "public-candidate",
-  "provides": [],
-  "requires": [],
+  "provides": [
+    "control.team-locks"
+  ],
+  "requires": [
+    "control.locks"
+  ],
   "optional": [],
   "conflicts": [],
-  "surfaces": [],
+  "surfaces": [
+    "library",
+    "cli",
+    "workflow"
+  ],
   "state": {
-    "ownership": "none",
-    "location": "none"
+    "ownership": "external",
+    "location": "project"
   },
   "boundaries": {
     "network": "none",
-    "data": "none",
+    "data": "user-local",
     "platforms": [
       "windows",
       "macos",
@@ -32,4 +40,3 @@
   },
   "adapters": []
 }
-

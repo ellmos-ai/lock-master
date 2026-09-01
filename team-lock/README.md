@@ -1,46 +1,53 @@
-# team-lock — Platzhalter
+# team-lock — atomare Koordination innerhalb eines Systems
 
-> **Dieser Ordner enthält heute keinen Code.** Er markiert den vorgesehenen
-> Platz im **lock-master**-Stack, damit die Zerlegung vollständig sichtbar ist.
-> Angelegt am 2026-07-26.
+Dieses Teilmodul verwaltet die vier Abschnitte einer vorhandenen
+`LOCK.team.<host>.txt`: Anwesenheit, Datei-/Ordner-Claims, exklusive
+Tool-/MCP-Claims und Nachrichten. Die Lock-Datei bleibt die einzige fachliche
+Quelle; es gibt keine zusätzliche Datenbank oder Registry.
 
 | | |
 |---|---|
 | Stabile ID | `lock-master.team-lock` |
-| Liefert | *(noch nichts — `provides` ist bewusst leer)* |
-| Status | `planned` |
+| Liefert | `control.team-locks` |
+| Status | `active` |
+| CLI | `python team_lock.py` oder installiert `lock-master-team` |
 
-## Was hier einmal liegen soll
+## Vertrag
 
-Atomare Claim-Vergabe für Agentenschwärme über `O_EXCL` — also das
-wettlaufsichere „ich nehme dieses Arbeitspaket", das ein reines Dateiformat
-nicht leisten kann.
+- Ein Claim-Aufruf bildet genau ein atomares Bundle. Entweder werden alle
+  normalisierten Ressourcen eingetragen oder keine.
+- Die dateilokale `order`-Nummer trennt mehrere Bundles desselben Agenten und
+  legt die FIFO-Priorität für überlappende Wartende fest. Sie ist keine
+  dauerhafte Claim-ID und kein Recovery-Nachweis.
+- Ein späterer Claim darf einen älteren, überlappenden Wartenden nicht
+  überholen. Nicht überlappende Ressourcen können unabhängig fortfahren.
+- Freigaben entfernen nur eigene, exakt benannte Ressourcen. Wiederholte
+  Freigaben sind erfolgreich und ändern die Datei nicht.
+- Einzelne alte Claim-Zeilen werden gelesen. Mehrere alte Zeilen desselben
+  Agenten sind als Bundle mehrdeutig und führen deshalb zu einem
+  fail-closed-Ergebnis.
 
-Die Substanz dafür existiert bereits, aber an anderer Stelle:
-`.MODULES/.ORCHESTRATION/swarm_ai/tools/team_lock.py`. Das Herauslösen ist ein
-**eigener, geplanter Durchgang**.
+## Persistenz und Guard
 
-**In diesem Lauf wurde `swarm-ai` nicht angefasst** — kein Lesen mit
-Änderungsabsicht, kein Verschieben, kein Commit. Wer den Umzug durchführt,
-prüft dort zuerst `git status`: vorgefundene Fremdänderungen bekommen einen
-eigenen Commit.
+Der vollständige lokale Lese-/Prüf-/Schreibvorgang wird mit
+`msvcrt.locking` unter Windows beziehungsweise `flock` unter POSIX
+serialisiert. Die Schwesterdatei `LOCK.team.*.txt.guard` bleibt absichtlich im
+Projekt: Sie enthält keinen fachlichen Zustand, und das Betriebssystem gibt den
+advisory Lock bei Prozessende frei. Das Beibehalten derselben Guarddatei
+verhindert, dass wartende Prozesse nach einem Unlink verschiedene Inodes
+sperren. Projekte sollten genau `LOCK.team.*.txt.guard` ignorieren, aber niemals
+die aktive `LOCK.team.*.txt` selbst.
 
-## Nicht verwechseln: Team Locks gibt es schon
+Eine Änderung wird zuerst in eine eindeutige temporäre Datei im selben Ordner
+geschrieben, geleert und synchronisiert. Erst danach ersetzt `os.replace` die
+Zieldatei. Das schützt lokale konkurrierende Prozesse und erhält bei einem
+fehlgeschlagenen Replace die bisherige Zieldatei. Es ist kein
+hostübergreifendes Transaktions- oder Wiederanlaufprotokoll.
 
-Team Locks als **Dateiformat** (`LOCK.team.<host>.txt`, koordiniert Agenten
-eines Systems intern und blockiert andere Systeme) sind vollständig
-implementiert — in [`../pure-locking/`](../pure-locking/), zusammen mit
-`TEAM_LOCK_TEMPLATE.txt`.
+## Grenzen
 
-Dieses Teilmodul ergänzt später nur die **atomare Vergabe**. Wer heute Team
-Locks nutzen will, braucht `pure-locking` und diesen Ordner nicht.
-
-## Gilt auch hier: Konvention, keine Sicherheitsgrenze
-
-Wie im gesamten Stack ist Durchsetzung freiwillige Konvention plus GUI/Audit.
-Ein Claim wird technisch nicht erzwungen. `O_EXCL` macht die *Vergabe*
-wettlaufsicher, nicht die *Einhaltung*.
-
-## Zerlegungsbeschluss
-
-`../KONZEPT-ZERLEGUNG.md` im Modulroot.
+Claims sind eine Kooperationskonvention und keine Sicherheitsgrenze. Das Modul
+verwaltet keine Aufgaben, Abhängigkeiten, Git-Aktionen, Claim-IDs, Abläufe,
+Handoffs oder Recovery-Ereignisse. Für die allgemeinen Lock-Regeln und das
+kanonische Template siehe [`../LOCK-SYSTEM.md`](../LOCK-SYSTEM.md) und
+[`../pure-locking/TEAM_LOCK_TEMPLATE.txt`](../pure-locking/TEAM_LOCK_TEMPLATE.txt).

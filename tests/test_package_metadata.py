@@ -37,9 +37,13 @@ def test_pyproject_pep621_pep639_compliance():
         "lock_utils",
         "permissions",
         "prune_stale_locks",
+        "team_lock",
     ]
     for mod in expected_modules:
         assert mod in setuptools_cfg["py-modules"], f"Module {mod} missing in py-modules"
+    assert "_lock_master_team" in setuptools_cfg.get("packages", [])
+    assert setuptools_cfg.get("package-dir", {}).get("_lock_master_team") == "team-lock/_lock_master_team"
+    assert project.get("scripts", {}).get("lock-master-team") == "team_lock:main"
 
 
 def test_manifest_in_exists_and_grafts_stack():
@@ -76,6 +80,7 @@ def test_root_shims_resolve_to_target_implementations():
         ("lock_utils.py", ROOT / "pure-locking" / "lock_utils.py"),
         ("permissions.py", ROOT / "permission-control" / "permissions.py"),
         ("prune_stale_locks.py", ROOT / "pure-locking" / "prune_stale_locks.py"),
+        ("team_lock.py", ROOT / "team-lock" / "team_lock.py"),
     ]
     for shim_name, real_path in shims:
         shim_file = ROOT / shim_name

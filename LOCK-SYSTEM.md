@@ -181,6 +181,30 @@ A Team Lock must contain all four sections (use `pure-locking/TEAM_LOCK_TEMPLATE
 - **Clean up on exit:** remove your presence entry and your claims. Delete
   the Team Lock file only when the presence log is fully empty.
 
+### Atomic Team-Lock CLI and library
+
+`python lock_create.py <project> --team <host>` creates the canonical four
+sections. `team_lock.py` (installed command: `lock-master-team`) updates
+presence, file/folder bundles, exclusive tool bundles and messages. One file or
+tool command is one atomic bundle. A file-local `order` number keeps distinct
+calls separate and establishes FIFO priority for overlapping waiters; it is not
+a durable claim ID or a recovery journal. Legacy one-resource claim lines are
+read, while ambiguous multiple legacy lines from the same agent fail closed.
+The filename remains authoritative for host identity: `lock_create --team`
+writes that value into `host:`, rejects a differing explicit `--host`, and later
+updates fail closed if the header differs from the final filename segment
+(`LOCK.team.<scope>.<host>.txt`).
+
+Each update validates the lock path, agent and resources in the public Python
+API as well as the CLI. Local processes serialize the full read/validate/write
+transaction through a persistent `LOCK.team.*.txt.guard` file using
+`msvcrt.locking` on Windows or `flock` on POSIX. The guard contains no state and
+is intentionally not unlinked: the OS releases the advisory lock on process
+exit, while retaining the inode avoids split-lock races among waiters. The Team
+Lock is replaced only after a unique temporary file has been flushed and
+synced. This protects local concurrent writers; it does not provide a
+cross-host transaction or a recovery log.
+
 ### User Lock (user-owned full lock -- only the user removes it)
 
 User Locks are a separate, protected category. They lock a project durably, and

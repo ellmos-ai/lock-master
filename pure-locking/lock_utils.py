@@ -342,17 +342,17 @@ def active_locks(project_dir: Path, now: datetime | None = None):
 
 _SECTION_RE = {
     "presence": re.compile(
-        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Anwesenheit(?:slog)?|Presence)",
+        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Anwesenheit(?:slog)?|Presence|PRESENCE:?)",
         re.IGNORECASE,
     ),
     "file_claims": re.compile(
-        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Datei|Files?\s+claimed)", re.IGNORECASE
+        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Datei|Files?\s+claimed|FILE-CLAIMS:?)", re.IGNORECASE
     ),
     "tool_claims": re.compile(
-        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Tool|Tools?\s+claimed)", re.IGNORECASE
+        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Tool|Tools?\s+claimed|TOOL-CLAIMS:?)", re.IGNORECASE
     ),
     "messages": re.compile(
-        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Nachrichten|Notes|Messages)",
+        r"^(?:#{1,3}\s*)?(?:\d+\.?\s*)?(?:Nachrichten|Notes|Messages|MESSAGES:?)",
         re.IGNORECASE,
     ),
     "queue": re.compile(

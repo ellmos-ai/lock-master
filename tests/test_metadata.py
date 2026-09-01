@@ -66,9 +66,9 @@ def test_llms_txt_integrity():
     llms_path = ROOT / "llms.txt"
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
-    assert "Last-checked: 2026-08-21" in content
+    assert "Last-checked: 2026-09-01" in content
     assert "Version: 1.5.1" in content or "1.5.1" in content
-    assert "128 passed" in content
+    assert "isolated wheel install/import/CLI smoke" in content
     assert "ellmos-ai" in content
     assert "open-bricks" in content
 
@@ -77,7 +77,7 @@ def test_readme_badges_and_ecosystem_parity():
     """Verify that README.md and README_de.md include language switchers, up-to-date badges, and sibling matrices."""
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
-        assert "pytest-128%20passed" in content
+        assert "pytest-passing" in content
         assert "1.5.1" in content
         assert "ellmos--ai" in content
         assert "open--bricks" in content

@@ -2,7 +2,7 @@
 
 > Portable, config-driven multi-agent file-lock system for project coordination.
 
-## Last-checked: 2026-08-21
+## Last-checked: 2026-09-01
 
 ## What it does
 
@@ -14,7 +14,7 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 ## Status & Test Verification
 
 - **Version**: 1.5.1
-- **Pytest**: 128 passed (100% green)
+- **Verification**: the full pytest suite and an isolated wheel install/import/CLI smoke run in CI
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)
 
@@ -67,11 +67,12 @@ what a partial extraction does *not* include.
 - `pure-locking/` -- the locking itself: `LOCK*.txt` create, scan, prune, bulk,
   plus the optional `watcher/`.
 - `permission-control/` -- the `LOCK.permissions.json` rule scheme.
-- `team-lock/` -- placeholder, no code yet (atomic `O_EXCL` claims, planned).
+- `team-lock/` -- Team-Lock CLI and installable library for atomic bundles,
+  overlap-aware FIFO queues, presence and messages.
 
 The flat entry points in the repository root still work unchanged
 (`python lock_scan.py`, `import lock_utils`): the root holds compatibility
-shims that load the real modules from `pure-locking/` and `permission-control/`.
+shims that load the real modules from their stack sub-modules.
 
 ## Core files
 
@@ -91,6 +92,10 @@ shims that load the real modules from `pure-locking/` and `permission-control/`.
   `LOCK.permissions.json` (`deny` > `ask` > `allow` > default).
 - `LOCK-SYSTEM.md` -- canonical spec: file format, scope convention, lifecycle,
   script reference.
+- `team_lock.py` -- root shim for the Team-Lock CLI/library. It validates the
+  public API as strictly as the CLI, writes atomic file/tool bundles, and gives
+  older overlapping waiters FIFO priority. The persistent `.guard` file holds
+  only an OS advisory lock and no coordination state.
 - `pure-locking/watcher/` -- optional localhost daemon, REST API, and Web UI.
   Runtime data defaults to `~/.lock_master_watcher` and the UI binds to
   `127.0.0.1`.

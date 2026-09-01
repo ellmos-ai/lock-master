@@ -45,23 +45,26 @@ purpose: [What is this team working on?]
 # Who is editing what? Who is waiting for what?
 # Only claim what you are ACTIVELY editing (keep claims tight).
 # Update immediately when you switch areas.
-# Format: [agent-name] EDITING  <path-or-glob>
-#         [agent-name] WAITING  <path-or-glob>
+# One line is one atomic bundle. "order" is a file-local FIFO ordinal, not a
+# durable claim ID. Paths are project-relative and do not contain wildcards.
+# Format: [agent-name] EDITING order=000001 | path | second/path
+#         [agent-name] WAITING order=000002 | path | second/path
 # ============================================================================
 # FILE-CLAIMS:
-# [agent-name] EDITING  <YOUR_ROOT>/project/src/module.py
-# [agent-name] WAITING  <YOUR_ROOT>/project/src/module.py
+# [agent-name] EDITING order=000001 | src/module.py | tests/test_module.py
+# [agent-name] WAITING order=000002 | src/module.py | tests/test_module.py
 
 # ============================================================================
 # SECTION 3 -- TOOL / SOFTWARE / MCP CLAIMS + QUEUE
 # Exclusive resources (running servers, DB connections, specific MCP tools).
 # Only list truly exclusive resources; shared read-only tools need no claim.
-# Format: [agent-name] USING   <tool-or-resource>
-#         [agent-name] WAITING <tool-or-resource>
+# One line is one atomic bundle. Shared read-only tools need no claim.
+# Format: [agent-name] USING   order=000001 | tool-id | second-tool-id
+#         [agent-name] WAITING order=000002 | tool-id | second-tool-id
 # ============================================================================
 # TOOL-CLAIMS:
-# [agent-name] USING   mcp::ellmos-filecommander::fc_start_session
-# [agent-name] WAITING mcp::ellmos-filecommander::fc_start_session
+# [agent-name] USING   order=000001 | mcp::ellmos-filecommander::fc_start_session
+# [agent-name] WAITING order=000002 | mcp::ellmos-filecommander::fc_start_session
 
 # ============================================================================
 # SECTION 4 -- MESSAGES / TIPS / LESSONS LEARNED

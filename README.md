@@ -3,7 +3,7 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Pytest 128 passed](https://img.shields.io/badge/pytest-128%20passed-brightgreen.svg)](#running-tests)
+[![Pytest](https://img.shields.io/badge/pytest-passing-brightgreen.svg)](#running-tests)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Privacy: Zero-Egress](https://img.shields.io/badge/privacy-100%25%20Offline%20%7C%20Zero--Egress-success.svg)](SECURITY.md)
@@ -330,7 +330,13 @@ CREATE (first agent)  -->  CHECK IN (each agent)  -->  WORK  -->  CHECK OUT  -->
 
 ### Creating a Team Lock
 
-Copy `pure-locking/TEAM_LOCK_TEMPLATE.txt` into the project directory and fill in the header:
+Create the canonical four-section file directly:
+
+```bash
+python lock_create.py . --team LAPTOP --owner agent-lead --purpose "Parallel refactor of auth module"
+```
+
+Alternatively, copy `pure-locking/TEAM_LOCK_TEMPLATE.txt` into the project directory and fill in the header:
 
 ```
 owner: agent-lead
@@ -340,7 +346,35 @@ expires_after: 24h
 purpose: Parallel refactor of auth module
 ```
 
-Then add presence and claim entries under the relevant sections.
+The `--team` value is also written to `host:`. The filename is authoritative;
+an explicit, differing `--host` or a later header mismatch is rejected.
+
+Then add presence and claim entries under the relevant sections, or use the `team_lock.py` CLI to manage them atomically:
+
+```bash
+# Register presence
+python team_lock.py claim-presence . --lock-name LOCK.team.LAPTOP.txt --agent "agent-1" --role "dev" --task "refactor auth"
+
+# Atomically claim multiple files (fails if any overlap is already claimed)
+python team_lock.py claim-file . --lock-name LOCK.team.LAPTOP.txt --agent "agent-1" --resource "src/auth.py" --resource "tests/test_auth.py"
+
+# Join the FIFO queue instead of failing when a holder or older waiter overlaps
+python team_lock.py claim-file . --lock-name LOCK.team.LAPTOP.txt --agent "agent-2" --resource "src/auth.py" --queue
+
+# Add a message for other agents
+python team_lock.py add-message . --lock-name LOCK.team.LAPTOP.txt --agent "agent-1" --msg "Found an issue in auth.py, investigating."
+
+# Release files when done
+python team_lock.py release-file . --lock-name LOCK.team.LAPTOP.txt --agent "agent-1" --resource "src/auth.py" --resource "tests/test_auth.py"
+```
+
+One claim command writes one bundle line. Its file-local `order` number keeps
+separate calls distinct and establishes FIFO priority; it is not a durable
+claim ID or recovery record. A persistent `LOCK.team.*.txt.guard` sibling is
+used only for the local OS advisory lock (`msvcrt.locking` or `flock`). It holds
+no state and is not removed, avoiding split-lock races between waiting
+processes. State is persisted with a unique, flushed and synced temporary file
+followed by `os.replace`.
 
 ---
 
@@ -442,7 +476,9 @@ lock-master/                        # Stack -- shipped as ONE module
 ├── permission-control/             # The LOCK.permissions.json rule scheme
 │   ├── permissions.py              # allow / deny / ask evaluation
 │   └── LOCK_PERMISSIONS_TEMPLATE.json
-├── team-lock/                      # Placeholder: atomic O_EXCL claims (planned)
+├── team-lock/                      # Team-Lock CLI and installable implementation
+│   ├── team_lock.py                # Source-checkout CLI entry point
+│   └── _lock_master_team/          # Validated API, FIFO queue, OS guard, atomic write
 │
 ├── lock_scan.py                    # Compatibility shims: the flat entry points
 ├── lock_utils.py                   #   keep working from the repository root.
@@ -450,6 +486,7 @@ lock-master/                        # Stack -- shipped as ONE module
 ├── bulk_lock.py                    #   name, so `import lock_scan` yields the
 ├── prune_stale_locks.py            #   original, not a re-export.
 ├── permissions.py                  #
+├── team_lock.py                    # Root shim; installed CLI: lock-master-team
 │
 ├── LOCK-SYSTEM.md                  # Canonical spec and lifecycle reference
 ├── KONZEPT-ZERLEGUNG.md            # Why the stack is split (German)
