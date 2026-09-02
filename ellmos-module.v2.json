@@ -4,7 +4,7 @@
   "display_name": "lock-master",
   "category": "control",
   "kind": "protocol",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "status": "active",
   "visibility": "public",
   "provides": [

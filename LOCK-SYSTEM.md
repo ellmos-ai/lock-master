@@ -251,6 +251,37 @@ unrestricted.
   project register when removing. If unsure whether the condition is met:
   do NOT remove; ask the user.
 
+### Lock types cannot be combined in the filename
+
+A lock name carries **exactly one** type marker, in its first segment. Names
+that read like a combination -- `LOCK.until.and.condition.<scope>.txt`,
+`LOCK.until.or.condition.<scope>.txt`, `LOCK.user.condition.<scope>.txt` -- are
+**ambiguous** and are treated fail-closed: `is_expired()` never releases them,
+`prune` never removes them, and `lock_scan.py` prints an explicit warning.
+
+**Why fail-closed and not simply rejected:** before v1.6.1 such a name was read
+as the FIRST marker plus an odd scope (`until` + `and.condition.<scope>`), and
+the second marker was silently ignored. Whoever wrote the name intending "both"
+got the WEAKER of the two locks -- it released the moment the deadline passed,
+condition unmet. Holding indefinitely is the safe failure: it can only lock too
+long, never too little.
+
+Only whole segments count. A scope like `publication-and-claim-edits` is a
+single segment and stays valid.
+
+**Combine a deadline with a condition through the FIELDS, not the name:**
+
+```
+LOCK.until.winners-announcement.txt
+  not_before: 2026-10-08T12:00-07:00        # ends the watching (machine-checkable)
+  release_condition: winners actually announced on <source>   # evidence for removal
+```
+
+The deadline stops a guard from watching; the condition states what must be
+proven before the file is removed. Detection: `lock_utils.is_ambiguous_lock()`.
+
+---
+
 ### Until Lock (deadline-based -- released at an absolute moment)
 
 Until Locks (since v1.6.0) hold **until a fixed point in time** that the file

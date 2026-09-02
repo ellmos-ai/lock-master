@@ -13,7 +13,7 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 
 ## Status & Test Verification
 
-- **Version**: 1.6.0
+- **Version**: 1.6.1
 - **Verification**: the full pytest suite and an isolated wheel install/import/CLI smoke run in CI
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)

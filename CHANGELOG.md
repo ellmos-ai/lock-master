@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.1]
+
+### Fixed
+
+- **Ambiguous lock names are now fail-closed.** A name that reads as if lock
+  types were combined (`LOCK.until.and.condition.<scope>.txt`,
+  `LOCK.user.condition.<scope>.txt`, ...) used to be read as the first marker
+  plus an odd scope, with the second marker silently ignored — so whoever wrote
+  it intending "both" got the WEAKER lock, released as soon as the deadline
+  passed. Such names now never expire, are never pruned, and `lock_scan.py`
+  prints an explicit warning pointing at the field-based alternative
+  (`not_before` + `release_condition`). Only whole segments count, so a scope
+  like `publication-and-claim-edits` stays valid.
+  New helper `lock_utils.is_ambiguous_lock()`; `lock_name_parts()` gained an
+  `ambiguous` key on every branch. 8 tests in
+  `tests/test_ambiguous_lock_names.py`; suite 167 -> 175 passed.
+
+
 ## [1.6.0]
 
 ### Added

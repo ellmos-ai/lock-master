@@ -48,6 +48,30 @@ _DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd])\s*$", re.IGNORECASE)
 _DURATION_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 
 
+TYPE_MARKERS = frozenset({"user", "team", "community", "condition", "until"})
+BOOLEAN_WORDS = frozenset({"and", "or", "not"})
+
+
+def _has_reserved_leftovers(segments: list[str]) -> bool:
+    """True if scope segments still contain a reserved marker or a boolean word.
+
+    A lock name carries exactly ONE type marker, in the first segment. A second
+    one, or a word like 'and'/'or'/'not-...', means the name was written as if
+    lock types could be combined in the filename — they cannot. Such a name is
+    ambiguous and must not be read as the weaker of the two readings.
+
+    Only whole segments count: a scope like 'publication-and-claim-edits' is one
+    segment and stays perfectly valid.
+    """
+    for segment in segments:
+        low = segment.lower()
+        if low in TYPE_MARKERS or low in BOOLEAN_WORDS:
+            return True
+        if low.startswith("not-") and low[4:] in TYPE_MARKERS:
+            return True
+    return False
+
+
 def lock_name_parts(name: str) -> dict[str, str | None | bool] | None:
     """Split a lock filename into type, scope and host.
 
@@ -60,7 +84,7 @@ def lock_name_parts(name: str) -> dict[str, str | None | bool] | None:
     """
     if name in LEGACY_LOCK_NAMES:
         return {"lock_type": "legacy", "scope": "project", "host": None,
-                "is_legacy": True}
+                "is_legacy": True, "ambiguous": False}
 
     m = LOCK_RE.match(name)
     if not m:
@@ -69,7 +93,7 @@ def lock_name_parts(name: str) -> dict[str, str | None | bool] | None:
     raw_scope = m.group(1)
     if not raw_scope:
         return {"lock_type": "exclusive", "scope": "project", "host": None,
-                "is_legacy": False}
+                "is_legacy": False, "ambiguous": False}
 
     segments = raw_scope.split(".")
     marker = segments[0].lower()
@@ -78,14 +102,17 @@ def lock_name_parts(name: str) -> dict[str, str | None | bool] | None:
         scope_segments = segments[1:-1] if len(segments) >= 3 else []
         scope = ".".join(scope_segments) if scope_segments else "project"
         return {"lock_type": "team", "scope": scope, "host": host,
-                "is_legacy": False}
+                "is_legacy": False,
+                "ambiguous": _has_reserved_leftovers(scope_segments)}
     if marker in {"user", "condition", "until"}:
         scope_segments = segments[1:]
         scope = ".".join(scope_segments) if scope_segments else "project"
         return {"lock_type": marker, "scope": scope, "host": None,
-                "is_legacy": False}
+                "is_legacy": False,
+                "ambiguous": _has_reserved_leftovers(scope_segments)}
     return {"lock_type": "exclusive", "scope": raw_scope, "host": None,
-            "is_legacy": False}
+            "is_legacy": False,
+            "ambiguous": _has_reserved_leftovers(segments[1:])}
 
 
 def lock_type_from_name(name: str) -> str:
@@ -173,6 +200,25 @@ def is_condition_lock(name: str) -> bool:
     return m.group(1).split(".")[0].lower() == "condition"
 
 
+def is_ambiguous_lock(name: str) -> bool:
+    """True if the filename reads as if lock types were combined.
+
+    Lock types cannot be combined in the filename: a name carries exactly one
+    type marker, in its first segment. Names like
+    'LOCK.until.and.condition.<scope>.txt' were previously read as a plain
+    until lock with the odd scope 'and.condition.<scope>' — the second marker
+    silently ignored. Whoever wrote such a name intending "both conditions"
+    got the WEAKER of the two locks, without any warning.
+
+    Ambiguous locks are fail-closed: is_expired() never releases them, so the
+    mistake can only lock too long, never too little. Combine a deadline with
+    a condition through the FIELDS instead ('not_before' plus
+    'release_condition'), not through the name.
+    """
+    parts = lock_name_parts(name)
+    return bool(parts and parts.get("ambiguous"))
+
+
 def is_until_lock(name: str) -> bool:
     """Return True for LOCK.until(.<scope>).txt — a deadline lock.
 
@@ -239,7 +285,8 @@ def is_protected_lock(name: str) -> bool:
     moment stated in its 'not_before' field — but its file still survives,
     because the human decision and the evidence obligation in
     'release_condition' outlive the deadline. See is_expired."""
-    return is_user_lock(name) or is_condition_lock(name) or is_until_lock(name)
+    return (is_user_lock(name) or is_condition_lock(name)
+            or is_until_lock(name) or is_ambiguous_lock(name))
 
 
 def locked_operations(lock_path: Path) -> list[str]:
@@ -353,9 +400,15 @@ def is_expired(lock_path: Path, now: datetime | None = None) -> bool:
     previously a nominally expired user lock could drop out of active_locks()
     even though the spec defines it as still valid.)
 
+    Ambiguous names (see is_ambiguous_lock) never expire either: a name that
+    reads as if two lock types were combined must not be resolved to the
+    weaker of its readings.
+
     All other locks expire after the relative 'expires_after' duration
     (default 24h) counted from 'created'."""
     now = now or datetime.now()
+    if is_ambiguous_lock(lock_path.name):
+        return False
     if is_until_lock(lock_path.name):
         moment = lock_not_before(lock_path)
         if moment is None:
