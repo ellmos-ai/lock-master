@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0]
+
+### Added
+
+- **New lock type: until locks (`LOCK.until(.<scope>).txt`)** — they hold until an
+  ABSOLUTE moment stated in the mandatory `not_before` field, instead of for a
+  relative duration or until a free-text condition. Motivating case: competition
+  judging holds, where the release moment is a calendar date weeks away that
+  nobody wants to write as `expires_after: 900h`.
+  - `not_before` accepts ISO with or without a UTC offset
+    (`2026-10-08T12:00-07:00`); offset-aware values are converted to local time,
+    values without an offset are read as local time.
+  - **Fail-closed:** a missing or unparsable `not_before` means the lock never
+    expires — a typo can only lock too long, never release too early.
+  - **First type to separate expiry from protection.** It *does* expire by time,
+    so a guard stops watching that project by itself; the file is *still*
+    protected from prune and bulk-unlock, so the human decision and the evidence
+    obligation in `release_condition` outlive the deadline.
+  - New helpers `lock_utils.is_until_lock()` and `lock_utils.lock_not_before()`.
+    `lock_scan.py` reports the remaining time plus the moment
+    (`35d 4h (until 2026-10-08T21:00)`) and flags a missing `not_before`.
+  - 12 tests in `tests/test_until_lock_system.py` covering recognition, expiry at
+    the moment, both fail-closed paths, timezone conversion, protection from
+    prune after expiry, and a regression guard for the other lock types.
+
+
 ## [Unreleased]
 
 - Fixed the watcher CLI to reuse the daemon's UTF-8 stdio hardening. On Windows,

@@ -149,6 +149,17 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
             elif lock_utils.is_condition_lock(name):
                 cond = data.get("release_condition", "?")
                 remaining = f"until condition met: {cond}"
+            elif lock_utils.is_until_lock(name):
+                moment = lock_utils.lock_not_before(lock_path)
+                if moment is None:
+                    remaining = ("MISSING not_before -> holds indefinitely "
+                                 "(fail-closed)")
+                elif now > moment:
+                    remaining = (f"deadline passed {moment.isoformat(timespec='minutes')}"
+                                 " - guard may stop; file stays for the user")
+                else:
+                    remaining = (f"{_format_remaining(moment - now)} "
+                                 f"(until {moment.isoformat(timespec='minutes')})")
             else:
                 remaining = _format_remaining((created + expires) - now)
             out.append({
@@ -161,6 +172,7 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
                 "expires_after": str(expires),
                 "operations": data.get("operations", ""),
                 "release_condition": data.get("release_condition", ""),
+                "not_before": data.get("not_before", ""),
                 "remaining": remaining,
             })
     out.sort(key=lambda r: r["path"])

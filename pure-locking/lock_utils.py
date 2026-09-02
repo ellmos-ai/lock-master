@@ -52,8 +52,9 @@ def lock_name_parts(name: str) -> dict[str, str | None | bool] | None:
     """Split a lock filename into type, scope and host.
 
     The file location determines the project/room. Scope only means the
-    intra-project component; the markers 'team'/'community'/'user'/'condition'
-    and the host segment are not part of the scope.
+    intra-project component; the markers
+    'team'/'community'/'user'/'condition'/'until' and the host segment are
+    not part of the scope.
 
     Returns None if the name is not a lock filename at all.
     """
@@ -78,7 +79,7 @@ def lock_name_parts(name: str) -> dict[str, str | None | bool] | None:
         scope = ".".join(scope_segments) if scope_segments else "project"
         return {"lock_type": "team", "scope": scope, "host": host,
                 "is_legacy": False}
-    if marker in {"user", "condition"}:
+    if marker in {"user", "condition", "until"}:
         scope_segments = segments[1:]
         scope = ".".join(scope_segments) if scope_segments else "project"
         return {"lock_type": marker, "scope": scope, "host": None,
@@ -90,9 +91,9 @@ def lock_name_parts(name: str) -> dict[str, str | None | bool] | None:
 def lock_type_from_name(name: str) -> str:
     """Determine the lock type from the filename.
 
-    'user' for LOCK.user.*, 'condition' for LOCK.condition.*, 'team' for
-    LOCK.team.* and LOCK.community.* (deprecated), 'legacy' for
-    TEST.txt/TESTS.txt, 'exclusive' for all other LOCK*.txt."""
+    'user' for LOCK.user.*, 'condition' for LOCK.condition.*, 'until' for
+    LOCK.until.*, 'team' for LOCK.team.* and LOCK.community.* (deprecated),
+    'legacy' for TEST.txt/TESTS.txt, 'exclusive' for all other LOCK*.txt."""
     parts = lock_name_parts(name)
     if parts is None:
         return "exclusive"
@@ -172,13 +173,73 @@ def is_condition_lock(name: str) -> bool:
     return m.group(1).split(".")[0].lower() == "condition"
 
 
+def is_until_lock(name: str) -> bool:
+    """Return True for LOCK.until(.<scope>).txt — a deadline lock.
+
+    An until lock holds until an ABSOLUTE point in time that the file states
+    in its mandatory 'not_before' field, rather than for a relative duration
+    ('expires_after', default 24h) or until a free-text condition is met.
+
+    Motivating case: competition judging holds. A submission must stay frozen
+    until the winners are announced — a fixed calendar moment weeks away, not
+    a duration anyone wants to express as '900h'. Before this type existed the
+    need was improvised twice with ad-hoc fields ('LOCK_FALLS_NOT_BEFORE',
+    'REQUIRED_EVENT') that no tool ever evaluated.
+
+    Two properties that no other type combines:
+      * it DOES expire by time — but at an absolute moment, so a guard stops
+        watching that project by itself once the moment has passed;
+      * it is still protected from automatic deletion, so the file survives
+        for the human decision and the evidence obligation recorded in
+        'release_condition'.
+    """
+    m = LOCK_RE.match(name)
+    if not m or not m.group(1):
+        return False
+    return m.group(1).split(".")[0].lower() == "until"
+
+
+def lock_not_before(lock_path: Path) -> datetime | None:
+    """Absolute release moment from the 'not_before' field of an until lock.
+
+    Accepts an ISO timestamp with or without a UTC offset, e.g.
+    '2026-10-08T12:00-07:00' or '2026-10-08 12:00'. An offset-aware value is
+    converted to local naive time so it can be compared with datetime.now().
+    A value without an offset is read as local time.
+
+    Returns None when the field is missing or unparsable — callers MUST treat
+    that as 'never expires' (fail-closed), never as 'expired'.
+    """
+    raw = parse_lock_file(lock_path).get("not_before")
+    if not raw:
+        return None
+    candidate = raw.strip()
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        parsed = _parse_created(candidate)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
 def is_protected_lock(name: str) -> bool:
     """True if the lock is protected from automatic removal.
 
-    Protected are user locks (removed only by the user) and condition locks
-    (released by condition, not by time). Protected locks are never deleted
-    by prune or bulk-unlock actions and never expire by time (see is_expired)."""
-    return is_user_lock(name) or is_condition_lock(name)
+    Protected are user locks (removed only by the user), condition locks
+    (released by condition, not by time) and until locks (released by an
+    absolute moment). Protected locks are never deleted by prune or
+    bulk-unlock actions.
+
+    NOTE: protection from deletion and expiry by time are two different
+    things, and until locks are the first type to separate them. A user or
+    condition lock never expires by time; an until lock DOES expire, at the
+    moment stated in its 'not_before' field — but its file still survives,
+    because the human decision and the evidence obligation in
+    'release_condition' outlive the deadline. See is_expired."""
+    return is_user_lock(name) or is_condition_lock(name) or is_until_lock(name)
 
 
 def locked_operations(lock_path: Path) -> list[str]:
@@ -280,15 +341,28 @@ def lock_created_and_expiry(lock_path: Path) -> tuple[datetime, timedelta, str]:
 
 
 def is_expired(lock_path: Path, now: datetime | None = None) -> bool:
-    """Time-based expiry. Protected locks (user locks, condition locks) NEVER
-    expire by time: user locks hold until the user removes them, condition
-    locks hold until their release_condition is fulfilled and the lock is
-    removed. (Fix in v1.4.0: previously a nominally expired user lock could
-    drop out of active_locks() even though the spec defines it as still
-    valid.)"""
+    """Time-based expiry.
+
+    Until locks expire at the ABSOLUTE moment in their 'not_before' field.
+    A missing or unparsable value is fail-closed: the lock never expires, so
+    a typo can only lock too long, never release too early.
+
+    User locks and condition locks NEVER expire by time: user locks hold
+    until the user removes them, condition locks hold until their
+    release_condition is fulfilled and the lock is removed. (Fix in v1.4.0:
+    previously a nominally expired user lock could drop out of active_locks()
+    even though the spec defines it as still valid.)
+
+    All other locks expire after the relative 'expires_after' duration
+    (default 24h) counted from 'created'."""
+    now = now or datetime.now()
+    if is_until_lock(lock_path.name):
+        moment = lock_not_before(lock_path)
+        if moment is None:
+            return False
+        return now > moment
     if is_protected_lock(lock_path.name):
         return False
-    now = now or datetime.now()
     created, expires, _ = lock_created_and_expiry(lock_path)
     return now > created + expires
 

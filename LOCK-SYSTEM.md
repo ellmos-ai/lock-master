@@ -251,6 +251,59 @@ unrestricted.
   project register when removing. If unsure whether the condition is met:
   do NOT remove; ask the user.
 
+### Until Lock (deadline-based -- released at an absolute moment)
+
+Until Locks (since v1.6.0) hold **until a fixed point in time** that the file
+states, instead of for a relative duration (`expires_after`, default 24h) or
+until a free-text condition is met. Use case: a competition judging hold, where
+the release moment is a calendar date weeks away that nobody wants to express
+as `expires_after: 900h`.
+
+- `LOCK.until.txt` -- deadline lock at project level.
+- `LOCK.until.<scope>.txt` -- deadline lock for a component, e.g.
+  `LOCK.until.winners-announcement.txt`.
+- The `until` marker segment is reserved (like `user`/`team`/`condition`).
+  Detection: `lock_utils.is_until_lock()`; the moment itself:
+  `lock_utils.lock_not_before()`.
+- **Required field `not_before:`** -- an absolute ISO timestamp, with or without
+  a UTC offset: `2026-10-08T12:00-07:00` or `2026-10-08 12:00`. An
+  offset-aware value is converted to local time; a value without an offset is
+  read as local time. Always write the offset when the deadline is announced in
+  a foreign timezone -- that is exactly where the mistakes happen.
+- **Fail-closed:** a missing or unparsable `not_before` means the lock **never
+  expires**. A typo can only lock too long, never release too early.
+- **`expires_after` has no effect.** The absolute moment replaces it.
+
+**This type is the first to separate two things every other type conflates:**
+
+| | expires by time | protected from deletion |
+|---|---|---|
+| exclusive | yes, after `expires_after` | no |
+| user | never | yes |
+| condition | never | yes |
+| **until** | **yes, at `not_before`** | **yes** |
+
+A guard therefore stops watching that project **by itself** once the moment has
+passed -- `is_expired()` turns true and `active_locks()` drops it. The **file
+still survives**: `prune_stale_locks.py` and bulk-unlock never touch it, because
+the human decision and the evidence obligation outlive the deadline.
+
+- **Optional field `release_condition:`** -- what must additionally be proven
+  before the lock is removed (e.g. "winners actually announced on <source>").
+  The deadline ends the *watching*; it does not by itself prove the event
+  happened. If the event is postponed, the lock stays fail-closed and the
+  `not_before` value is corrected.
+- **Field `operations:`** works as for condition locks: it names the LOCKED
+  operations; everything else stays explicitly allowed.
+- **Release:** removing the file follows what the lock itself says. A deadline
+  lock guarding a user decision states so in `release_condition` and is removed
+  by the user; `lock_scan.py` shows "deadline passed <moment> - guard may stop;
+  file stays for the user".
+- `lock_scan.py` shows the remaining time plus the moment, e.g.
+  `35d 4h (until 2026-10-08T21:00)`.
+
+---
+
 ---
 
 ## Permission System: LOCK.permissions + Immediate Lockdown

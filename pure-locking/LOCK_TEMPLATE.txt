@@ -34,6 +34,11 @@ owner: [Name / Agent / Automation]
 created: YYYY-MM-DDTHH:MM
 host: [Maschinenname, z. B. LAPTOP | SERVER — oder leer lassen]
 expires_after: 24h
+# Nur fuer LOCK.until.*: absoluter Freigabezeitpunkt statt relativer Dauer.
+# ISO, mit oder ohne UTC-Offset. Offset IMMER angeben, wenn die Frist in einer
+# fremden Zeitzone verkuendet wurde - genau dort passieren die Fehler.
+# Fehlt der Wert oder ist er unparsbar, laeuft der Lock NIE ab (fail-closed).
+#   not_before: 2026-10-08T12:00-07:00
 release_condition: [Bedingung oder leer lassen]
 mode: hard
 purpose: [Warum ist der Bereich gesperrt? Was wird gerade gemacht?]
