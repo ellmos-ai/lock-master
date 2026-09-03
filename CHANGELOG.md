@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.2]
+
+### Added
+
+- **New field `release_mode: all | any` for until locks that also set
+  `release_condition`** (T-20260903-476807738). Deadline and condition are
+  combined through fields, not through name grammar — the previously
+  considered variants (`LOCK.until.and.condition.*`,
+  `LOCK.until.or.condition.*`, ...) were explicitly rejected. `all` (default,
+  backward-compatible) requires both; since the condition is free text the
+  tool cannot verify it, so `is_expired()` does not auto-release on the
+  deadline alone (fail-closed) — the file stays for a human/agent to check,
+  same as a condition lock. `any` lets the deadline alone release it, leaving
+  the condition side to a human/agent. Invalid values fall back to `all`.
+  Locks without a `release_condition` field are unaffected. 7 tests added to
+  `tests/test_until_lock_system.py`; suite 175 -> 182 passed.
+
 ## [1.6.1]
 
 ### Fixed

@@ -109,6 +109,7 @@ are ignored.
 | `host`             | optional | Machine/hostname holding the lock — which system locked it (cross-system). |
 | `expires_after`    | optional | e.g. `24h` / `48h` / `90m`. Default = `24h`. |
 | `release_condition`| optional | Free text: what must happen for the lock to be released. |
+| `release_mode`     | optional | Only meaningful on an until lock that ALSO sets `release_condition`: `all` (default, backward-compatible) \| `any`. See below. |
 | `mode`             | optional | `hard` (no changes, default) \| `soft` (reads/hints ok). |
 | `purpose`          | optional | Free text: why locked / what is running. |
 | `scope`            | optional | Informational only; the filename is authoritative. |
@@ -279,6 +280,23 @@ LOCK.until.winners-announcement.txt
 
 The deadline stops a guard from watching; the condition states what must be
 proven before the file is removed. Detection: `lock_utils.is_ambiguous_lock()`.
+
+**Combining AND/OR through `release_mode` (T-20260903-476807738):** the
+previously considered name variants (`LOCK.until.and.condition.*`,
+`LOCK.until.or.condition.*`, ...) were explicitly rejected -- combine through
+the fields instead. Once an until lock ALSO sets `release_condition`,
+`release_mode` decides:
+
+- `all` (default, backward-compatible) -- deadline AND condition must both be
+  met. Since `release_condition` is free text the tool cannot verify it, so
+  `is_expired()` does NOT auto-release once the deadline passes (fail-closed);
+  the file stays for a human/agent to check, exactly like a condition lock.
+- `any` -- whichever comes first releases it. The deadline alone is enough for
+  the tool; the condition side is then left to a human/agent to judge (state
+  this clearly, or the lock reads as stronger than it is).
+- An invalid value falls back to `all` (never release too early on a typo).
+- Without a `release_condition` field at all, `release_mode` has no effect --
+  plain date check, as before.
 
 ---
 

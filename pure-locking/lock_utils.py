@@ -24,6 +24,17 @@ File format (one setting per line, stdlib parser, no extra dependency):
     created           (required)  ISO YYYY-MM-DDTHH:MM (base for expiry).
     expires_after     (optional)  e.g. "24h" / "48h" / "90m". Default = 24h.
     release_condition (optional)  Free-text release condition.
+    release_mode      (optional, only meaningful on an until lock that ALSO
+                                  sets release_condition)  "all" (default,
+                                  backward-compatible) | "any". "all" =
+                                  deadline AND condition must both be met --
+                                  since the condition is free text the tool
+                                  cannot check it, so it does not auto-release
+                                  on the deadline alone (fail-closed). "any" =
+                                  the deadline alone releases it; the
+                                  condition side is then left to a human/agent.
+                                  An invalid value falls back to "all".
+                                  T-20260903-476807738.
     mode              (optional)  "hard" (default) | "soft".
     purpose           (optional)  Free-text description.
     scope             (optional)  Informational only; AUTHORITATIVE is the filename.
@@ -392,7 +403,10 @@ def is_expired(lock_path: Path, now: datetime | None = None) -> bool:
 
     Until locks expire at the ABSOLUTE moment in their 'not_before' field.
     A missing or unparsable value is fail-closed: the lock never expires, so
-    a typo can only lock too long, never release too early.
+    a typo can only lock too long, never release too early. If the file ALSO
+    sets 'release_condition', 'release_mode' governs whether the deadline
+    alone is enough ('any') or both must hold ('all', default -- see the
+    field docs above and T-20260903-476807738).
 
     User locks and condition locks NEVER expire by time: user locks hold
     until the user removes them, condition locks hold until their
@@ -413,7 +427,18 @@ def is_expired(lock_path: Path, now: datetime | None = None) -> bool:
         moment = lock_not_before(lock_path)
         if moment is None:
             return False
-        return now > moment
+        if now <= moment:
+            return False
+        # Deadline reached. Without an additional release_condition field this
+        # stays a pure date check (backward-compatible). If a condition is ALSO
+        # set, release_mode decides (T-20260903-476807738): 'any' -> deadline
+        # alone is enough; 'all'/default/invalid -> the tool cannot verify the
+        # free-text condition, so it does not auto-release (fail-closed; the
+        # condition side stays a human/agent decision).
+        data = parse_lock_file(lock_path)
+        if not data.get("release_condition"):
+            return True
+        return (data.get("release_mode") or "all").strip().lower() == "any"
     if is_protected_lock(lock_path.name):
         return False
     created, expires, _ = lock_created_and_expiry(lock_path)

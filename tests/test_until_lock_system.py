@@ -150,3 +150,58 @@ def test_other_types_keep_their_behaviour(tmp_path: Path):
     assert lock_utils.is_expired(exclusive) and lock_utils.is_prunable(exclusive)
     assert not lock_utils.is_expired(user)
     assert not lock_utils.is_expired(condition)
+
+
+# ---------------------------------------------------------- release_mode -----
+# T-20260903-476807738: combine a deadline with a free-text condition through
+# the FIELDS, not through a name grammar (LOCK.until.and.condition.* etc. were
+# explicitly rejected).
+
+def test_deadline_alone_still_releases_without_release_condition(tmp_path: Path):
+    """Backward compatibility: a lock with ONLY not_before is unaffected --
+    release_mode only matters once release_condition is ALSO present."""
+    lock = _write(tmp_path, "LOCK.until.plain.txt", owner="test",
+                  not_before=_stamp(timedelta(hours=-1)))
+    assert lock_utils.is_expired(lock)
+
+
+def test_default_all_does_not_auto_release_past_deadline_with_condition(tmp_path: Path):
+    lock = _write(tmp_path, "LOCK.until.gated.txt", owner="test",
+                  not_before=_stamp(timedelta(hours=-1)),
+                  release_condition="review notes incorporated")
+    assert not lock_utils.is_expired(lock)
+
+
+def test_explicit_all_behaves_like_default(tmp_path: Path):
+    lock = _write(tmp_path, "LOCK.until.gated2.txt", owner="test",
+                  not_before=_stamp(timedelta(hours=-1)),
+                  release_condition="x", release_mode="all")
+    assert not lock_utils.is_expired(lock)
+
+
+def test_any_releases_on_deadline_alone(tmp_path: Path):
+    lock = _write(tmp_path, "LOCK.until.any.txt", owner="test",
+                  not_before=_stamp(timedelta(hours=-1)),
+                  release_condition="x", release_mode="any")
+    assert lock_utils.is_expired(lock)
+
+
+def test_any_still_holds_before_the_deadline(tmp_path: Path):
+    lock = _write(tmp_path, "LOCK.until.anyfuture.txt", owner="test",
+                  not_before=_stamp(timedelta(days=1)),
+                  release_condition="x", release_mode="any")
+    assert not lock_utils.is_expired(lock)
+
+
+def test_invalid_release_mode_falls_back_to_all(tmp_path: Path):
+    lock = _write(tmp_path, "LOCK.until.badmode.txt", owner="test",
+                  not_before=_stamp(timedelta(hours=-1)),
+                  release_condition="x", release_mode="whenever")
+    assert not lock_utils.is_expired(lock)
+
+
+def test_release_mode_is_case_insensitive(tmp_path: Path):
+    lock = _write(tmp_path, "LOCK.until.anycase.txt", owner="test",
+                  not_before=_stamp(timedelta(hours=-1)),
+                  release_condition="x", release_mode="ANY")
+    assert lock_utils.is_expired(lock)
