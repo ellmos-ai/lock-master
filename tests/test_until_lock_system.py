@@ -108,14 +108,58 @@ def test_unparsable_not_before_never_expires(tmp_path: Path):
 
 # ------------------------------------------------------------------ timezone --
 
+def _expected_local_naive(iso_with_offset: str) -> datetime:
+    """Independently compute what an offset-aware ISO timestamp converts to
+    in THIS system's local time, for THIS specific instant (DST-correct --
+    does not reuse "now"'s offset, which can differ from the tested date's
+    own offset when the two straddle a DST transition).
+
+    Uses the same stdlib primitive lock_utils.lock_not_before() itself uses
+    (fromisoformat -> astimezone() -> strip tzinfo), so this is a contract
+    test, not an isolation test: it catches "conversion forgotten",
+    "converted to UTC instead of local", or "offset sign flipped" --
+    exactly the class of regression a hardcoded expected hour cannot
+    survive a timezone change for -- not a broken astimezone() itself.
+    A fixed hardcoded expected hour (the previous "21") only holds on a
+    system whose local timezone is CEST; GitHub-hosted CI runners default
+    to UTC, where the same conversion yields a different hour
+    (T-20260906-803989378). No production code changes: lock_not_before()
+    converting offset-aware input to naive LOCAL time is the documented,
+    intentional contract (it must compare with datetime.now()), not a bug."""
+    aware = datetime.fromisoformat(iso_with_offset)
+    return aware.astimezone().replace(tzinfo=None)
+
+
 def test_utc_offset_is_converted_to_local_time(tmp_path: Path):
-    """The real-world case: 2026-10-08 12:00 PDT is 21:00 in CEST."""
+    """An offset-aware not_before value is converted to local naive time --
+    verified against an independently-computed expectation (see
+    _expected_local_naive), not a hardcoded hour tied to one timezone."""
+    not_before = "2026-10-08T12:00-07:00"
     lock = _write(tmp_path, "LOCK.until.tz.txt", owner="test",
-                  not_before="2026-10-08T12:00-07:00")
+                  not_before=not_before)
     moment = lock_utils.lock_not_before(lock)
     assert moment is not None
     assert moment.tzinfo is None, "must be naive so it compares with now()"
-    assert (moment.day, moment.hour) == (8, 21)
+    assert moment == _expected_local_naive(not_before)
+
+
+def test_utc_offset_conversion_is_correct_across_a_dst_boundary(tmp_path: Path):
+    """Same conversion for a date in the other half of the year
+    (2026-12-08) than the case above (2026-10-08). On a host that observes
+    a DST transition between the two (e.g. Europe/Berlin: CEST -> CET on
+    2026-10-25), this additionally exercises a DIFFERENT UTC offset than
+    the first test and would catch a fix that hardcodes a single fixed
+    offset instead of asking the platform per-date. On a non-DST host (or
+    UTC) both dates share the same offset and this degenerates to a
+    duplicate of the first assertion -- still correct, just not
+    discriminating there."""
+    not_before = "2026-12-08T12:00-07:00"
+    lock = _write(tmp_path, "LOCK.until.tz-winter.txt", owner="test",
+                  not_before=not_before)
+    moment = lock_utils.lock_not_before(lock)
+    assert moment is not None
+    assert moment.tzinfo is None
+    assert moment == _expected_local_naive(not_before)
 
 
 def test_value_without_offset_is_read_as_local_time(tmp_path: Path):

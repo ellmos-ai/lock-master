@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.3]
+
+### Added
+
+- **`lock_scan.py --check-dir`, ported to this canonical module** (it had
+  only ever existed in a deployed copy outside this repo, confirmed via
+  `git log -S check_dir --all` -> zero hits before this release). A fast,
+  worktree-aware lock check for exactly one directory: if the directory is
+  a linked git worktree, its main clone is checked too
+  (T-20260903-592302105). Same behaviour/exit codes as the deployed copy
+  it was ported from (0 = free, 1 = a LOCK file applies).
+- **Git hook guards for `--check-dir`** (T-20260906-910508487).
+  `lock_utils.git_hook_guards()` resolves the effective hooks directory via
+  `git rev-parse --git-path hooks` (honors `core.hooksPath` and
+  per-worktree config exactly as git itself would), lists any
+  `pre-push`/`pre-commit`/`pre-receive` hook present, and flags the known
+  Build-Week-Judging embargo hook signature. If `core.hooksPath` points at
+  a directory that does not exist on the current host, that is reported as
+  its own structural note instead of looking like "no hooks configured" --
+  found in practice on an OneDrive-shared `.git` whose hooksPath was
+  hardcoded to a different host's user profile.
+  New `--strict` flag: without it, guard hooks are reported as a warning
+  and the `--check-dir` exit code is unchanged (0/1); with it, "free of
+  LOCK files but a guard hook present" becomes its own exit code (2).
+  LOCK-SYSTEM.md gained a "third, invisible tier" section.
+  18 tests added in `tests/test_check_dir.py`.
+
+### Fixed
+
+- **`test_utc_offset_is_converted_to_local_time` no longer assumes the test
+  runner's local timezone is CEST** (T-20260906-803989378). The test
+  asserted a hardcoded expected local hour for an offset-aware
+  `not_before` value; that only held on a system whose local timezone is
+  CEST (UTC+2) and failed on every GitHub-hosted CI runner (ubuntu/macos/
+  windows all default to UTC there) -- this test had been failing on 100%
+  of CI runs (0/12 matrix jobs green) since it was introduced, unnoticed
+  because the author's own machine happened to be in CEST. Root cause was
+  in the test, not in `lock_utils.lock_not_before()`: converting an
+  offset-aware timestamp to naive LOCAL time is the documented, intentional
+  contract (so it can be compared with `datetime.now()`), not a bug. Fixed
+  by computing the expected value independently per-run instead of
+  hardcoding it, so the test is correct under any local timezone; a second
+  test added for a date on the other side of the European DST boundary.
+  Also added direct coverage for `lock_scan._format_remaining()` (the
+  "Restzeit" display string), which had no dedicated test before.
+
 ## [1.6.2]
 
 ### Added
