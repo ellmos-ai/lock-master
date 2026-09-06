@@ -259,6 +259,66 @@ def write_caches(locks: list[dict], scanned_at: datetime, config: dict) -> list[
     return results
 
 
+def _check_dir(target: Path, as_json: bool, strict: bool) -> int:
+    """--check-dir: worktree-aware lock check for exactly ONE directory (no
+    full scan). See lock_utils.active_locks_for_path().
+
+    Also reports active git guard hooks (pre-push/pre-commit/pre-receive)
+    for `target` -- a directory can have no LOCK file and still be blocked
+    at push time by a hook this check previously never saw
+    (T-20260906-910508487). "Free" below means "no LOCK file", not
+    "pushable". Hooks are reported as a warning and do NOT change the
+    Exit 0/1 semantics unless --strict is given (then: 2 = free of LOCK
+    files but a guard hook is present)."""
+    target = target.resolve()
+    now = datetime.now()
+    hits = lock_utils.active_locks_for_path(target, now)
+    rows = [
+        {
+            "path": str(source_dir / name),
+            "scope": scope,
+            "legacy": is_legacy,
+            "from_main_repo_of_worktree": source_dir != target,
+        }
+        for name, scope, is_legacy, source_dir in hits
+    ]
+    guards = lock_utils.git_hook_guards(target)
+
+    if as_json:
+        print(json.dumps(
+            {"checked": str(target), "locks": rows, "hook_guards": guards},
+            ensure_ascii=False, indent=2,
+        ))
+        if rows:
+            return 1
+        return 2 if (strict and guards) else 0
+
+    if not rows:
+        print(f"lock_scan --check-dir: {target} is free (incl. main clone if worktree).")
+    else:
+        print(f"lock_scan --check-dir: {len(rows)} active lock(s) affect {target}:")
+        for r in rows:
+            tag = "  (from worktree's main clone)" if r["from_main_repo_of_worktree"] else ""
+            legacy = " [LEGACY]" if r["legacy"] else ""
+            print(f"  {r['path']}{legacy}  scope={r['scope']}{tag}")
+
+    for g in guards:
+        if g["hook"] is None:
+            print(f"  GUARD-NOTE: {g['hint']} ({g['path']})")
+            continue
+        tag = "  [EMBARGO SIGNATURE]" if g["embargo"] else ""
+        print(f"  GUARD: {g['hook']} ({g['hint']}){tag}")
+    if guards:
+        print(
+            "  NOTE: 'free' above means no LOCK file -- it does NOT mean "
+            "pushable. The guard(s) above can still block the operation."
+        )
+
+    if rows:
+        return 1
+    return 2 if (strict and guards) else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="List all active project locks (LOCK*.txt) across all configured roots (read-only)."
@@ -274,7 +334,29 @@ def main() -> int:
         default=str(DEFAULT_ROOTS_FILE),
         help="Path to lock_roots.json.",
     )
+    parser.add_argument(
+        "--check-dir",
+        metavar="PATH",
+        help="Fast, WORKTREE-AWARE check for exactly this one directory "
+        "(stage-1 check before starting work) instead of a full scan of "
+        "all roots. If PATH is inside a git worktree, its main clone is "
+        "checked too (T-20260903-592302105). Also reports active git guard "
+        "hooks (pre-push/pre-commit/pre-receive) for PATH -- 'free' means "
+        "no LOCK file, not 'pushable' (T-20260906-910508487). "
+        "Exit 0 = free, 1 = locked, 2 = free but a guard hook is present "
+        "(only with --strict).",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="With --check-dir: exit 2 if no LOCK file but a guard hook is "
+        "present (default: guard hooks are reported but do not change the "
+        "exit code).",
+    )
     args = parser.parse_args()
+
+    if args.check_dir:
+        return _check_dir(Path(args.check_dir), args.json, args.strict)
 
     config = load_config(Path(args.roots_file))
     scanned_at = datetime.now()

@@ -43,6 +43,7 @@ File format (one setting per line, stdlib parser, no extra dependency):
 from __future__ import annotations
 
 import re
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -570,3 +571,170 @@ def compute_expires_at(lock_path: Path) -> str | None:
         return (created + expires).isoformat(timespec="seconds")
     except (OSError, ValueError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Worktree-aware single-directory check (T-20260903-592302105)
+# ---------------------------------------------------------------------------
+# A lock can live in the repo clone (C:\_Local_DEV\repos\<repo>\LOCK.*.txt)
+# while the actual work happens in a `git worktree` (C:\_Local_DEV\worktrees\
+# <name>) -- its own directory with no LOCK file of its own. Anyone who only
+# checks `LOCK*.txt` locally (stage 1, LOCK-SYSTEM.md) finds nothing and
+# wrongly considers the area free, even though the lock applies to the same
+# underlying work. `git rev-parse --git-common-dir` reliably leads from the
+# worktree to the shared .git and thus to the main clone.
+
+def git_common_dir(path: Path) -> Path | None:
+    """`git rev-parse --git-common-dir` for `path`, as an absolute path.
+
+    None if `path` is not a git working tree, git is missing, or the call
+    fails (fail-soft: only `path` itself is then checked -- a lock is never
+    overlooked the other way around)."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = Path(path) / common_dir
+    try:
+        return common_dir.resolve()
+    except OSError:
+        return common_dir
+
+
+def worktree_main_dir(path: Path) -> Path | None:
+    """Main-clone directory for a git worktree.
+
+    A linked worktree has no `.git` directory of its own, only a `.git`
+    file pointing at the shared `.git` in the main clone; that file's
+    parent directory is the main clone. Returns None if `path` is not a
+    git directory OR `path` already IS the main clone itself (then there
+    is nothing additional to check)."""
+    common = git_common_dir(path)
+    if common is None:
+        return None
+    main_dir = common.parent
+    try:
+        if main_dir.resolve() == Path(path).resolve():
+            return None
+    except OSError:
+        pass
+    return main_dir
+
+
+def active_locks_for_path(path: Path, now: datetime | None = None):
+    """Worktree-aware lock check for EXACTLY ONE directory -- the stage-1
+    check ("OBSERVE") before starting work at exactly this location.
+
+    Returns (name, scope, is_legacy, source_dir) for own locks in `path`
+    PLUS, if `path` is a linked git worktree, the locks of its main clone.
+    A caller that only checks `active_locks(path)` locally never sees a
+    worktree's main-clone locks -- that is the exact gap from
+    T-20260903-592302105.
+
+    Covers the reported case (one worktree, one main clone); nested
+    worktrees/submodules are not handled separately."""
+    path = Path(path)
+    out = [(name, scope, legacy, path) for name, scope, legacy in active_locks(path, now)]
+    main_dir = worktree_main_dir(path)
+    if main_dir is not None and main_dir.is_dir():
+        out.extend(
+            (name, scope, legacy, main_dir)
+            for name, scope, legacy in active_locks(main_dir, now)
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Git hook guards (T-20260906-910508487)
+# ---------------------------------------------------------------------------
+# lock_scan --check-dir only ever looked at LOCK*.txt files. A directory can
+# report "free" there and still be blocked at push time by a git hook the
+# lock system never sees -- found three times in the same OneDrive-shared
+# BACH .git instance (stale Build-Week-Judging pre-push embargo hooks left
+# behind after the 2026-08-26 lift: WORKSTATION-LG 2026-08-31, ASUS-GEI's
+# OneDrive mirror 2026-09-06). "Free" means "no LOCK file", not "pushable".
+
+KNOWN_GUARD_HOOKS = ("pre-push", "pre-commit", "pre-receive")
+
+# Case-insensitive substrings identifying the Build-Week-Judging embargo
+# hook lineage (archived at
+# .SYNC/_archive/2026-08-26-build-week-hold-released/pre-push-hooks/).
+EMBARGO_HOOK_SIGNATURES = (
+    "build week judging",
+    "buildweek-no-push",
+    "operator competition embargo",
+)
+
+
+def _first_hint_line(content: str) -> str:
+    """First non-shebang, non-empty line of a hook script, truncated -- used
+    as a short "what is this hook for" hint in --check-dir output."""
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#!"):
+            continue
+        return line[:160]
+    return "(empty)"
+
+
+def git_hook_guards(path: Path) -> list[dict]:
+    """Detect active git push/commit guard hooks for `path`.
+
+    Uses `git rev-parse --git-path hooks`, which resolves exactly the
+    directory git itself will use for hook execution -- including a
+    `core.hooksPath` override and per-worktree config extensions. This is
+    deliberately NOT a naive `git_common_dir(path) / "hooks"` join: if
+    `core.hooksPath` is configured but the target directory does not exist
+    on this host (found empirically: an OneDrive-shared .git/config whose
+    hooksPath was hardcoded to another host's user profile), git runs NO
+    hooks here at all -- reported below as its own structural entry
+    (hook=None) instead of silently returning an empty list that would look
+    identical to "no hooks configured".
+
+    Fail-soft: returns [] if `path` is not a git working tree, git is
+    missing, or the call fails -- a lock/guard check must never abort
+    because git itself is unavailable; it just cannot say anything about
+    hooks in that case."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+
+    hooks_dir = Path(result.stdout.strip())
+    if not hooks_dir.is_dir():
+        return [{
+            "hook": None,
+            "path": str(hooks_dir),
+            "hint": "core.hooksPath (or default hooks dir) does not exist on "
+                    "this host -- git runs no hooks here",
+            "embargo": False,
+        }]
+
+    guards: list[dict] = []
+    for name in KNOWN_GUARD_HOOKS:
+        hook_path = hooks_dir / name
+        if not hook_path.is_file():
+            continue
+        try:
+            content = hook_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            content = ""
+        guards.append({
+            "hook": name,
+            "path": str(hook_path),
+            "hint": _first_hint_line(content),
+            "embargo": any(sig in content.lower() for sig in EMBARGO_HOOK_SIGNATURES),
+        })
+    return guards
