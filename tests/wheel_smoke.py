@@ -70,7 +70,17 @@ def main(argv: list[str] | None = None) -> int:
             [str(cli), "--help"],
             check=True,
             cwd=temp,
-            env=clean_environment,
+            # This invokes the installed console-script .exe directly (not
+            # `python -X utf8 ...` like the two calls above), so Python's
+            # UTF-8 mode is not on by default here. Without it, a non-ASCII
+            # character in the (partly German) argparse help text -- e.g.
+            # "für" -- is written using the platform's default locale
+            # encoding, which is cp1252 on an English-locale Windows CI
+            # runner; the strict `encoding="utf-8"` decode below then fails
+            # on that byte (T-20260907-501809205). PYTHONUTF8=1 is the
+            # environment-variable equivalent of `-X utf8` (PEP 540) and
+            # forces the child's stdout to be UTF-8 regardless of locale.
+            env={**clean_environment, "PYTHONUTF8": "1"},
             text=True,
             encoding="utf-8",
             stdout=subprocess.PIPE,
