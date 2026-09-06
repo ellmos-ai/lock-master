@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import lock_utils
-from lock_scan import collect_locks, render_cache
+from lock_scan import _format_remaining, collect_locks, render_cache
 from prune_stale_locks import prune
 
 
@@ -214,3 +214,27 @@ class TestRenderCache:
     def test_render_empty_list(self):
         md = render_cache([], datetime.now(), "Empty")
         assert "no active locks" in md
+
+
+# ---------------------------------------------------------------------------
+# _format_remaining (lock_scan) -- T-20260906-803989378
+# ---------------------------------------------------------------------------
+# Pins the "Restzeit"/remaining-time display string. Not previously covered
+# by a direct test (TestExpiry pins is_expired()/expires_after decay itself;
+# nothing pinned the "23h59m"-style rendering used for that same value).
+
+class TestFormatRemaining:
+    def test_expired_is_negative(self):
+        assert _format_remaining(timedelta(seconds=-1)) == "expired"
+
+    def test_zero_remaining(self):
+        assert _format_remaining(timedelta(seconds=0)) == "0h00m"
+
+    def test_hours_and_minutes(self):
+        assert _format_remaining(timedelta(hours=23, minutes=59)) == "23h59m"
+
+    def test_minutes_are_zero_padded(self):
+        assert _format_remaining(timedelta(hours=1, minutes=5)) == "1h05m"
+
+    def test_more_than_24h(self):
+        assert _format_remaining(timedelta(hours=25)) == "25h00m"
