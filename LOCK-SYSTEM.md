@@ -406,6 +406,35 @@ Project-specific rules take local precedence (more specific beats more general):
 a project may declare stricter requirements (e.g. mandatory creation) or use
 a custom scope name.
 
+### A third, invisible tier: git hook guards (T-20260906-910508487)
+
+`LOCK*.txt` is not the only thing that can block an operation. A git working
+tree can carry its own `pre-push`/`pre-commit`/`pre-receive` hook that
+refuses an operation outright -- independent of, and invisible to, the LOCK
+system above. This was found in practice: a stale `pre-push` hook from a
+lifted Build-Week-Judging embargo kept blocking pushes in an OneDrive-shared
+`.git` instance on two separate hosts and two separate dates, while
+`lock_scan.py --check-dir` reported the same directory as "free" both times
+-- "free" only ever meant "no LOCK file", never "pushable".
+
+`lock_scan.py --check-dir` (see Scripts below) therefore also reports any
+`pre-push`/`pre-commit`/`pre-receive` hook present for the checked
+directory -- resolved via `git rev-parse --git-path hooks`, so a
+`core.hooksPath` override or a per-worktree config extension is honored
+exactly as git itself would honor it. A hook whose content matches a known
+Build-Week-Judging embargo signature is flagged explicitly
+(`[EMBARGO SIGNATURE]` / `"embargo": true` in JSON). If `core.hooksPath` is
+configured but the target directory does not exist on the current host, git
+silently runs no hooks at all there -- this structural case is reported too
+(`GUARD-NOTE:` / `"hook": null`), instead of looking identical to "no hooks
+configured".
+
+**This does not change the Exit 0/1 contract.** A guard hook is reported as
+a warning alongside the LOCK check, never as a reason to fail the check --
+callers relying on `--check-dir`'s exit code to mean "no LOCK file" keep
+working unchanged. Pass `--strict` to additionally treat "free of LOCK files
+but a guard hook present" as its own outcome (exit 2).
+
 ---
 
 ## Lifecycle: RESPECT -> CLAIM -> RELEASE
@@ -519,6 +548,17 @@ On Windows, always set `PYTHONIOENCODING=utf-8` (cp1252 default encoding).
 python lock_scan.py
 python lock_scan.py --json
 ```
+
+**Check exactly one directory before starting work (fast, worktree-aware,
+also reports git hook guards -- see "A third, invisible tier" above):**
+```
+python lock_scan.py --check-dir /path/to/project
+python lock_scan.py --check-dir /path/to/project --json
+python lock_scan.py --check-dir /path/to/project --strict
+```
+Exit 0 = free, 1 = a LOCK file applies, 2 = free of LOCK files but a guard
+hook is present (only with `--strict`; without it, guard hooks are reported
+but never change the exit code).
 
 **Remove expired locks:**
 ```
