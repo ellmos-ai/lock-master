@@ -222,7 +222,20 @@ def test_heartbeat_advances_while_scan_is_in_progress(monkeypatch, tmp_path: Pat
         daemon=True,
     )
     thread.start()
-    time.sleep(0.15)
+
+    # Poll for the actual condition instead of a fixed sleep
+    # (T-20260907-955138260). A flat time.sleep(0.15) assumed the 20ms
+    # heartbeat interval always produces ~7 ticks in that window -- true on
+    # an unloaded machine, but on a slower/contended CI runner (observed:
+    # macos-latest, Python 3.10-3.12) fewer ticks land in a fixed 150ms
+    # wall-clock window even though the loop itself is working correctly,
+    # just slower. Waiting for the real condition (with a generous ceiling
+    # so a genuine regression still fails in bounded time, not a hang)
+    # removes the timing assumption instead of just widening it.
+    deadline = time.monotonic() + 5.0
+    while counter["n"] <= 3 and time.monotonic() < deadline:
+        time.sleep(0.01)
+
     stop_event.set()
     thread.join(timeout=2)
 
