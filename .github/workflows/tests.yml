@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     strategy:
@@ -29,6 +33,8 @@ jobs:
           python -m pip install build pytest ruff
       - name: Lint with ruff
         run: ruff check .
+      - name: Validate bytecode compilation
+        run: python -m compileall -q .
       - name: Run test suite
         run: python -X utf8 -m pytest -q
       - name: Build wheel

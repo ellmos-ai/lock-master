@@ -11,8 +11,8 @@
 
 | Version | Supported | Notes |
 |---------|-----------|-------|
-| `1.5.x` | :white_check_mark: | Current active release branch |
-| `< 1.5` | :x: | Legacy release -- please upgrade |
+| `1.6.x` | :white_check_mark: | Current active release branch |
+| `< 1.6` | :x: | Legacy release -- please upgrade |
 
 ### Reporting a Vulnerability
 
@@ -22,6 +22,7 @@ If you discover a potential security vulnerability in `lock-master`, please repo
 2. **Preferred Method**: Use GitHub Private Vulnerability Reporting via  
    [Security Advisories](https://github.com/ellmos-ai/lock-master/security/advisories) → *New draft security advisory*.
 3. **Alternative Method**: Contact the maintainers directly via email:
+   - `security@open-bricks.org` (Roof organization security contact)
    - `security@ellmos.ai`
    - `support@lukasgeiger.com`
    - `lukas@open-bricks.org`
@@ -36,9 +37,11 @@ Include detailed reproduction steps, environment details (OS, Python version), a
 - **Atomic Locking & File Collision Resilience**: Exclusive lock creation relies on atomic filesystem semantics (`open("x")`) where supported, preventing race conditions between concurrent agents.
 - **Safe Stale Lock Pruning**: The `prune_stale_locks.py` tool includes `--dry-run` inspection mode so maintainers and automated supervisors can preview deletions before unlinking files.
 
-### Response Time
+### Response Time & SLA Commitments
 
-Critical security vulnerabilities are acknowledged within 48 hours, with patches prepared and released promptly.
+- **Initial Response**: Within 48 hours for acknowledgment of submitted vulnerability reports.
+- **Technical Triage**: Within 5 business days with vulnerability confirmation and severity rating.
+- **Remediation & Patching**: Prompt security advisory and patch release on all supported versions (`1.6.x`).
 
 ---
 
@@ -49,8 +52,8 @@ Critical security vulnerabilities are acknowledged within 48 hours, with patches
 
 | Version | Unterstützt | Anmerkungen |
 |---------|-------------|-------------|
-| `1.5.x` | :white_check_mark: | Aktueller Hauptzweig |
-| `< 1.5` | :x: | Veraltet -- bitte aktualisieren |
+| `1.6.x` | :white_check_mark: | Aktueller Hauptzweig |
+| `< 1.6` | :x: | Veraltet -- bitte aktualisieren |
 
 ### Sicherheitslücken melden
 
@@ -60,6 +63,7 @@ Wenn Sie eine Sicherheitslücke in `lock-master` entdecken, melden Sie diese bit
 2. **Bevorzugter Weg**: Nutzen Sie die private Sicherheitsberatung auf GitHub via  
    [Security Advisories](https://github.com/ellmos-ai/lock-master/security/advisories) → *New draft security advisory*.
 3. **Alternativer Weg**: Kontaktieren Sie uns direkt per E-Mail:
+   - `security@open-bricks.org` (Sicherheitskontakt der Dachorganisation)
    - `security@ellmos.ai`
    - `support@lukasgeiger.com`
    - `lukas@open-bricks.org`
@@ -74,6 +78,8 @@ Bitte geben Sie eine genaue Problembeschreibung, Reproduktionsschritte, Betriebs
 - **Atomares Sperren & Kollisionsschutz**: Die Erstellung exklusiver Sperren nutzt atomare Dateisystem-Primitive (`open("x")`), um Race Conditions zwischen parallelen KI-Agenten zu unterbinden.
 - **Sicheres Bereinigen verfallener Sperren**: Das Werkzeug `prune_stale_locks.py` bietet `--dry-run`-Vorschauen, um versehentliches Löschen aktiver Sperren auszuschließen.
 
-### Reaktionszeiten
+### Reaktionszeiten & SLA-Zusagen
 
-Sicherheitsrelevante Meldungen werden in der Regel innerhalb von 48 Stunden gesichtet und zeitnah behoben.
+- **Erstreaktion**: Innerhalb von 48 Stunden zur Eingangsbestätigung eingereichter Meldungen.
+- **Technische Triage**: Innerhalb von 5 Werktagen mit Schweregrad-Einstufung und Bestätigung.
+- **Behebung & Patches**: Zeitnahe Bereitstellung von Sicherheitsadvisories und Patches auf allen unterstützten Zweigen (`1.6.x`).

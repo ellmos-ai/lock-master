@@ -66,7 +66,7 @@ def test_llms_txt_integrity():
     llms_path = ROOT / "llms.txt"
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
-    assert "Last-checked: 2026-09-01" in content
+    assert "Last-checked: 2026-09-09" in content
     assert "Version: 1.6.3" in content or "1.6.3" in content
     assert "isolated wheel install/import/CLI smoke" in content
     assert "ellmos-ai" in content
@@ -117,10 +117,21 @@ def test_pyproject_tooling_integrity():
     assert "Bug Tracker" in urls
     assert "Changelog" in urls
     assert "Security" in urls
+    assert urls.get("Parent Organization") == "https://github.com/ellmos-ai"
+    assert urls.get("Umbrella Ecosystem") == "https://github.com/open-bricks"
 
     tool = pyproject.get("tool", {})
     assert "ruff" in tool
     assert tool["ruff"].get("line-length") == 120
+
+
+def test_pyproject_pytest_configuration():
+    """Verify that pyproject.toml defines standardized pytest configuration."""
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        pyproject = tomllib.load(handle)
+    pytest_cfg = pyproject.get("tool", {}).get("pytest", {}).get("ini_options", {})
+    assert pytest_cfg.get("testpaths") == ["tests"]
+    assert pytest_cfg.get("pythonpath") == ["."]
 
 
 def test_ci_workflow_parity():
@@ -136,18 +147,34 @@ def test_ci_workflow_parity():
     assert "3.10" in content
     assert "3.13" in content
     assert "ruff check ." in content
+    assert "concurrency:" in content
+    assert "cancel-in-progress: true" in content
+    assert "python -m compileall -q ." in content
 
 
 def test_security_policy_bilingual_parity():
-    """Verify that SECURITY.md provides bilingual English and German policies with official contacts."""
+    """Verify that SECURITY.md provides bilingual English and German policies with official contacts and SLAs."""
     sec_file = ROOT / "SECURITY.md"
     assert sec_file.is_file(), "SECURITY.md must exist"
     content = sec_file.read_text(encoding="utf-8")
     assert "## English" in content
     assert "## Deutsch" in content
+    assert "security@open-bricks.org" in content
     assert "security@ellmos.ai" in content
     assert "support@lukasgeiger.com" in content
     assert "lukas@open-bricks.org" in content
+    assert "1.6.x" in content
+    assert "48 hours" in content or "48 Stunden" in content
+    assert "5 business days" in content or "5 Werktagen" in content
     assert "Local-First" in content or "local-first" in content.lower()
     assert "Zero-Egress" in content or "zero-egress" in content.lower()
     assert "https://github.com/ellmos-ai/lock-master/security/advisories" in content
+
+
+def test_gitignore_hygiene():
+    """Verify that .gitignore contains conflict copy, packaging smoke, and temp file patterns."""
+    gi_path = ROOT / ".gitignore"
+    assert gi_path.is_file()
+    content = gi_path.read_text(encoding="utf-8")
+    for pattern in ["*.sync-conflict-*", "*-CONFLIT-*", "wheelhouse/", ".wheel-smoke/", "*.tmp", "*.bak"]:
+        assert pattern in content, f"Pattern {pattern} missing from .gitignore"

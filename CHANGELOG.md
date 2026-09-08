@@ -7,6 +7,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.6.3]
 
+### Changed (Pfad A Hygiene - 2026-09-09)
+
+- **CI Workflow Hardening**: Configured GitHub Actions workflow concurrency control (`cancel-in-progress: true`) and bytecode compilation pre-test validation gate (`python -m compileall -q .`) across all matrix targets in `.github/workflows/tests.yml`.
+- **PEP 621 Standard Ecosystem URLs & Pytest Tooling**: Added `Parent Organization` (`https://github.com/ellmos-ai`) and `Umbrella Ecosystem` (`https://github.com/open-bricks`) URLs to `pyproject.toml`; added declarative `[tool.pytest.ini_options]` (`testpaths = ["tests"]`, `pythonpath = ["."]`).
+- **Gitignore Resilience**: Added ignore patterns for cloud synchronization conflicts (`*.sync-conflict-*`, `*.conflict`, `*-CONFLIT-*`, `*-conflict-*`), packaging / wheelhouse smoke artifacts (`wheelhouse/`, `.wheel-smoke/`), and temporary files (`*.tmp`, `*.bak`, `*.log`).
+- **Bilingual Security Policy Alignment**: Updated `SECURITY.md` supported versions table from legacy 1.5.x to 1.6.x, added roof organization security contact `security@open-bricks.org` alongside `security@ellmos.ai`, `support@lukasgeiger.com` and `lukas@open-bricks.org`, and codified the 48-hour response and 5-business-day triage SLAs in both English and German.
+- **LLM Context & Discovery Synchronization**: Refreshed `llms.txt`, `README.md`, and `README_de.md` timestamps to 2026-09-09 with updated verification notes (206+ passed tests, bytecode gate, CI concurrency).
+- **Automated Contract Tests**: Expanded `tests/test_metadata.py` with contract tests verifying gitignore conflict hygiene, CI concurrency/compileall gates, PEP 621 ecosystem URLs, and security policy SLAs.
+
 ### Added
 
 - **`lock_scan.py --check-dir`, ported to this canonical module** (it had

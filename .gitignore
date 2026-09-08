@@ -51,6 +51,21 @@ Thumbs.db
 tests/tmp/
 tests/*.lock.txt
 
+# Packaging and wheel smoke test artefacts
+wheelhouse/
+.wheel-smoke/
+
+# Cloud sync conflict patterns
+*.sync-conflict-*
+*.conflict
+*-CONFLIT-*
+*-conflict-*
+
+# Temporary & backup files
+*.tmp
+*.bak
+*.log
+
 # Konfliktkopien-Archiv (Verfahren: .SYNC/AUFTRAG_ALLE-DESKTOP-APPS_KONFLIKTKOPIEN-WARTUNG)
 _archive/
 
