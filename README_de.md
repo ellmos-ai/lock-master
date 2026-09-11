@@ -117,9 +117,10 @@ sequenceDiagram
     Note over AgentA,AgentB: Phase 2: Intra-Host Koordination & Granulare Sub-Claims
     AgentA->>LM: Claim für core/engine.py eintragen
     LM->>FS: Section File Claims in LOCK.team.HOST_A.txt aktualisieren
-    AgentB->>FS: Prüfen von LOCK.team.HOST_A.txt
-    FS-->>AgentB: core/engine.py belegt; docs/ frei
-    AgentB->>LM: Claim für docs/api.md & Scope docs eintragen
+    AgentB->>LM: Workspace vor Bearbeitung prüfen
+    LM->>FS: LOCK.team.HOST_A.txt & aktive Claims lesen
+    FS-->>AgentB: core/engine.py belegt - docs/ frei
+    AgentB->>LM: Claim Datei: docs/api.md & Scope: docs eintragen
     LM->>FS: Agent-B-Claim in LOCK.team.HOST_A.txt aufnehmen (Kollisionsfrei)
 
     Note over AgentA,Admin: Phase 3: Verfall, Stale-Prüfung & Sichere Freigabe

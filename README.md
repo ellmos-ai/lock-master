@@ -120,7 +120,7 @@ sequenceDiagram
     LM->>FS: Update claims section in LOCK.team.HOST_A.txt
     AgentB->>LM: Inspect workspace before edits
     LM->>FS: Read LOCK.team.HOST_A.txt & active claims
-    FS-->>AgentB: core/engine.py claimed; docs/ unclaimed
+    FS-->>AgentB: core/engine.py claimed - docs/ unclaimed
     AgentB->>LM: Claim file: docs/api.md & scope: docs
     LM->>FS: Record Agent B claim in LOCK.team.HOST_A.txt (No collision)
 
