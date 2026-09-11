@@ -1,0 +1,92 @@
+# MARKETING-LOG: lock-master
+Date: 2026-09-11
+Operator: Antigravity / Gemini (via GITHUBBOT Pfad B)
+Target Repo: ellmos-ai/lock-master
+Canonical Path: C:\_Local_DEV\repos\lock-master
+Version: 1.6.3
+
+================================================================================
+1. REPOSITORY AUDIT & DISCOVERABILITY BASELINE
+================================================================================
+- Organization: ellmos-ai
+- Ecosystem: open-bricks (umbrella)
+- Target Audience: Multi-agent developers, AI agent system architects, offline-first engineers, multi-machine operators, infrastructure reliability teams
+- Core Positioning: Portable, zero-dependency file-based mutex and coordination protocol for AI coding agents (Claude Code, Codex, Antigravity/Gemini) and humans sharing workspaces.
+- Distinct Value Proposition: Operates entirely via transparent, human-readable plain text files (LOCK*.txt). Requires zero daemons, zero external databases (no Redis, no Consul), and runs on pure Python standard library (3.10+). Features cloud-sync tolerance, team locks with intra-host sub-claims, and declarative access permissions.
+- Sibling Ecosystem Integration: Foundational locking and synchronization pillar in the ellmos infrastructure stack alongside ticket-master (task triage), system-gap-master (cross-machine sync yard), agent-ops-stack, and sqlite-transit-sync.
+
+================================================================================
+2. TARGET PERSONAS & USER JOURNEYS
+================================================================================
+1. Autonomous AI Agent Architects & Fleet Coordinators
+   - Needs: Coordinate multi-agent swarms (Codex, Claude Code, Gemini/Antigravity) operating on local git checkouts and shared file trees without race conditions or destructive overwrites.
+   - Pain Points: Conventional distributed lock managers (Redis Redlock, etcd, Zookeeper) require heavyweight daemons, complex credentials, and fail completely in offline or local-first environments.
+   - lock-master Solution: Plain text `LOCK*.txt` files that any agent or language can read and write. Scoped locks (`LOCK.<scope>.txt`) allow fine-grained concurrency across independent submodules.
+
+2. Multi-Device & Cloud-Sync Developers
+   - Needs: Work across multiple physical computers (laptop, workstation, server) synchronized via OneDrive, Dropbox, or Syncthing without corrupted lock states.
+   - Pain Points: Traditional file-locking APIs (OS flock, fcntl) do not propagate across cloud sync folders, and latency (30s to 5min) causes conflicting edits.
+   - lock-master Solution: Dedicated Team Locks (`LOCK.team.<host>.txt`) per physical machine that inform peer systems to stay out, coupled with rename-based atomic file claims.
+
+3. Local-First & Zero-Egress Tool Builders
+   - Needs: Build secure, compliant developer tools and MCP servers that operate in strictly air-gapped, zero-telemetry environments.
+   - Pain Points: Cloud-managed orchestration tools phone home, transmit telemetry, and require network access for authentication.
+   - lock-master Solution: 100% Local-First / Zero-Egress, unprivileged user-mode (`RunAsInvoker`) operation, and zero external runtime dependencies (Python standard library only).
+
+4. Enterprise Security, Privacy & Safety Officers
+   - Needs: Guarantee fail-closed access control, auditable permission rules, transparent lock status, and reproducible recovery from abandoned processes.
+   - Pain Points: Opaque locking databases hide who holds which lock and why, making deadlocks difficult to debug.
+   - lock-master Solution: Human-readable metadata (owner, host, purpose, expiry, condition), declarative `LOCK.permissions.json` evaluation, safe dry-run stale pruning (`prune_stale_locks.py`), and 10 codified governance invariants (`INV-LOCAL-01` to `INV-SLA-10`).
+
+================================================================================
+3. HIGH-INTENT SEARCH QUERIES (BILINGUAL EN & DE)
+================================================================================
+English (EN):
+- `multi-agent file locking python`
+- `ai coding agent workspace coordination lock files`
+- `zero dependency file lock cli`
+- `portable project component locking`
+- `cloud sync resilient lock system onedrive dropbox`
+- `claude code codex shared workspace lock`
+- `team lock sub claims mcp tool locking`
+- `lock-master ellmos`
+- `declarative lock permissions json`
+- `stale lock auto expiry pruning`
+
+German (DE):
+- `Multi-Agenten Datei Sperrsystem Python`
+- `KI Coding Agenten Workspace Koordination Lock Dateien`
+- `Abhaengigkeitsfreies Datei Mutex CLI`
+- `Portables Komponenten Sperrsystem`
+- `Cloud-Sync tolerantes Sperrsystem OneDrive Dropbox`
+- `Claude Code Codex gemeinsames Workspace Locking`
+- `Team-Lock Sub-Claims MCP Tool Sperren`
+- `Deklarative Sperr Berechtigungen JSON`
+- `Vergessene Sperren Bereinigung Python`
+- `Local-First Dateisystem Mutex fuer KI Flotten`
+
+================================================================================
+4. COMPETITIVE DIFFERENTIATION MATRIX
+================================================================================
+| Feature / Dimension | lock-master | OS flock / fcntl | Redis Distributed Lock | SQLite Advisory Locks | Naive Shell Scripts |
+|:---|:---|:---|:---|:---|:---|
+| Dependency Footprint | Zero (Python stdlib) | OS-specific C API | Redis Server + Client | SQLite Engine | Shell utilities |
+| Human Readability | 100% (Plain Text) | Binary Kernel State | Opaque Key-Value | Binary Database File | Ad-hoc text/flag |
+| Cloud-Sync Tolerance | High (Per-host Team Lock) | Zero (Local OS only) | N/A (Network server) | High risk of DB corruption | Poor / Race prone |
+| Scoped Concurrency | Granular (Scope & Files) | File-descriptor only | Key namespace | Table / Row lock | Hardcoded names |
+| Multi-Agent Metadata | Owner, Host, Purpose, TTL | PID only | Key metadata / TTL | Custom schema | Fragile or none |
+| Permission Rules | Declarative JSON Engine | Unix permissions | ACL / Auth token | DB grants | None |
+| Offline / Air-Gapped | 100% Local-First | 100% Local-First | Needs Local Daemon | 100% Local-First | 100% Local-First |
+| Optional Web UI | Built-in Localhost UI | None | Third-party UI | DB Browser | None |
+
+================================================================================
+5. STRATEGIC ACTION ITEMS & DISCOVERABILITY ROADMAP
+================================================================================
+- [x] Standardize bilingual README navigation with 15-point bidirectional parity.
+- [x] Integrate 10 Governance & Runtime Invariants (INV-LOCAL-01 to INV-SLA-10) in README and docs.
+- [x] Create comprehensive THIRD_PARTY_LICENSES.md audit for 100% permissive stack transparency.
+- [x] Add PEP 621 URLs for Third-Party Licenses, Marketing Log, and LLM Ready in pyproject.toml.
+- [x] Synchronize llms.txt discovery index with 208 passed tests baseline and invariant contracts.
+- [ ] Submit to Awesome-Multi-Agent, Awesome-Python-DevTools, and Awesome-Local-AI lists.
+- [ ] Package optional standalone CLI binary release via PyInstaller / PyOxidizer.
+- [ ] Produce short animated terminal screencast (SVG/GIF) showcasing `lock_scan.py` and `team_lock.py`.

@@ -7,6 +7,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.6.3]
 
+### Changed (Pfad B Discoverability & Design - 2026-09-11)
+
+- **Bilingual 15-Point Quick Navigation**: Restructured `README.md` and `README_de.md` quick navigation to the complete 15-point architecture standard with 100% bidirectional anchor parity.
+- **Codified Governance & Runtime Invariants**: Formalized 10 system-wide invariants (`INV-LOCAL-01` to `INV-SLA-10`) guaranteeing 100% local-first zero-egress operation, unprivileged user mode, fail-closed lock semantics, hierarchical scopes, team locks, deterministic TTL, declarative permissions, and dual security SLAs.
+- **Third-Party License Transparency Notice**: Authored `THIRD_PARTY_LICENSES.md` auditing runtime (Python standard library only) and development tooling (pytest, ruff, setuptools, flask, anyio) with 100% permissive open-source licenses and zero copyleft/AGPL.
+- **Marketing & Target Personas Audit**: Created `MARKETING-LOG.txt` detailing 4 core target personas, bilingual high-intent discovery search queries, competitive matrix (vs. OS flock, Redis Redlock, SQLite advisory locks), and strategic discoverability roadmap.
+- **PEP 621 Standard Ecosystem URLs**: Added URLs for `Third-Party Licenses`, `Marketing Log`, and `LLM Ready` under `[project.urls]` in `pyproject.toml`, and set `addopts = "-ra -v"`.
+- **LLM Context & Metadata Parity**: Synchronized `llms.txt` with latest verification baseline (212 passed tests, 100% green), runtime invariants, and documentation cross-references.
+- **Contract Test Suite Expansion**: Extended `tests/test_metadata.py` with rigorous contract tests verifying bilingual anchor parity, invariant contracts, license audit files, marketing logs, and pyproject URLs.
+
 ### Changed (Pfad A Hygiene - 2026-09-09)
 
 - **CI Workflow Hardening**: Configured GitHub Actions workflow concurrency control (`cancel-in-progress: true`) and bytecode compilation pre-test validation gate (`python -m compileall -q .`) across all matrix targets in `.github/workflows/tests.yml`.

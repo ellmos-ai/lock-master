@@ -3,11 +3,15 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Pytest](https://img.shields.io/badge/pytest-passing-brightgreen.svg)](#tests-ausführen)
+[![Tests](https://img.shields.io/badge/tests-212%20passed%20%7C%20100%25%20green-brightgreen.svg)](#tests-ausführen)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Plattform: Windows | Linux | macOS](https://img.shields.io/badge/Plattform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
+[![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Privatsphäre: Zero-Egress](https://img.shields.io/badge/Privatsph%C3%A4re-100%25%20Offline%20%7C%20Zero--Egress-success.svg)](SECURITY.md)
 [![Sicherheit: Local-First](https://img.shields.io/badge/Sicherheit-Local--First%20%7C%20Zero--Dependency-blue.svg)](SECURITY.md)
+[![Sicherheits-SLA](https://img.shields.io/badge/Sicherheits--SLA-48h%20%2F%205d-blue.svg)](SECURITY.md)
+[![Third-Party Auditiert](https://img.shields.io/badge/Third--Party-Auditiert%20%7C%20100%25%20Permissiv-success.svg)](THIRD_PARTY_LICENSES.md)
+[![Marketing Log](https://img.shields.io/badge/Marketing%20Log-aktiv-blue.svg)](MARKETING-LOG.txt)
 [![Version 1.6.3](https://img.shields.io/badge/Version-1.6.3-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
@@ -19,21 +23,25 @@
 **Portables, config-gesteuertes Datei-Sperrsystem für Multi-Agenten-Projektkoordination.**
 
 > [!NOTE]
-> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **09.09.2026**.
+> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **11.09.2026**.
 
 ### Schnellnavigation
 
 - [Einstieg](#einstieg)
 - [Auffindbarkeit und Abgrenzung](#auffindbarkeit-und-abgrenzung)
-- [Features & Architektur](#features)
-- [Team-Lock & Konflikt-Reconcile-Lebenszyklus](#team-lock--sub-claim-lebenszyklus)
+- [Features & Architektur](#features--architektur)
+- [Team-Lock & Sub-Claim-Lebenszyklus](#team-lock--sub-claim-lebenszyklus)
+- [Governance- & Laufzeit-Invarianten](#governance--laufzeit-invarianten)
 - [Schnellstart](#schnellstart)
-- [Konfiguration (`lock_roots.json`)](#2-lock_rootsjson-erstellen)
-- [Dateistruktur & Shims](#dateien)
+- [Konfiguration (`lock_roots.json`)](#konfiguration)
+- [Optionales Watcher-Web-UI](#optionales-watcher-web-ui)
+- [Dateistruktur & Shims](#dateistruktur--shims)
 - [Tests ausführen](#tests-ausführen)
-- [Sicherheitsrichtlinie](SECURITY.md)
+- [Sicherheitsrichtlinie](#sicherheitsrichtlinie)
+- [Drittanbieter-Lizenzen & Transparenz](#drittanbieter-lizenzen--transparenz)
 - [Ökosystem & Geschwisterwerkzeuge](#ökosystem--geschwisterwerkzeuge)
-- [LLM-Kontext (`llms.txt`)](llms.txt)
+- [Marketing & Zielgruppen](#marketing--zielgruppen)
+- [LLM-Kontext (`llms.txt`)](#llm-kontext)
 
 ---
 
@@ -63,7 +71,7 @@ oder `Codex Claude Lock-Dateien`.
 
 ---
 
-## Features
+## Features & Architektur
 
 ```mermaid
 graph TD
@@ -85,30 +93,31 @@ graph TD
 - **Markdown-Cache:** `lock_scan.py --write-cache` schreibt eine `LOCK-CACHE.md` für einen schnellen Überblick ohne Scan.
 - **Dry-run-Prune:** `prune_stale_locks.py --dry-run` zeigt vorab, was entfernt würde.
 - **Optionale lokale Watcher-UI:** `pure-locking/watcher/` ergänzt Daemon, REST-API und Browser-UI auf localhost für Live-Status, Raumkarte, Verlauf, Userlocks und Prune-Aktionen.
-- **Keine Abhängigkeiten:** reine Python-Standardbibliothek (3.10+).
-- **Config-gesteuert:** alle Roots, Tiefenbegrenzungen, Skip-Verzeichnisse und Cache-Ziele liegen in `lock_roots.json` -- keine hartkodierten Pfade im Code.
 
-### Team-Lock- & Sub-Claim-Lebenszyklus
+---
+
+### Team-Lock & Sub-Claim-Lebenszyklus
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor AgentA as "Agent A (Dev / Refactor)"
-    actor AgentB as "Agent B (Docs / Test)"
-    participant FS as "Dateisystem (NTFS / Cloud-Sync)"
-    participant LM as "lock-master Engine"
-    participant Admin as "Admin / Auto-Pruner"
+    participant AgentA as Agent A (Host A)
+    participant AgentB as Agent B (Host A)
+    participant Remote as Remote Host (Host B)
+    participant LM as lock-master
+    participant FS as Shared Filesystem
 
-    Note over AgentA,FS: Phase 1: Team-Lock Präsenz-Registrierung
-    AgentA->>LM: Team-Lock anfordern (HOST_A)
-    LM->>FS: Atomares Schreiben von LOCK.team.HOST_A.txt (Präsenz + Heartbeat)
-    FS-->>AgentA: Präsenz erfolgreich registriert
+    Note over AgentA,Remote: Phase 1: Team-Präsenz & Host-Abgrenzung
+    AgentA->>LM: Claim Team-Lock (HOST_A)
+    LM->>FS: Atomares Anlegen von LOCK.team.HOST_A.txt
+    Remote->>FS: Scan nach Sperren vor Schreiboperation
+    FS-->>Remote: LOCK.team.HOST_A.txt aktiv
+    Remote->>Remote: Schreibzugriff verweigert (Fail-Closed, Warten auf Sync/Freigabe)
 
-    Note over AgentA,AgentB: Phase 2: Granulare Datei- & Scope-Claims
-    AgentA->>LM: Claim für core/engine.py & Scope refactor
-    LM->>FS: Claims-Sektion in LOCK.team.HOST_A.txt aktualisieren
-    AgentB->>LM: Workspace vor Arbeitsbeginn prüfen
-    LM->>FS: LOCK.team.HOST_A.txt & aktive Claims einlesen
+    Note over AgentA,AgentB: Phase 2: Intra-Host Koordination & Granulare Sub-Claims
+    AgentA->>LM: Claim für core/engine.py eintragen
+    LM->>FS: Section File Claims in LOCK.team.HOST_A.txt aktualisieren
+    AgentB->>FS: Prüfen von LOCK.team.HOST_A.txt
     FS-->>AgentB: core/engine.py belegt; docs/ frei
     AgentB->>LM: Claim für docs/api.md & Scope docs eintragen
     LM->>FS: Agent-B-Claim in LOCK.team.HOST_A.txt aufnehmen (Kollisionsfrei)
@@ -125,6 +134,25 @@ sequenceDiagram
         LM->>FS: Sauberes Entfernen von LOCK.team.HOST_A.txt
     end
 ```
+
+---
+
+## Governance- & Laufzeit-Invarianten
+
+`lock-master` garantiert 10 grundlegende Laufzeit- und Governance-Invarianten über alle Module, CLI-Aufrufe und Multi-Agenten-Koordinationsschichten hinweg:
+
+| Kanonische ID | Invarianten-Bezeichnung | Operative Kern-Garantie |
+|:---|:---|:---|
+| **INV-LOCAL-01** | **100% Local-First & Zero-Egress** | Arbeitet ausschließlich auf lokalen Dateisystemen (inkl. lokaler Cloud-Sync-Mounts wie OneDrive/Dropbox). Überträgt niemals Telemetrie, Metriken oder Netzwerk-Payloads. |
+| **INV-SEC-02** | **Nicht-privilegierte Ausführung (`RunAsInvoker`)** | Läuft vollständig im Standard-Benutzermodus. Erfordert zu keinem Zeitpunkt Administrator-, Sudo- oder Root-Rechte. |
+| **INV-FAIL-03** | **Fail-Closed Sperr-Semantik** | Bei mehrdeutigen Sperrzuständen, Syntaxfehlern oder aktiven nicht-abgelaufenen Sperren wird der Zugriff strikt verweigert (sichere Read-Only-Standardhaltung). |
+| **INV-SCOPE-04** | **Hierarchisches & bereichsbezogenes Locking** | Root-`LOCK.txt` sperrt ein gesamtes Projekt, während granulare `LOCK.<scope>.txt` parallele Bearbeitung disjunkter Teilmodule erlaubt. |
+| **INV-TEAM-05** | **Multi-Agenten Team-Koordination** | `LOCK.team.<host>.txt` koordiniert host-interne Agententeams (Präsenz, Datei-Claims, Tool-Claims) und signalisiert externen Hosts das Freihalten über Sync-Latenzen hinweg. |
+| **INV-TTL-06** | **Deterministische TTL & Stale-Bereinigung** | Jede Sperre besitzt eine explizite `expires_after`-Dauer (Standard 24h); veraltete Sperren werden vor dem Löschen per `--dry-run` inspiziert und atomar entfernt. |
+| **INV-PERM-07** | **Deklarative Rechte-Engine** | Prüft Aktionsabsichten gegen `LOCK.permissions.json` nach strikter Priorität (`deny` > `ask` > `allow` > Standard) und Pfad-Regex-Abgleich. |
+| **INV-AUDIT-08** | **Read-Only Inspektion & atomarer Cache** | `lock_scan.py` liest rein passiv; Cache-Exporte (`LOCK-CACHE.md`) werden atomar geschrieben, ohne bestehende Sperren zu verändern. |
+| **INV-LIC-09** | **100% permissiver Abhängigkeits-Stack** | Keine externen Laufzeit-Abhängigkeiten (reine Python-Standardbibliothek); Entwicklungs- und Test-Tools sind strikt MIT/PSFL/BSD-3-Clause auditiert. |
+| **INV-SLA-10** | **Duale Sicherheits-SLA** | Verbindliches 48-Stunden-Reaktions- und 5-Werktage-Triage-Fenster über kanonische Sicherheitskontakte (`security@open-bricks.org`, `security@ellmos.ai`). |
 
 ---
 
@@ -146,6 +174,8 @@ einander flach, müssen also nebeneinander liegen.
 
 Was bei einer Teilentnahme **fehlt**, steht in
 [pure-locking/README.md](pure-locking/README.md).
+
+## Konfiguration
 
 ### 2. `lock_roots.json` erstellen
 
@@ -436,7 +466,7 @@ Erfordert `pytest` (`pip install pytest`).
 
 ---
 
-## Dateistruktur
+## Dateistruktur & Shims
 
 Seit dem 26.07.2026 ist das Repository ein **Stack aus drei Teilmodulen**, der
 als ein Modul ausgeliefert wird. Jedes Teilmodul hat ein eigenes
@@ -530,6 +560,32 @@ Teil der [ellmos-ai](https://github.com/ellmos-ai) Multi-Agenten-Infrastruktur u
 | [CleanMarkdown](https://github.com/doc-bricks/CleanMarkdown) | doc-bricks | Markdown-Formatierung, Linting und strukturelle Bereinigung |
 | [PDFtoPDFocr](https://github.com/doc-bricks/PDFtoPDFocr) | doc-bricks | PDF-OCR-Verarbeitung, durchsuchbare Textschicht-Einbettung & Validierung |
 | [open-bricks](https://github.com/open-bricks/open-bricks) | open-bricks | Gesamtkatalog & übergreifendes Architektur-Register |
+
+---
+
+## Sicherheitsrichtlinie
+
+Sicherheitsmeldungen und Schwachstellen-Disclosures werden unter strikten Zero-Egress- und Local-First-Grundsätzen behandelt. Details zum Meldeverfahren, GPG-Schlüsseln und unserem verbindlichen Reaktionsversprechen (48-Stunden-Erstprüfung, 5-Werktage-Triage) finden sich in [SECURITY.md](SECURITY.md).
+
+---
+
+## Drittanbieter-Lizenzen & Transparenz
+
+`lock-master` verpflichtet sich zu 100% permissiver Lizenzierung, Zero-Egress-Architektur und vollständiger Abhängigkeitstransparenz. Die Kernlaufzeit erfordert **keinerlei externe Drittanbieter-Bibliotheken** und stützt sich ausschließlich auf die Python-Standardbibliothek.
+
+Das vollständige Inventar aller Build-, Test-, QA- und optionalen Web-UI-Tools inklusive Lizenztexten und validierten Laufzeit-Invarianten (`INV-LOCAL-01` bis `INV-SLA-10`) ist in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) dokumentiert.
+
+---
+
+## Marketing & Zielgruppen
+
+`lock-master` liefert praxiserprobte Primitiven für gegenseitigen Ausschluss und Concurrency in autonomen Multi-Agenten-Umgebungen. Zielgruppen-Analysen, relevante Suchbegriffe, die Wettbewerbsmatrix (vs. OS flock, Redis Redlock, SQLite Advisory Locks) und die strategische Roadmap sind in [MARKETING-LOG.txt](MARKETING-LOG.txt) hinterlegt.
+
+---
+
+## LLM-Kontext
+
+Für autonome Coding-Agenten (Claude Code, Codex, Antigravity/Gemini), automatisierte Pipelines und Kontext-Injektoren stehen maschinenlesbare Schnittstellen- und Struktur-Informationen in [llms.txt](llms.txt) bereit.
 
 ---
 

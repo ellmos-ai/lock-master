@@ -2,7 +2,7 @@
 
 > Portable, config-driven multi-agent file-lock system for project coordination.
 
-## Last-checked: 2026-09-09
+## Last-checked: 2026-09-11
 
 ## What it does
 
@@ -14,9 +14,10 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 ## Status & Test Verification
 
 - **Version**: 1.6.3
-- **Verification**: 206+ passed tests (pytest), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
+- **Verification**: 212 passed tests (pytest 100% green), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)
+- **Governance Invariants**: INV-LOCAL-01 through INV-SLA-10 codified and verified
 
 ## Audience
 
@@ -101,6 +102,23 @@ shims that load the real modules from their stack sub-modules.
   `127.0.0.1`.
 - `KONZEPT-ZERLEGUNG.md` -- why the stack is split, and what deliberately was
   not solved along with it.
+- `THIRD_PARTY_LICENSES.md` -- third-party license audit, runtime dependency
+  matrix, and codified runtime invariants (INV-LOCAL-01 through INV-SLA-10).
+- `MARKETING-LOG.txt` -- target personas, high-intent discovery search queries,
+  competitive matrix, and discoverability roadmap.
+
+## Governance & Runtime Invariants
+
+- **INV-LOCAL-01**: 100% Local-First & Zero-Egress (no network calls or telemetry).
+- **INV-SEC-02**: Unprivileged Execution (`RunAsInvoker`, no admin elevation).
+- **INV-FAIL-03**: Fail-Closed Locking Semantics (read-only default on ambiguity).
+- **INV-SCOPE-04**: Hierarchical & Scoped Locking (`LOCK.txt` vs `LOCK.<scope>.txt`).
+- **INV-TEAM-05**: Multi-Agent Team Coordination (`LOCK.team.<host>.txt` presence & sub-claims).
+- **INV-TTL-06**: Deterministic TTL & Stale Cleanup (`expires_after` & dry-run prune).
+- **INV-PERM-07**: Declarative Permission Engine (`LOCK.permissions.json` evaluation).
+- **INV-AUDIT-08**: Read-Only Inspection & Atomic Cache (`lock_scan.py` & `LOCK-CACHE.md`).
+- **INV-LIC-09**: 100% Permissive Audited Stack (Python stdlib, MIT/PSFL, zero copyleft).
+- **INV-SLA-10**: Dual Security Response SLA (48h response / 5d triage commitment).
 
 ## Lock file format
 

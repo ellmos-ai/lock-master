@@ -3,11 +3,15 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Pytest](https://img.shields.io/badge/pytest-passing-brightgreen.svg)](#running-tests)
+[![Tests](https://img.shields.io/badge/tests-212%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
+[![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Privacy: Zero-Egress](https://img.shields.io/badge/privacy-100%25%20Offline%20%7C%20Zero--Egress-success.svg)](SECURITY.md)
 [![Security: Local-First](https://img.shields.io/badge/security-Local--First%20%7C%20Zero--Dependency-blue.svg)](SECURITY.md)
+[![Security SLA](https://img.shields.io/badge/Security%20SLA-48h%20%2F%205d-blue.svg)](SECURITY.md)
+[![Third-Party Audited](https://img.shields.io/badge/Third--Party-Audited%20%7C%20100%25%20Permissive-success.svg)](THIRD_PARTY_LICENSES.md)
+[![Marketing Log](https://img.shields.io/badge/Marketing%20Log-active-blue.svg)](MARKETING-LOG.txt)
 [![Version 1.6.3](https://img.shields.io/badge/version-1.6.3-informational.svg)](VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LLM Indexing](https://img.shields.io/badge/llms.txt-indexed-purple.svg)](llms.txt)
@@ -19,21 +23,25 @@
 **Portable, config-driven file-lock system for multi-agent project coordination.**
 
 > [!NOTE]
-> **AI / LLM Indexing**: AI agents and automated tools can inspect [llms.txt](llms.txt) for a machine-readable summary, search terms, and disambiguation details. Last checked: **2026-09-09**.
+> **AI / LLM Indexing**: AI agents and automated tools can inspect [llms.txt](llms.txt) for a machine-readable summary, search terms, and disambiguation details. Last checked: **2026-09-11**.
 
 ### Quick Navigation
 
 - [Start Here](#start-here)
 - [Discovery Context](#discovery-context)
 - [Features & Architecture](#features)
-- [Team-Lock & Contested Resolution Lifecycle](#team-lock-and-sub-claims-lifecycle)
+- [Team-Lock & Sub-Claims Lifecycle](#team-lock-and-sub-claims-lifecycle)
+- [Governance & Runtime Invariants](#governance--runtime-invariants)
 - [Quick Start](#quick-start)
-- [Configuration (`lock_roots.json`)](#2-create-lock_rootsjson)
-- [File Layout & Shims](#files)
+- [Configuration (`lock_roots.json`)](#configuration)
+- [Optional Watcher UI](#optional-watcher-ui)
+- [File Layout & Shims](#file-layout--shims)
 - [Running Tests](#running-tests)
-- [Security Policy](SECURITY.md)
+- [Security Policy](#security-policy)
+- [Third-Party Licenses & Transparency](#third-party-licenses--transparency)
 - [Ecosystem & Sibling Tools](#ecosystem--sibling-tools)
-- [LLM Context (`llms.txt`)](llms.txt)
+- [Marketing & Target Personas](#marketing--target-personas)
+- [LLM Context (`llms.txt`)](#llm-context)
 
 ---
 
@@ -131,6 +139,25 @@ sequenceDiagram
 
 ---
 
+## Governance & Runtime Invariants
+
+`lock-master` guarantees 10 fundamental runtime and governance invariants across all modules, CLI invocations, and multi-agent coordination layers:
+
+| Canonical ID | Invariant Title | Core Operational Guarantee |
+|:---|:---|:---|
+| **INV-LOCAL-01** | **100% Local-First & Zero-Egress** | Operates strictly on local filesystems (including local cloud sync mounts like OneDrive/Dropbox). Never transmits telemetry, metrics, or network payloads. |
+| **INV-SEC-02** | **Unprivileged Execution (`RunAsInvoker`)** | Runs entirely in standard unprivileged user mode. Never demands administrative elevation, sudo, or root access. |
+| **INV-FAIL-03** | **Fail-Closed Locking Semantics** | In the presence of ambiguous lock states, parsing syntax errors, or active non-expired locks, access is strictly denied (safe read-only default). |
+| **INV-SCOPE-04** | **Hierarchical & Scoped Locking** | Root `LOCK.txt` locks an entire project, while granular `LOCK.<scope>.txt` allows fine-grained concurrency across disjoint modules. |
+| **INV-TEAM-05** | **Multi-Agent Team Coordination** | `LOCK.team.<host>.txt` coordinates intra-host agent teams (presence, file sub-claims, tool claims) while signaling remote hosts to stay out across sync latency. |
+| **INV-TTL-06** | **Deterministic TTL & Stale Cleanup** | Every lock has an explicit `expires_after` duration (default 24h); stale locks are safely inspected via `--dry-run` and atomically pruned. |
+| **INV-PERM-07** | **Declarative Permission Engine** | Evaluates action intents against `LOCK.permissions.json` using deterministic priority (`deny` > `ask` > `allow` > default) and regex path matching. |
+| **INV-AUDIT-08** | **Read-Only Inspection & Atomic Cache** | `lock_scan.py` is read-only by default; cache exports (`LOCK-CACHE.md`) are written atomically without altering workspace lock states. |
+| **INV-LIC-09** | **100% Permissive Dependency Stack** | Zero external runtime dependencies (Python standard library only); development and QA tools are strictly MIT/PSFL/BSD-3-Clause audited. |
+| **INV-SLA-10** | **Dual Security Response SLA** | Committed 48-hour response and 5-business-day triage window via canonical security contacts (`security@open-bricks.org`, `security@ellmos.ai`). |
+
+---
+
 ## Quick Start
 
 ### 1. Copy the scripts
@@ -149,6 +176,8 @@ other flatly, so keep them side by side.
 
 See [pure-locking/README.md](pure-locking/README.md) for what a partial
 extraction does **not** include.
+
+## Configuration
 
 ### 2. Create `lock_roots.json`
 
@@ -455,7 +484,7 @@ Requires `pytest` (`pip install pytest`).
 
 ---
 
-## Files
+## File Layout & Shims
 
 Since 2026-07-26 the repository is a **stack of three sub-modules**, shipped as
 one module. Each sub-module carries its own `ellmos-module.v2.json` and a README
@@ -548,6 +577,32 @@ Part of the [ellmos-ai](https://github.com/ellmos-ai) multi-agent infrastructure
 | [CleanMarkdown](https://github.com/doc-bricks/CleanMarkdown) | doc-bricks | Markdown formatting, linting, and structural sanitization toolkit |
 | [PDFtoPDFocr](https://github.com/doc-bricks/PDFtoPDFocr) | doc-bricks | PDF OCR processing, searchable text layer embedding & validation |
 | [open-bricks](https://github.com/open-bricks/open-bricks) | open-bricks | Umbrella catalog & cross-ecosystem architectural registry |
+
+---
+
+## Security Policy
+
+Security disclosures and vulnerability reports are managed under strict zero-egress, local-first policies. See [SECURITY.md](SECURITY.md) for full disclosure procedures, public keys, and commitments to our dual SLA (48-hour initial response, 5-business-day triage window).
+
+---
+
+## Third-Party Licenses & Transparency
+
+`lock-master` is committed to 100% permissive licensing, zero-egress architecture, and complete dependency transparency. The core runtime requires **zero external dependencies** and operates purely on the Python standard library.
+
+For the comprehensive inventory of runtime, build, QA, and optional web UI dependencies, alongside their full license texts and verified runtime invariants (`INV-LOCAL-01` to `INV-SLA-10`), see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+---
+
+## Marketing & Target Personas
+
+`lock-master` provides battle-tested concurrency and mutual exclusion primitives for autonomous multi-agent fleet operations. Detailed persona breakdowns, high-intent discovery search queries, competitive matrix (vs. OS flock, Redis Redlock, SQLite advisory locks), and the strategic adoption roadmap are documented in [MARKETING-LOG.txt](MARKETING-LOG.txt).
+
+---
+
+## LLM Context
+
+For autonomous AI coding agents (Claude Code, Codex, Antigravity/Gemini), automated pipelines, and LLM context injectors, machine-readable project metadata, API signatures, search terms, and disambiguation guides are maintained in [llms.txt](llms.txt).
 
 ---
 

@@ -53,6 +53,9 @@ Repository = "https://github.com/ellmos-ai/lock-master.git"
 "Bug Tracker" = "https://github.com/ellmos-ai/lock-master/issues"
 Changelog = "https://github.com/ellmos-ai/lock-master/blob/main/CHANGELOG.md"
 Security = "https://github.com/ellmos-ai/lock-master/blob/main/SECURITY.md"
+"Third-Party Licenses" = "https://github.com/ellmos-ai/lock-master/blob/main/THIRD_PARTY_LICENSES.md"
+"Marketing Log" = "https://github.com/ellmos-ai/lock-master/blob/main/MARKETING-LOG.txt"
+"LLM Ready" = "https://github.com/ellmos-ai/lock-master/blob/main/llms.txt"
 "Parent Organization" = "https://github.com/ellmos-ai"
 "Umbrella Ecosystem" = "https://github.com/open-bricks"
 
@@ -62,7 +65,7 @@ lock-master-team = "team_lock:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v"
+addopts = "-ra -v"
 
 [tool.ruff]
 line-length = 120

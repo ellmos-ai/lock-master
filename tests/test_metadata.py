@@ -62,26 +62,31 @@ def test_documentation_links_and_no_file_uris():
 
 
 def test_llms_txt_integrity():
-    """Verify that llms.txt contains proper discovery metadata, version, and current timestamp."""
+    """Verify that llms.txt contains proper discovery metadata, version, invariants, and current timestamp."""
     llms_path = ROOT / "llms.txt"
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
-    assert "Last-checked: 2026-09-09" in content
+    assert "Last-checked: 2026-09-11" in content
     assert "Version: 1.6.3" in content or "1.6.3" in content
     assert "isolated wheel install/import/CLI smoke" in content
     assert "ellmos-ai" in content
     assert "open-bricks" in content
+    assert "THIRD_PARTY_LICENSES.md" in content
+    assert "MARKETING-LOG.txt" in content
+    assert "INV-LOCAL-01" in content
 
 
 def test_readme_badges_and_ecosystem_parity():
     """Verify that README.md and README_de.md include language switchers, up-to-date badges, and sibling matrices."""
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
-        assert "pytest-passing" in content
+        assert "tests-212%20passed" in content or "pytest-passing" in content
         assert "1.6.3" in content
         assert "ellmos--ai" in content
         assert "open--bricks" in content
         assert "llms.txt" in content
+        assert "THIRD_PARTY_LICENSES.md" in content
+        assert "MARKETING-LOG.txt" in content
         assert "ticket-master" in content
         assert "gardener" in content
         assert "clutch" in content
@@ -117,6 +122,9 @@ def test_pyproject_tooling_integrity():
     assert "Bug Tracker" in urls
     assert "Changelog" in urls
     assert "Security" in urls
+    assert "Third-Party Licenses" in urls
+    assert "Marketing Log" in urls
+    assert "LLM Ready" in urls
     assert urls.get("Parent Organization") == "https://github.com/ellmos-ai"
     assert urls.get("Umbrella Ecosystem") == "https://github.com/open-bricks"
 
@@ -132,6 +140,107 @@ def test_pyproject_pytest_configuration():
     pytest_cfg = pyproject.get("tool", {}).get("pytest", {}).get("ini_options", {})
     assert pytest_cfg.get("testpaths") == ["tests"]
     assert pytest_cfg.get("pythonpath") == ["."]
+    assert "-ra" in pytest_cfg.get("addopts", "")
+
+
+def test_bilingual_readme_navigation_parity():
+    """Verify that README.md and README_de.md have full 15-point quick navigation parity."""
+    en_content = (ROOT / "README.md").read_text(encoding="utf-8")
+    de_content = (ROOT / "README_de.md").read_text(encoding="utf-8")
+
+    en_anchors = [
+        "#start-here",
+        "#discovery-context",
+        "#features",
+        "#team-lock-and-sub-claims-lifecycle",
+        "#governance--runtime-invariants",
+        "#quick-start",
+        "#configuration",
+        "#optional-watcher-ui",
+        "#file-layout--shims",
+        "#running-tests",
+        "#security-policy",
+        "#third-party-licenses--transparency",
+        "#ecosystem--sibling-tools",
+        "#marketing--target-personas",
+        "#llm-context",
+    ]
+
+    de_anchors = [
+        "#einstieg",
+        "#auffindbarkeit-und-abgrenzung",
+        "#features--architektur",
+        "#team-lock--sub-claim-lebenszyklus",
+        "#governance--laufzeit-invarianten",
+        "#schnellstart",
+        "#konfiguration",
+        "#optionales-watcher-web-ui",
+        "#dateistruktur--shims",
+        "#tests-ausführen",
+        "#sicherheitsrichtlinie",
+        "#drittanbieter-lizenzen--transparenz",
+        "#ökosystem--geschwisterwerkzeuge",
+        "#marketing--zielgruppen",
+        "#llm-kontext",
+    ]
+
+    assert len(en_anchors) == 15
+    assert len(de_anchors) == 15
+
+    for anchor in en_anchors:
+        assert f"({anchor})" in en_content, f"Anchor {anchor} missing in README.md Quick Navigation"
+
+    for anchor in de_anchors:
+        assert f"({anchor})" in de_content, f"Anchor {anchor} missing in README_de.md Schnellnavigation"
+
+
+def test_governance_invariants_parity():
+    """Verify that 10 canonical runtime invariants INV-LOCAL-01 to INV-SLA-10 are codified."""
+    invariants = [
+        "INV-LOCAL-01",
+        "INV-SEC-02",
+        "INV-FAIL-03",
+        "INV-SCOPE-04",
+        "INV-TEAM-05",
+        "INV-TTL-06",
+        "INV-PERM-07",
+        "INV-AUDIT-08",
+        "INV-LIC-09",
+        "INV-SLA-10",
+    ]
+    for target in ("README.md", "README_de.md", "THIRD_PARTY_LICENSES.md", "llms.txt"):
+        content = (ROOT / target).read_text(encoding="utf-8")
+        for inv in invariants:
+            assert inv in content, f"Invariant {inv} missing in {target}"
+
+
+def test_third_party_licenses_metadata():
+    """Verify that THIRD_PARTY_LICENSES.md exists, has proper headers, and 100% permissive licenses."""
+    lic_file = ROOT / "THIRD_PARTY_LICENSES.md"
+    assert lic_file.is_file(), "THIRD_PARTY_LICENSES.md must exist"
+    content = lic_file.read_text(encoding="utf-8")
+    assert "file:///" not in content
+    assert "100% Local-First" in content
+    assert "Zero-Egress" in content
+    assert "RunAsInvoker" in content
+    assert "PSFL-2.0" in content
+    assert "MIT License" in content
+    assert "pytest" in content
+    assert "ruff" in content
+    assert "security@open-bricks.org" in content
+
+
+def test_marketing_log_present():
+    """Verify that MARKETING-LOG.txt exists, contains target personas, search terms, and competitive matrix."""
+    log_file = ROOT / "MARKETING-LOG.txt"
+    assert log_file.is_file(), "MARKETING-LOG.txt must exist"
+    content = log_file.read_text(encoding="utf-8")
+    assert "TARGET PERSONAS" in content
+    assert "HIGH-INTENT SEARCH QUERIES" in content
+    assert "COMPETITIVE DIFFERENTIATION MATRIX" in content
+    assert "STRATEGIC ACTION ITEMS" in content
+    assert "Autonomous AI Agent Architects" in content
+    assert "Multi-Device & Cloud-Sync Developers" in content
 
 
 def test_ci_workflow_parity():
