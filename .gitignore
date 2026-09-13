@@ -71,3 +71,6 @@ _archive/
 
 # Mobile Icons
 mobile_icons/
+
+# Auftrags- und Reviewzettel der Pflegerunden (Laufmaterial, kein Repo-Inhalt)
+_review/
