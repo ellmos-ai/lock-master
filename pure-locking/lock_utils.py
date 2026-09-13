@@ -800,6 +800,17 @@ def _pointer_repo_name(pointer: dict) -> str | None:
     return repo_id.split("/")[-1] or None
 
 
+def _path_key(p: Path) -> str:
+    """Comparable form of a path: absolute, normalized, case-insensitive.
+
+    Windows paths differ in case and separators without differing in meaning;
+    an index keyed on the raw string would miss the very entry it holds."""
+    try:
+        return str(Path(os.path.expandvars(str(p))).resolve()).lower()
+    except OSError:
+        return str(p).lower()
+
+
 def twin_dirs_for_path(path: Path, twin_config: dict | None):
     """Twin directories of `path` in the other tree.
 
@@ -844,11 +855,34 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
     except (OSError, ValueError):
         return [], "index-missing"
 
-    if resolved.name in index.get("unreadable_pointers_by_dirname", {}):
-        return [], "pointer-unreadable"
-
-    hits = index.get("by_repo_name", {}).get(resolved.name, [])
-    return [Path(h) for h in hits if Path(h).is_dir()], "ok"
+    # Walk UP to the clone root, not just the given directory. A lock at the
+    # repository root binds everything below it, so asking about
+    # <clone>/src/thing must find the twin of <clone>. Looking at the last path
+    # segment alone made every call from a subdirectory report "free" while the
+    # twin was locked -- found in review, T-20260913-715231627.
+    by_name = index.get("by_repo_name", {})
+    by_path = index.get("by_clone_path", {})
+    unreadable = index.get("unreadable_pointers_by_dirname", {})
+    for ancestor in (resolved, *resolved.parents):
+        if not any(ancestor == r or r in ancestor.parents for r in clone_roots):
+            break
+        if ancestor.name in unreadable:
+            return [], "pointer-unreadable"
+        # The declared clone path wins over the name: it is unambiguous even
+        # when the folder on disk carries a different name than repo_name.
+        hits = by_path.get(_path_key(ancestor)) or by_name.get(ancestor.name) or []
+        dirs = [Path(h) for h in hits if Path(h).is_dir()]
+        if not dirs:
+            continue
+        # The twin of an ancestor covers this path through inheritance; the
+        # matching subpath below the twin is checked too, so a scoped lock
+        # sitting deeper on the mirror side is not missed either.
+        rel = resolved.relative_to(ancestor)
+        out = list(dirs)
+        if rel != Path("."):
+            out += [d / rel for d in dirs if (d / rel).is_dir()]
+        return out, "ok"
+    return [], "ok"
 
 
 def build_twin_index(directories) -> dict:
@@ -859,12 +893,23 @@ def build_twin_index(directories) -> dict:
     already walks exactly these directories, so the index costs no second pass.
     """
     by_name: dict[str, list[str]] = {}
+    by_clone_path: dict[str, list[str]] = {}
     unreadable: dict[str, list[str]] = {}
     for d in directories:
         d = Path(d)
         if not (d / REPO_POINTER_NAME).is_file():
             continue
         pointer = read_repo_pointer(d)
+        # The clone folder on disk may be named differently from repo_name
+        # (checked out under another name, or a second working copy). Looking up
+        # by name alone then finds nothing and the check reports "free" while the
+        # twin is locked. So index the DECLARED clone path as well and prefer it.
+        clone = _pointer_clone_path(pointer) if pointer is not None else None
+        if clone is not None:
+            key = _path_key(clone)
+            by_clone_path.setdefault(key, [])
+            if str(d) not in by_clone_path[key]:
+                by_clone_path[key].append(str(d))
         name = _pointer_repo_name(pointer) if pointer is not None else None
         if not name:
             # A pointer is there but unreadable. Do NOT skip it: that would
@@ -883,5 +928,6 @@ def build_twin_index(directories) -> dict:
         "schema": "ellmos-lock-twin-index-v1",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "by_repo_name": by_name,
+        "by_clone_path": by_clone_path,
         "unreadable_pointers_by_dirname": unreadable,
     }

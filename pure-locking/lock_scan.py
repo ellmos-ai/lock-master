@@ -432,6 +432,9 @@ def main() -> int:
         written = write_caches(locks, scanned_at, config)
         for path, count in written:
             print(f"lock_scan --write-cache: {path} ({count} active lock(s))")
+        twin = write_twin_index(config)
+        if twin is not None:
+            print(f"lock_scan --write-cache: {twin[0]} ({twin[1]} repo twin(s))")
         return 0
 
     if args.json:

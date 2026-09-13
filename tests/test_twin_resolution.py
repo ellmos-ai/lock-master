@@ -36,9 +36,13 @@ def _pointer(repo_name: str, clone: Path) -> str:
     }, ensure_ascii=False, indent=2)
 
 
-def _setup(tmp: Path, *, pointer_ok: bool = True, with_lock: bool = True):
-    """Baut ein Klon/Zwilling-Paar wie in der Zwei-Baeume-Regel."""
-    clone = tmp / "repos" / "demo-repo"
+def _setup(tmp: Path, *, pointer_ok: bool = True, with_lock: bool = True,
+           clone_dirname: str = "demo-repo"):
+    """Baut ein Klon/Zwilling-Paar wie in der Zwei-Baeume-Regel.
+
+    clone_dirname weicht bewusst vom repo_name ab, wenn der Aufrufer das
+    verlangt -- ein Klon darf auf der Platte anders heissen als im Pointer."""
+    clone = tmp / "repos" / clone_dirname
     twin = tmp / "onedrive" / "demo-repo"
     clone.mkdir(parents=True)
     twin.mkdir(parents=True)
@@ -110,6 +114,34 @@ def test_pfad_ausserhalb_der_clone_roots():
         fremd = Path(td) / "woanders"
         fremd.mkdir()
         assert lock_utils.twin_dirs_for_path(fremd, cfg) == ([], "not-applicable")
+
+
+def test_lock_wird_auch_aus_einem_unterordner_gesehen():
+    """Ein Lock am Repo-Root bindet alles darunter -- auch fuer die
+    Zwillingsaufloesung. Vorher wurde nur das letzte Pfadsegment im Index
+    gesucht: ein Aufruf aus <klon>/src meldete "frei", obwohl der Zwilling
+    gesperrt war. Im Review gefunden (T-20260913-715231627)."""
+    with tempfile.TemporaryDirectory() as td:
+        clone, twin, cfg = _setup(Path(td))
+        unterordner = clone / "src" / "tief"
+        unterordner.mkdir(parents=True)
+        dirs, status = lock_utils.twin_dirs_for_path(unterordner, cfg)
+        assert status == "ok", status
+        assert twin.resolve() in [Path(d).resolve() for d in dirs], dirs
+        assert lock_utils.active_locks(twin), "Lock am Zwilling nicht gefunden"
+
+
+def test_klon_ordner_darf_anders_heissen_als_repo_name():
+    """Der Klon auf der Platte traegt nicht zwingend den repo_name. Die
+    Aufloesung ueber den DEKLARIERTEN Klonpfad muss trotzdem greifen -- sonst
+    meldet der Check "frei", waehrend der Zwilling gesperrt ist. Im Review
+    gefunden (T-20260913-715231627)."""
+    with tempfile.TemporaryDirectory() as td:
+        clone, twin, cfg = _setup(Path(td), clone_dirname="anders-benannt")
+        assert clone.name != "demo-repo"
+        dirs, status = lock_utils.twin_dirs_for_path(clone, cfg)
+        assert status == "ok", status
+        assert twin.resolve() in [Path(d).resolve() for d in dirs], dirs
 
 
 def test_check_dir_exitcodes_end_to_end():
