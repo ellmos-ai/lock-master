@@ -41,6 +41,15 @@ DEFAULT_ROOTS_FILE = Path(__file__).resolve().parent / "lock_roots.json"
 SYSTEM_CACHE_PATH = Path(__file__).resolve().parent / "LOCK-CACHE.md"
 
 
+# Home directories that older configurations wrote out literally. Kept as a
+# list rather than one hardcoded value so a second such legacy prefix can be
+# added without touching the logic.
+_LEGACY_HOME_MARKERS = (
+    os.path.join("C:" + os.sep, "Users", "User"),
+    os.path.join("C:" + os.sep, "Users", "lukas"),
+)
+
+
 def _expand_path(raw: str) -> str:
     """Expand `~` and environment variables in a configured path.
 
@@ -51,7 +60,26 @@ def _expand_path(raw: str) -> str:
     and the root is silently skipped -- the scan then reports far fewer locks
     than actually exist, which is worse than failing loudly.
     """
-    return os.path.expanduser(os.path.expandvars(str(raw)))
+    expanded = os.path.expanduser(os.path.expandvars(str(raw)))
+    if os.path.exists(expanded):
+        return expanded
+
+    # Host fallback for older configurations that hardcoded one machine's home
+    # directory. Such an entry resolves nowhere on a host whose user is named
+    # differently -- the root is then silently skipped and the scan reports
+    # fewer locks than exist, which is the dangerous direction. Re-anchor the
+    # tail of the path on the real home directory instead.
+    #
+    # Carried over from the deployed copy in the drift merge
+    # T-20260913-633163908: it lived only there, so every host reading the
+    # repository fassung lost it.
+    home = os.path.expanduser("~")
+    for marker in _LEGACY_HOME_MARKERS:
+        if expanded.lower().startswith(marker.lower()) and home:
+            candidate = home + expanded[len(marker):]
+            if os.path.exists(candidate):
+                return candidate
+    return expanded
 
 
 def load_config(roots_file: Path) -> dict:

@@ -1,5 +1,11 @@
 # LOCK-SYSTEM -- Project Locks for Multi-Agent Coordination
 
+> **German version:** `LOCK-SYSTEM_de.md` in this repository (language tier Core per P-006:
+> DE + EN). It additionally carries the host-near operating sections of the system this was
+> extracted from and is the source deployed to `<OneDrive>/_scripts/LOCK-SYSTEM.md`. Keep
+> both in step: a rule that reaches only one of them reaches only half its readers
+> (T-20260913-633163908). [2026-09-13]
+
 **Scope:** All project roots listed in your `lock_roots.json`.
 **Canonical spec:** This file. Script-level docs are in the individual `.py` files.
 **Updated:** 2026-06-25
@@ -584,6 +590,52 @@ python prune_stale_locks.py --roots-file /path/to/my_roots.json
 `shallow_depth` (default 2, for roots with `"shallow": true` for large trees),
 and `skip_dirs` (directories skipped including their subtrees, e.g.
 `node_modules`, `.venv`, `.git`, `build`, `releases`).
+
+---
+
+### A fresh clone cannot see `LOCK.user.*` — always check the mirror twin [2026-09-13]
+
+The two-trees rule says a lock at the clone **or** at its cloud-synced mirror binds
+equally. That carries a trap which is not obvious:
+
+**`LOCK.user.*` is deliberately not versioned** (the lock file says so itself, and
+`git ls-files` shows no hit). A **freshly cloned** repository therefore cannot contain the
+user lock at all — the clone does not say "no lock", it says *nothing*. Whoever checks only
+the clone reads a state out of an empty spot.
+
+**Field case, 2026-09-10 (T-20260913-785936980):** a host had re-cloned both repositories
+from the remote and recorded "the user-held lock is gone". The lock from 2026-08-27 sat
+untouched at the mirror path and the competition it guarded was still running. The guarded
+artefact was unharmed, but the deadline clause of a judging hold was overrun by mistake. It
+was not a rule violation — it was a measurement gap, and it hits **every** host that clones
+fresh.
+
+**Since 2026-09-13 `lock_scan.py --check-dir` resolves the twin itself** and reports its
+locks alongside (`(from the twin in the other tree)`). The relationship comes from the
+already existing, declared `REPO.pointer.json` — never from guessing names:
+
+| Direction | Path |
+|---|---|
+| mirror → clone | `REPO.pointer.json` sits in the checked directory |
+| clone → mirror | `TWIN-INDEX.json`, written by `lock_scan.py --write-cache` from the very directories the full scan walks anyway |
+
+Configured through the `twin_resolution` block in `lock_roots.json` (`clone_roots` +
+`index_path`). **Fail-closed:** if the checked path lies under a `clone_root` and the index
+is missing or unreadable, or the twin carries an unparsable `REPO.pointer.json`,
+`--check-dir` reports **UNDETERMINED with exit 1** — never "free". Without a
+`twin_resolution` block (another host, no mirror) twin resolution is "not applicable" and
+changes nothing.
+
+The lookup walks **up to the clone root**, so a check from a subdirectory finds the twin of
+its repository — a lock at the repository root binds everything below it. The index also
+carries the declared clone path, so a clone folder named differently from `repo_name`
+resolves too. Both were fail-open paths found in review.
+
+**After a move, a new clone or a new twin** refresh the index: `lock_scan.py --write-cache`.
+A repository missing from the index has no known twin.
+
+**Rule of thumb:** an empty spot is not a state. In a freshly cloned repository "no LOCK
+file" proves nothing — only the look at the twin does.
 
 ---
 

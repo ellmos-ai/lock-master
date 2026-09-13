@@ -54,6 +54,12 @@ def check(target: Path) -> tuple[list[dict], str | None]:
     except ValueError as exc:
         return [], f"Manifest ist kein gueltiges JSON: {exc}"
 
+    # Nicht jede Zieldatei ist eine Kopie. Manche sind absichtlich ein duenner
+    # Shim, der an die Fassung im Klon delegiert -- fuer die waere "ABWEICHEND"
+    # dauerhaft richtig und damit wertlos: ein Check, der immer rot ist, wird
+    # nicht mehr gelesen. Solche Eintraege stehen im Manifest unter "shims" und
+    # werden nur auf Existenz geprueft.
+    shims = manifest.get("shims", {})
     rows: list[dict] = []
     for dest_name, source_rel in sorted(manifest.get("files", {}).items()):
         dest, source = target / dest_name, REPO_ROOT / source_rel
@@ -65,6 +71,13 @@ def check(target: Path) -> tuple[list[dict], str | None]:
             rows.append({"file": dest_name, "status": "ABWEICHEND", "source": source_rel})
         else:
             rows.append({"file": dest_name, "status": "ok", "source": source_rel})
+    for dest_name, note in sorted(shims.items()):
+        dest = target / dest_name
+        rows.append({
+            "file": dest_name,
+            "status": "shim" if dest.is_file() else "shim-fehlt",
+            "source": str(note),
+        })
     return rows, None
 
 
@@ -86,7 +99,7 @@ def main(argv: list[str]) -> int:
         print(f"FEHLER: {err}")
         return 2
 
-    drift = [r for r in rows if r["status"] != "ok"]
+    drift = [r for r in rows if r["status"] not in ("ok", "shim")]
     if as_json:
         print(json.dumps({"target": str(target), "files": rows}, ensure_ascii=False, indent=2))
         return 1 if drift else 0
@@ -101,7 +114,9 @@ def main(argv: list[str]) -> int:
         print("entstanden, bei der jede Seite eine Sicherheitsfunktion der anderen")
         print("nicht hatte.")
         return 1
-    print(f"Deploy entspricht dem Klon ({len(rows)} Dateien, CRLF-normalisiert).")
+    shim_count = sum(1 for r in rows if r["status"] == "shim")
+    suffix = f", davon {shim_count} bewusste Shim(s)" if shim_count else ""
+    print(f"Deploy entspricht dem Klon ({len(rows)} Eintraege{suffix}, CRLF-normalisiert).")
     return 0
 
 
