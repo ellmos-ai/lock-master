@@ -259,7 +259,27 @@ def write_caches(locks: list[dict], scanned_at: datetime, config: dict) -> list[
     return results
 
 
-def _check_dir(target: Path, as_json: bool, strict: bool) -> int:
+
+def write_twin_index(config: dict) -> tuple[Path, int] | None:
+    """Write TWIN-INDEX.json (repo_name -> twin directories) from the
+    REPO.pointer.json files of the directories the scan walks anyway.
+
+    Without this index --check-dir cannot resolve the clone -> mirror direction
+    of the two-trees rule (T-20260913-785936980). Returns None when no
+    twin_resolution.index_path is configured."""
+    twin_cfg = config.get("twin_resolution") or {}
+    raw = twin_cfg.get("index_path")
+    if not raw:
+        return None
+    index_path = Path(os.path.expandvars(str(raw)))
+    index = lock_utils.build_twin_index(iter_lock_dirs(config))
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(
+        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    return index_path, len(index["by_repo_name"])
+
+def _check_dir(target: Path, as_json: bool, strict: bool,
+               roots_file: Path | None = None) -> int:
     """--check-dir: worktree-aware lock check for exactly ONE directory (no
     full scan). See lock_utils.active_locks_for_path().
 
@@ -273,12 +293,26 @@ def _check_dir(target: Path, as_json: bool, strict: bool) -> int:
     target = target.resolve()
     now = datetime.now()
     hits = lock_utils.active_locks_for_path(target, now)
+
+    # Two-trees rule: the twin in the other tree counts as well
+    # (T-20260913-785936980). A freshly cloned repo cannot contain the
+    # deliberately unversioned LOCK.user.* -- without this step one reads a
+    # state out of an empty spot.
+    twin_cfg = (load_config(roots_file or DEFAULT_ROOTS_FILE) or {}).get("twin_resolution")
+    twins, twin_status = lock_utils.twin_dirs_for_path(target, twin_cfg)
+    for twin in twins:
+        hits.extend(
+            (name, scope, legacy, twin)
+            for name, scope, legacy in lock_utils.active_locks(twin, now)
+        )
+
     rows = [
         {
             "path": str(source_dir / name),
             "scope": scope,
             "legacy": is_legacy,
             "from_main_repo_of_worktree": source_dir != target,
+            "from_twin": source_dir in twins,
         }
         for name, scope, is_legacy, source_dir in hits
     ]
@@ -286,19 +320,48 @@ def _check_dir(target: Path, as_json: bool, strict: bool) -> int:
 
     if as_json:
         print(json.dumps(
-            {"checked": str(target), "locks": rows, "hook_guards": guards},
+            {"checked": str(target), "locks": rows, "hook_guards": guards,
+             "twin_status": twin_status,
+             "twins_checked": [str(t) for t in twins]},
             ensure_ascii=False, indent=2,
         ))
         if rows:
             return 1
+        if twin_status in ("index-missing", "pointer-unreadable"):
+            return 1
         return 2 if (strict and guards) else 0
 
     if not rows:
-        print(f"lock_scan --check-dir: {target} is free (incl. main clone if worktree).")
+        if twin_status == "pointer-unreadable":
+            print(
+                f"lock_scan --check-dir: {target} -- UNDETERMINED, not 'free'. "
+                f"The mirror twin carries a {lock_utils.REPO_POINTER_NAME} that "
+                "cannot be read, so its locks are invisible. Repair the pointer, "
+                "then run lock_scan.py --write-cache."
+            )
+        elif twin_status == "index-missing":
+            print(
+                f"lock_scan --check-dir: {target} -- UNDETERMINED, not 'free'. "
+                "The path lies under a clone root, but the twin index "
+                f"({lock_utils.TWIN_INDEX_NAME}) is missing or unreadable. An "
+                "unversioned LOCK.user.* on the mirror twin would be invisible "
+                "here (T-20260913-785936980). Create it: lock_scan.py --write-cache"
+            )
+        else:
+            suffix = f", {len(twins)} twin(s) checked" if twins else ""
+            print(
+                f"lock_scan --check-dir: {target} is free "
+                f"(incl. main clone if worktree{suffix})."
+            )
     else:
         print(f"lock_scan --check-dir: {len(rows)} active lock(s) affect {target}:")
         for r in rows:
-            tag = "  (from worktree's main clone)" if r["from_main_repo_of_worktree"] else ""
+            if r["from_twin"]:
+                tag = "  (from the twin in the other tree)"
+            elif r["from_main_repo_of_worktree"]:
+                tag = "  (from worktree's main clone)"
+            else:
+                tag = ""
             legacy = " [LEGACY]" if r["legacy"] else ""
             print(f"  {r['path']}{legacy}  scope={r['scope']}{tag}")
 
@@ -315,6 +378,8 @@ def _check_dir(target: Path, as_json: bool, strict: bool) -> int:
         )
 
     if rows:
+        return 1
+    if twin_status in ("index-missing", "pointer-unreadable"):
         return 1
     return 2 if (strict and guards) else 0
 
@@ -356,7 +421,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.check_dir:
-        return _check_dir(Path(args.check_dir), args.json, args.strict)
+        return _check_dir(Path(args.check_dir), args.json, args.strict,
+                          Path(args.roots_file))
 
     config = load_config(Path(args.roots_file))
     scanned_at = datetime.now()
