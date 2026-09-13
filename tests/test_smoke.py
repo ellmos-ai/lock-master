@@ -68,8 +68,13 @@ class TestScopeFromName:
         assert lock_utils.scope_from_name("LOCK.txt.bak") is None
 
     def test_legacy_test_txt_not_a_lock(self):
-        # TEST.txt is handled separately as legacy, not via scope_from_name
-        assert lock_utils.scope_from_name("TEST.txt") is None
+        # Legacy locks (TEST.txt) now go through the same parser as every other
+        # lock name and report the scope they actually have: a legacy lock is
+        # project-wide and active_locks() treats it as active, so reporting
+        # "project" is consistent with the rest of the API. The previous None
+        # meant "not a lock name at all", which contradicted active_locks().
+        # Changed in the zipper merge T-20260913-715231627.
+        assert lock_utils.scope_from_name("TEST.txt") == "project"
 
 
 # ---------------------------------------------------------------------------
@@ -208,9 +213,12 @@ class TestRenderCache:
         config = make_config([tmp_path])
         locks = collect_locks(config)
         md = render_cache(locks, datetime.now(), "Test Cache")
-        assert "| Path |" in md
+        # The cache file is a read artefact for German-speaking agents and for
+        # the user; its header row is German. Language verdict of the zipper
+        # merge T-20260913-715231627 -- the running deployment wins, tests follow.
+        assert "| Projekt/Pfad |" in md
         assert "render-test" in md
 
     def test_render_empty_list(self):
         md = render_cache([], datetime.now(), "Empty")
-        assert "no active locks" in md
+        assert "(keine aktiven Locks)" in md
