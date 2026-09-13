@@ -42,6 +42,8 @@ File format (one setting per line, stdlib parser, no extra dependency):
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
 from datetime import datetime, timedelta
@@ -738,3 +740,222 @@ def git_hook_guards(path: Path) -> list[dict]:
             "embargo": any(sig in content.lower() for sig in EMBARGO_HOOK_SIGNATURES),
         })
     return guards
+
+
+# ---------------------------------------------------------------------------
+# Twin resolution: clone <-> cloud mirror (T-20260913-785936980)
+# ---------------------------------------------------------------------------
+# The two-trees rule says a lock at the clone OR at its cloud-synced mirror
+# binds equally. active_locks_for_path() resolved only the worktree direction,
+# so the mirror twin of a clone stayed invisible.
+#
+# That is more than an inconvenience, because LOCK.user.* is deliberately NOT
+# versioned: a FRESHLY CLONED repository cannot contain it at all. Whoever
+# checks only the clone reads a state out of an empty spot. On 2026-09-10 that
+# is exactly what happened -- a host that had just re-cloned both repositories
+# recorded "the user-held lock is gone", while the lock sat untouched at the
+# mirror path and the competition it guarded was still running.
+#
+# Resolution uses the DECLARED relationship that already exists,
+# REPO.pointer.json (field local_locator) -- no guessing from names:
+#   direction A  mirror -> clone : the pointer sits in the checked directory.
+#   direction B  clone -> mirror : via the TWIN-INDEX.json that
+#                                  lock_scan.py --write-cache writes alongside
+#                                  the caches, from the very directories the
+#                                  scan already walks.
+#
+# FAIL-CLOSED: if the checked path lies under a configured clone_root and the
+# index is missing or unreadable, the result is UNDETERMINED -- not "free".
+# That exact case overran the judging hold. If twin_resolution is not
+# configured at all (another host, no mirror), this is "not applicable" rather
+# than an error: unavailable is not empty.
+
+REPO_POINTER_NAME = "REPO.pointer.json"
+TWIN_INDEX_NAME = "TWIN-INDEX.json"
+
+
+def read_repo_pointer(directory: Path) -> dict | None:
+    """The REPO.pointer.json of a directory, or None if absent/unreadable."""
+    f = Path(directory) / REPO_POINTER_NAME
+    if not f.is_file():
+        return None
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+# REPO.pointer.json exists in more than one shape in the wild. Measured on a
+# live tree: 3 of 29 pointers used neither field of the documented shape, and
+# treating them as "unreadable" would have fail-closed three perfectly healthy
+# repositories -- a guard that cries wolf stops being read. So accept every
+# shape that names the same two things, and reserve "unreadable" for a pointer
+# that truly cannot be parsed or says nothing about its clone.
+_CLONE_PATH_FIELDS = ("windows_default", "canonical_path", "local_clone",
+                      "clone_path", "source_of_truth")
+_REPO_NAME_FIELDS = ("repo_name", "project", "module", "name")
+
+
+def _pointer_clone_path(pointer: dict) -> Path | None:
+    pointer = pointer or {}
+    sources = (pointer.get("local_locator") or {}, pointer)
+    for src in sources:
+        for field in _CLONE_PATH_FIELDS:
+            raw = src.get(field)
+            if raw:
+                return Path(raw)
+    return None
+
+
+def _pointer_repo_name(pointer: dict) -> str | None:
+    pointer = pointer or {}
+    sources = (pointer.get("local_locator") or {}, pointer)
+    for src in sources:
+        for field in _REPO_NAME_FIELDS:
+            name = src.get(field)
+            if name:
+                return str(name)
+    for key in ("repo_id", "canonical_remote", "git_remote", "remote", "repository"):
+        raw = str(pointer.get(key) or "")
+        if raw:
+            tail = raw.rstrip("/").split("/")[-1]
+            if tail.endswith(".git"):
+                tail = tail[:-4]
+            if tail:
+                return tail
+    # Last resort: the declared clone path names the repository too.
+    clone = _pointer_clone_path(pointer)
+    return clone.name if clone else None
+
+
+def _path_key(p: Path) -> str:
+    """Comparable form of a path: absolute, normalized, case-insensitive.
+
+    Windows paths differ in case and separators without differing in meaning;
+    an index keyed on the raw string would miss the very entry it holds."""
+    try:
+        return str(Path(os.path.expandvars(str(p))).resolve()).lower()
+    except OSError:
+        return str(p).lower()
+
+
+def twin_dirs_for_path(path: Path, twin_config: dict | None):
+    """Twin directories of `path` in the other tree.
+
+    Returns (dirs, status). status:
+      "ok"                 - resolved (dirs may be empty: no twin declared)
+      "not-applicable"     - no twin_resolution configured, or path outside
+      "index-missing"      - path is under a clone_root but no readable index
+                             -> FAIL-CLOSED, the caller must not report "free"
+      "pointer-unreadable" - the twin carries a REPO.pointer.json that could
+                             not be read -> FAIL-CLOSED as well
+    """
+    path = Path(path)
+    if not twin_config:
+        return [], "not-applicable"
+
+    # Direction A: the checked directory is itself the mirror twin.
+    pointer = read_repo_pointer(path)
+    if pointer is not None:
+        clone = _pointer_clone_path(pointer)
+        return ([clone] if clone and clone.is_dir() else []), "ok"
+
+    # Direction B: does the path live under a clone root?
+    clone_roots = []
+    for raw in twin_config.get("clone_roots", []):
+        try:
+            clone_roots.append(Path(os.path.expandvars(str(raw))).resolve())
+        except OSError:
+            continue
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    if not any(resolved == r or r in resolved.parents for r in clone_roots):
+        return [], "not-applicable"
+
+    index_raw = twin_config.get("index_path")
+    if not index_raw:
+        return [], "index-missing"
+    try:
+        index = json.loads(
+            Path(os.path.expandvars(str(index_raw))).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], "index-missing"
+
+    # Walk UP to the clone root, not just the given directory. A lock at the
+    # repository root binds everything below it, so asking about
+    # <clone>/src/thing must find the twin of <clone>. Looking at the last path
+    # segment alone made every call from a subdirectory report "free" while the
+    # twin was locked -- found in review, T-20260913-715231627.
+    by_name = index.get("by_repo_name", {})
+    by_path = index.get("by_clone_path", {})
+    unreadable = index.get("unreadable_pointers_by_dirname", {})
+    for ancestor in (resolved, *resolved.parents):
+        if not any(ancestor == r or r in ancestor.parents for r in clone_roots):
+            break
+        if ancestor.name in unreadable:
+            return [], "pointer-unreadable"
+        # The declared clone path wins over the name: it is unambiguous even
+        # when the folder on disk carries a different name than repo_name.
+        hits = by_path.get(_path_key(ancestor)) or by_name.get(ancestor.name) or []
+        dirs = [Path(h) for h in hits if Path(h).is_dir()]
+        if not dirs:
+            continue
+        # The twin of an ancestor covers this path through inheritance; the
+        # matching subpath below the twin is checked too, so a scoped lock
+        # sitting deeper on the mirror side is not missed either.
+        rel = resolved.relative_to(ancestor)
+        out = list(dirs)
+        if rel != Path("."):
+            out += [d / rel for d in dirs if (d / rel).is_dir()]
+        return out, "ok"
+    return [], "ok"
+
+
+def build_twin_index(directories) -> dict:
+    """Collect every REPO.pointer.json in `directories` into an index
+    repo_name -> [twin directories].
+
+    Written by lock_scan.py during the full scan (--write-cache): that scan
+    already walks exactly these directories, so the index costs no second pass.
+    """
+    by_name: dict[str, list[str]] = {}
+    by_clone_path: dict[str, list[str]] = {}
+    unreadable: dict[str, list[str]] = {}
+    for d in directories:
+        d = Path(d)
+        if not (d / REPO_POINTER_NAME).is_file():
+            continue
+        pointer = read_repo_pointer(d)
+        # The clone folder on disk may be named differently from repo_name
+        # (checked out under another name, or a second working copy). Looking up
+        # by name alone then finds nothing and the check reports "free" while the
+        # twin is locked. So index the DECLARED clone path as well and prefer it.
+        clone = _pointer_clone_path(pointer) if pointer is not None else None
+        if clone is not None:
+            key = _path_key(clone)
+            by_clone_path.setdefault(key, [])
+            if str(d) not in by_clone_path[key]:
+                by_clone_path[key].append(str(d))
+        name = _pointer_repo_name(pointer) if pointer is not None else None
+        if not name:
+            # A pointer is there but unreadable. Do NOT skip it: that would
+            # drop this very repository out of the index, and --check-dir would
+            # call its clone "free" again while the twin may be locked -- the
+            # same fail-open path this feature closes, one level down.
+            # Findable on lookup by directory name.
+            unreadable.setdefault(d.name, [])
+            if str(d) not in unreadable[d.name]:
+                unreadable[d.name].append(str(d))
+            continue
+        by_name.setdefault(name, [])
+        if str(d) not in by_name[name]:
+            by_name[name].append(str(d))
+    return {
+        "schema": "ellmos-lock-twin-index-v1",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "by_repo_name": by_name,
+        "by_clone_path": by_clone_path,
+        "unreadable_pointers_by_dirname": unreadable,
+    }
