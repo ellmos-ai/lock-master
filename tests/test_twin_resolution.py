@@ -144,6 +144,27 @@ def test_klon_ordner_darf_anders_heissen_als_repo_name():
         assert twin.resolve() in [Path(d).resolve() for d in dirs], dirs
 
 
+def test_andere_pointer_schemata_gelten_als_lesbar():
+    """REPO.pointer.json existiert im Bestand in mehreren Formen. Am lebenden
+    Baum gemessen: 3 von 29 Pointern nannten weder local_locator.repo_name noch
+    repo_id, sondern top-level repo_name/canonical_path bzw. project/local_clone.
+    Sie als "unlesbar" zu behandeln haette drei gesunde Repos fail-closed
+    blockiert -- ein Waechter, der grundlos Alarm schlaegt, wird nicht mehr
+    gelesen. (T-20260913-715231627)"""
+    varianten = [
+        {"local_locator": {"repo_name": "demo", "windows_default": "C:/x/demo"}},
+        {"repo_name": "demo", "canonical_path": "C:/x/demo"},
+        {"project": "demo", "local_clone": "C:/x/demo"},
+        {"canonical_remote": "https://github.com/org/demo.git", "local_clone": "C:/x/demo"},
+        {"module": "demo", "source_of_truth": "C:/x/demo"},
+    ]
+    for v in varianten:
+        assert lock_utils._pointer_repo_name(v) == "demo", v
+        assert lock_utils._pointer_clone_path(v) is not None, v
+    # Ein Pointer, der ueber seinen Klon nichts sagt, bleibt unlesbar.
+    assert lock_utils._pointer_repo_name({"schema": "x"}) is None
+
+
 def test_check_dir_exitcodes_end_to_end():
     """lock_scan --check-dir: Exit 1 ueber den Zwilling, Exit 0 ohne Lock.
     Exitcode OHNE Pipe messen -- sonst misst man die Pipe (LOCK-SYSTEM.md)."""
