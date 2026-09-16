@@ -55,11 +55,22 @@ tests/*.lock.txt
 wheelhouse/
 .wheel-smoke/
 
-# Cloud sync conflict patterns
+# Cloud sync conflict patterns & multi-host defense
 *.sync-conflict-*
 *.conflict
 *-CONFLIT-*
 *-conflict-*
+* (kopie)*
+* (Kopie)*
+* (copy)*
+* (Copy)*
+*conflicted copy*
+*-WORKSTATION*
+*-WORKSTATION-LG*
+*-ASUS-GEI*
+*.orig
+*.rej
+uv.lock
 
 # Temporary & backup files
 *.tmp

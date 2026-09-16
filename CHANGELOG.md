@@ -7,6 +7,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.6.3]
 
+### Changed (Pfad A Hygiene & CI Hardening - 2026-09-16)
+
+- **CI Workflow Execution Guardrails**: Added `timeout-minutes: 15` execution guardrail to the `tests:` job in `.github/workflows/tests.yml` to prevent runaway matrix runners.
+- **Automated Stale Issues & PRs Lifecycle**: Configured `.github/workflows/stale.yml` using `actions/stale@v9` with `timeout-minutes: 10`, 30-day issue stale, 45-day PR stale, and exempt labels (`pinned`, `security`, `proposal`, `feature`, `rfc`).
+- **Multi-Host Cloud-Sync & Gitignore Hardening**: Extended `.gitignore` against multi-host synchronization conflict patterns (`* (kopie)*`, `* (Kopie)*`, `* (copy)*`, `* (Copy)*`, `*conflicted copy*`, `*-WORKSTATION*`, `*-WORKSTATION-LG*`, `*-ASUS-GEI*`, `*.orig`, `*.rej`, `uv.lock`).
+- **LLM Context & Discovery Synchronization**: Refreshed `llms.txt` timestamp to 2026-09-16 with updated verification notes and 228 passing tests baseline.
+- **Contract Test Suite Expansion**: Extended `tests/test_metadata.py` with 4 automated contract tests validating CI timeout minutes, stale workflow configuration, multi-host gitignore patterns, and changelog recency.
+
 ### Changed (Pfad B Discoverability & Design - 2026-09-11)
 
 - **Bilingual 15-Point Quick Navigation**: Restructured `README.md` and `README_de.md` quick navigation to the complete 15-point architecture standard with 100% bidirectional anchor parity.

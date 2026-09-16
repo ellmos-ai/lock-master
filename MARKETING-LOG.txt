@@ -90,3 +90,11 @@ German (DE):
 - [ ] Submit to Awesome-Multi-Agent, Awesome-Python-DevTools, and Awesome-Local-AI lists.
 - [ ] Package optional standalone CLI binary release via PyInstaller / PyOxidizer.
 - [ ] Produce short animated terminal screencast (SVG/GIF) showcasing `lock_scan.py` and `team_lock.py`.
+
+================================================================================
+6. PFAD A HYGIENE & CI HARDENING AUDIT (2026-09-16)
+================================================================================
+- CI Timeout Guardrail: Codified `timeout-minutes: 15` in `.github/workflows/tests.yml` to prevent runaway matrix runners.
+- Automated Stale Lifecycle: Codified `.github/workflows/stale.yml` using `actions/stale@v9` with `timeout-minutes: 10` for issues and pull requests.
+- Multi-Host Sync Defense: Codified `.gitignore` patterns protecting against cloud sync conflict files across multi-host environments (`WORKSTATION-LG`, `ASUS-GEI`).
+- Verification Baseline: 228 passing tests (100% green), clean Ruff linting, clean bytecode compilation, and wheel smoke verification.

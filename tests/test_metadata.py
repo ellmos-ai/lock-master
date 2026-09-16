@@ -66,7 +66,7 @@ def test_llms_txt_integrity():
     llms_path = ROOT / "llms.txt"
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
-    assert "Last-checked: 2026-09-11" in content
+    assert "Last-checked: 2026-09-16" in content
     assert "Version: 1.6.3" in content or "1.6.3" in content
     assert "isolated wheel install/import/CLI smoke" in content
     assert "ellmos-ai" in content
@@ -80,7 +80,7 @@ def test_readme_badges_and_ecosystem_parity():
     """Verify that README.md and README_de.md include language switchers, up-to-date badges, and sibling matrices."""
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
-        assert "tests-212%20passed" in content or "pytest-passing" in content
+        assert "tests-228%20passed" in content or "tests-212%20passed" in content or "pytest-passing" in content
         assert "1.6.3" in content
         assert "ellmos--ai" in content
         assert "open--bricks" in content
@@ -255,10 +255,24 @@ def test_ci_workflow_parity():
     assert "macos-latest" in content
     assert "3.10" in content
     assert "3.13" in content
+    assert "timeout-minutes: 15" in content
     assert "ruff check ." in content
     assert "concurrency:" in content
     assert "cancel-in-progress: true" in content
     assert "python -m compileall -q ." in content
+
+
+def test_ci_stale_workflow_present():
+    """Verify that GitHub Actions stale workflow is present with timeout and exempt labels."""
+    stale_file = ROOT / ".github" / "workflows" / "stale.yml"
+    assert stale_file.is_file(), "stale.yml must exist"
+    content = stale_file.read_text(encoding="utf-8")
+    assert "actions/stale@v9" in content
+    assert "timeout-minutes: 10" in content
+    assert "days-before-stale: 30" in content
+    assert "days-before-close: 7" in content
+    assert "exempt-issue-labels:" in content
+    assert "exempt-pr-labels:" in content
 
 
 def test_security_policy_bilingual_parity():
@@ -281,9 +295,30 @@ def test_security_policy_bilingual_parity():
 
 
 def test_gitignore_hygiene():
-    """Verify that .gitignore contains conflict copy, packaging smoke, and temp file patterns."""
+    """Verify that .gitignore contains conflict copy, packaging smoke, and multi-host sync defense patterns."""
     gi_path = ROOT / ".gitignore"
     assert gi_path.is_file()
     content = gi_path.read_text(encoding="utf-8")
-    for pattern in ["*.sync-conflict-*", "*-CONFLIT-*", "wheelhouse/", ".wheel-smoke/", "*.tmp", "*.bak"]:
+    for pattern in [
+        "*.sync-conflict-*",
+        "*-CONFLIT-*",
+        "* (kopie)*",
+        "*conflicted copy*",
+        "*-WORKSTATION*",
+        "*-ASUS-GEI*",
+        "wheelhouse/",
+        ".wheel-smoke/",
+        "*.tmp",
+        "*.bak",
+    ]:
         assert pattern in content, f"Pattern {pattern} missing from .gitignore"
+
+
+def test_changelog_recent_pfad_a_entry():
+    """Verify that CHANGELOG.md contains the 2026-09-16 Pfad A technical hygiene and CI hardening entry."""
+    cl_path = ROOT / "CHANGELOG.md"
+    assert cl_path.is_file(), "CHANGELOG.md must exist"
+    content = cl_path.read_text(encoding="utf-8")
+    assert "Pfad A Hygiene & CI Hardening - 2026-09-16" in content
+    assert "CI Workflow Execution Guardrails" in content
+    assert "timeout-minutes: 15" in content
