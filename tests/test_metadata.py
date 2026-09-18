@@ -322,3 +322,142 @@ def test_changelog_recent_pfad_a_entry():
     assert "Pfad A Hygiene & CI Hardening - 2026-09-16" in content
     assert "CI Workflow Execution Guardrails" in content
     assert "timeout-minutes: 15" in content
+
+
+def test_pep639_license_files_and_zero_runtime_dependencies():
+    """Verify PEP 639 license-files, explicit zero runtime dependencies, and dev tooling."""
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        pyproject = tomllib.load(handle)
+    project = pyproject.get("project", {})
+
+    assert project.get("license-files") == ["LICENSE", "THIRD_PARTY_LICENSES.md"]
+    assert project.get("dependencies") == []
+    dev_deps = project.get("optional-dependencies", {}).get("dev", [])
+    assert any("pytest" in d for d in dev_deps)
+    assert any("ruff" in d for d in dev_deps)
+
+
+def test_gitignore_security_credentials_and_sync_hygiene():
+    """Verify that .gitignore excludes private keys, certs, tokens, credentials, and sync conflicts."""
+    gi_path = ROOT / ".gitignore"
+    assert gi_path.is_file()
+    content = gi_path.read_text(encoding="utf-8")
+    required_patterns = [
+        "*.pem",
+        "*.key",
+        "*.pfx",
+        "*.p12",
+        "*.crt",
+        "*.cert",
+        "*.csr",
+        "*.token",
+        "*.secret",
+        "credentials.json",
+        "secrets.json",
+        ".npmrc",
+        ".pypirc",
+        "id_rsa*",
+        "id_ed25519*",
+        "*.orig",
+        "*.rej",
+        "*.sync-conflict-*",
+        "*-WORKSTATION-LG*",
+        "*-ASUS-GEI*",
+    ]
+    for pattern in required_patterns:
+        assert pattern in content, f"Pattern {pattern} missing from .gitignore"
+
+
+def test_security_slas_and_30d_remediation():
+    """Verify that SECURITY.md defines 48h initial response, 5-day triage, and 30-day remediation SLAs."""
+    sec_path = ROOT / "SECURITY.md"
+    assert sec_path.is_file()
+    content = sec_path.read_text(encoding="utf-8")
+    assert "30 calendar days" in content
+    assert "30 Kalendertagen" in content
+    assert "48 hours" in content
+    assert "48 Stunden" in content
+    assert "5 business days" in content
+    assert "5 Werktagen" in content
+
+
+def test_ast_zero_hardcoded_secrets_and_personal_paths():
+    """Verify AST / regex scan finds zero hardcoded API keys, tokens, or developer personal paths."""
+    import ast
+    import re
+
+    patterns = [
+        (re.compile(r"(?i)api[_-]?key\s*[:=]\s*['\"][^'\"]{10,}['\"]"), "API Key"),
+        (re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"), "Private Key"),
+        (re.compile(r"C:\\Users\\lukas", re.IGNORECASE), "Personal path"),
+        (re.compile(r"ghp_[a-zA-Z0-9]{36}"), "GitHub Token"),
+    ]
+
+    for py_file in ROOT.rglob("*.py"):
+        if any(part in py_file.parts for part in [".git", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", "tests"]):
+            continue
+        text = py_file.read_text(encoding="utf-8", errors="ignore")
+        ast.parse(text, filename=str(py_file))
+        for regex, desc in patterns:
+            match = regex.search(text)
+            assert not match, f"Found {desc} in {py_file}: {match.group(0) if match else ''}"
+
+
+def test_supply_chain_zero_external_runtime_imports():
+    """Verify runtime source code only imports Python standard library and internal modules."""
+    import ast
+    import sys
+
+    stdlib_top_levels = set(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else {
+        "http", "urllib", "json", "pathlib", "subprocess", "argparse", "dataclasses",
+        "re", "shutil", "typing", "os", "sys", "datetime", "uuid", "hashlib", "io",
+        "fcntl", "msvcrt", "contextlib", "signal", "time", "threading", "tempfile",
+        "ctypes", "sqlite3", "platform", "inspect", "importlib", "socket", "stat",
+        "fnmatch", "concurrent"
+    }
+
+    internal_modules = {
+        "_lock_master_team", "bulk_lock", "lock_create", "lock_scan",
+        "lock_status", "lock_utils", "permissions", "prune_stale_locks", "team_lock",
+        "storage", "lock_watcher", "rooms", "dir_stats", "config", "scanner",
+        "cache_writer", "cli", "web_server", "contested"
+    }
+
+    runtime_files = [
+        ROOT / "bulk_lock.py",
+        ROOT / "lock_create.py",
+        ROOT / "lock_scan.py",
+        ROOT / "lock_status.py",
+        ROOT / "lock_utils.py",
+        ROOT / "permissions.py",
+        ROOT / "prune_stale_locks.py",
+        ROOT / "team_lock.py",
+    ]
+
+    for sub in ["team-lock", "pure-locking", "permission-control"]:
+        subdir = ROOT / sub
+        if subdir.is_dir():
+            runtime_files.extend([p for p in subdir.rglob("*.py") if "__pycache__" not in p.parts])
+
+    for py_file in runtime_files:
+        if not py_file.is_file():
+            continue
+        text = py_file.read_text(encoding="utf-8")
+        tree = ast.parse(text, filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root_pkg = alias.name.split(".")[0]
+                    assert (
+                        root_pkg in stdlib_top_levels or root_pkg in internal_modules
+                    ), f"Disallowed runtime import '{alias.name}' in {py_file}"
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    continue
+                if node.module:
+                    root_pkg = node.module.split(".")[0]
+                    assert (
+                        root_pkg in stdlib_top_levels or root_pkg in internal_modules
+                    ), f"Disallowed runtime import from '{node.module}' in {py_file}"
+
+

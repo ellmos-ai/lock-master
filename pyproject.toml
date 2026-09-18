@@ -11,7 +11,9 @@ authors = [
   { name = "Lukas Geiger" }
 ]
 license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.10"
+dependencies = []
 keywords = [
   "agent-coordination",
   "ai-agents",
@@ -58,6 +60,12 @@ Security = "https://github.com/ellmos-ai/lock-master/blob/main/SECURITY.md"
 "LLM Ready" = "https://github.com/ellmos-ai/lock-master/blob/main/llms.txt"
 "Parent Organization" = "https://github.com/ellmos-ai"
 "Umbrella Ecosystem" = "https://github.com/open-bricks"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6.0"
+]
 
 [project.scripts]
 lock-master-team = "team_lock:main"

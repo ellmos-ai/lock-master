@@ -41,7 +41,7 @@ Include detailed reproduction steps, environment details (OS, Python version), a
 
 - **Initial Response**: Within 48 hours for acknowledgment of submitted vulnerability reports.
 - **Technical Triage**: Within 5 business days with vulnerability confirmation and severity rating.
-- **Remediation & Patching**: Prompt security advisory and patch release on all supported versions (`1.6.x`).
+- **Remediation & Patching**: Coordinated fix and security release within 30 calendar days for confirmed vulnerabilities across all supported versions (`1.6.x`).
 
 ---
 
@@ -82,4 +82,4 @@ Bitte geben Sie eine genaue Problembeschreibung, Reproduktionsschritte, Betriebs
 
 - **Erstreaktion**: Innerhalb von 48 Stunden zur Eingangsbestätigung eingereichter Meldungen.
 - **Technische Triage**: Innerhalb von 5 Werktagen mit Schweregrad-Einstufung und Bestätigung.
-- **Behebung & Patches**: Zeitnahe Bereitstellung von Sicherheitsadvisories und Patches auf allen unterstützten Zweigen (`1.6.x`).
+- **Behebung & Patches**: Zeitnahe Bereitstellung von Sicherheitsadvisories und koordinierter Patch-Release innerhalb von 30 Kalendertagen für bestätigte Schwachstellen auf allen unterstützten Zweigen (`1.6.x`).

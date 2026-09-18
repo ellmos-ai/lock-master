@@ -1,7 +1,7 @@
 # Third-Party Licenses & Transparency Notice
 
 > **Project:** `ellmos-ai/lock-master`  
-> **Audited:** 2026-09-11  
+> **Audited:** 2026-09-18  
 > **Repository License:** [MIT License](LICENSE)  
 > **Architecture & Privacy:** 100% Local-First, Zero-Egress, Unprivileged User-Mode (`RunAsInvoker`), Fail-Closed
 
@@ -23,7 +23,7 @@ Furthermore, `lock-master` guarantees:
 7. **Declarative Permission Engine (INV-PERM-07):** Evaluates access actions against `LOCK.permissions.json` using strict priority ordering (`deny` > `ask` > `allow` > default) and regex path matching.
 8. **Read-Only Inspection & Atomic Cache (INV-AUDIT-08):** `lock_scan.py` inspects workspace hierarchies in pure read-only mode; cache exports (`LOCK-CACHE.md`) are written atomically without side effects on active locks.
 9. **100% Permissive Audited Dependency Stack (INV-LIC-09):** Zero external runtime dependencies (pure Python standard library); development and testing tools are strictly MIT/PSFL/BSD-3-Clause audited.
-10. **Dual Security Response & Triage SLA (INV-SLA-10):** Commitments to 48-hour response and 5-business-day triage via canonical security channels (`security@open-bricks.org`, `security@ellmos.ai`).
+10. **Dual Security Response & Triage SLA (INV-SLA-10):** Commitments to 48-hour response, 5-business-day triage, and 30-day remediation via canonical security channels (`security@open-bricks.org`, `security@ellmos.ai`).
 
 ---
 

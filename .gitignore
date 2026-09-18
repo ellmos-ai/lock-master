@@ -13,6 +13,26 @@ data/
 *.db
 .env
 .env.*
+*.env
+
+# Secrets, private keys, certificates, and credentials
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cert
+*.csr
+*.token
+*.secret
+credentials.json
+secrets.json
+.npmrc
+.pypirc
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
 
 # Python
 __pycache__/

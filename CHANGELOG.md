@@ -7,6 +7,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.6.3]
 
+### Changed (AI Security & Dependency Audit - 2026-09-18)
+
+- **PEP 639 License Standard Compliance**: Formally declared `license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]` and explicit `dependencies = []` (guaranteeing zero external runtime dependencies) in `pyproject.toml`. Added `[project.optional-dependencies]` dev tooling (`pytest>=8.0`, `ruff>=0.6.0`).
+- **Gitignore Security & Credential Hardening**: Fortified `.gitignore` with strict protection patterns against certificates, private keys (`*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.crt`, `*.cert`, `*.csr`), auth tokens, secrets, credentials (`*.token`, `*.secret`, `credentials.json`, `secrets.json`, `.npmrc`, `.pypirc`), SSH keys (`id_rsa*`, `id_ed25519*`, etc.), and environment configurations (`*.env`).
+- **Security SLA 30-Day Remediation Commitment**: Codified the explicit 30-day remediation SLA commitment in `SECURITY.md` (English and German) and updated `THIRD_PARTY_LICENSES.md` audit metadata.
+- **Contract Test Suite Expansion**: Added automated contract tests in `tests/test_metadata.py` validating PEP 639 license-files, zero runtime dependencies, gitignore security patterns, 30-day remediation SLA, and zero hardcoded secrets/personal paths AST scan.
+
 ### Changed (Pfad A Hygiene & CI Hardening - 2026-09-16)
 
 - **CI Workflow Execution Guardrails**: Added `timeout-minutes: 15` execution guardrail to the `tests:` job in `.github/workflows/tests.yml` to prevent runaway matrix runners.
