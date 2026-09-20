@@ -481,9 +481,9 @@ def _selftest() -> None:
              "expires_after fehlt -> Default 24h, 30h alt = abgelaufen"),
             (f"owner: A\ncreated: {stale}\nexpires_after: broken\nfence: 1000\n",
              "kaputtes expires_after -> Default 24h, nicht unbegrenzt"),
-            (f"owner: A\nexpires_after: 24h\nfence: 1000\n",
+            ("owner: A\nexpires_after: 24h\nfence: 1000\n",
              "created fehlt -> mtime-Fallback, nicht unbegrenzt"),
-            (f"owner: A\ncreated: kaputt\nexpires_after: 24h\nfence: 1000\n",
+            ("owner: A\ncreated: kaputt\nexpires_after: 24h\nfence: 1000\n",
              "kaputtes created -> mtime-Fallback"),
         ):
             fenced.write_text(body, encoding="utf-8")
