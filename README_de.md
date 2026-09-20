@@ -138,7 +138,7 @@ sequenceDiagram
     AgentA->>LM: Datei beanspruchen: core/engine.py
     LM->>FS: Sub-Claim in LOCK.team.HOST_A.txt eintragen
     AgentB->>LM: Sub-Claims abfragen: team_lock.py claims
-    LM-->>AgentB: core/engine.py belegt; tests/ verfügbar
+    LM-->>AgentB: core/engine.py belegt, tests/ verfügbar
 
     Note over AgentA,Pruner: Phase 4: Arbeitsabschluss & Sicheres Pruning
     AgentA->>FS: Refactoring abgeschlossen -> LOCK.api.txt entfernen

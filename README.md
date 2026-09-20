@@ -138,7 +138,7 @@ sequenceDiagram
     AgentA->>LM: Claim file: core/engine.py
     LM->>FS: Record sub-claim in LOCK.team.HOST_A.txt
     AgentB->>LM: Query sub-claims: team_lock.py claims
-    LM-->>AgentB: core/engine.py claimed; tests/ available
+    LM-->>AgentB: core/engine.py claimed, tests/ available
 
     Note over AgentA,Pruner: Phase 4: Work Completion & Safe Stale Pruning
     AgentA->>FS: Complete refactoring -> Remove LOCK.api.txt
