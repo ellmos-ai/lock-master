@@ -1,7 +1,7 @@
 # Third-Party Licenses & Transparency Notice
 
 > **Project:** `ellmos-ai/lock-master`  
-> **Audited:** 2026-09-18  
+> **Audited:** 2026-09-20  
 > **Repository License:** [MIT License](LICENSE)  
 > **Architecture & Privacy:** 100% Local-First, Zero-Egress, Unprivileged User-Mode (`RunAsInvoker`), Fail-Closed
 
@@ -27,24 +27,41 @@ Furthermore, `lock-master` guarantees:
 
 ---
 
-## Runtime Dependency Matrix
+## Level 1 Software Bill of Materials (SBOM)
 
-| Package | Role / Functional Scope | License | Project Repository / Upstream |
-|:---|:---|:---|:---|
-| **Python Standard Library** | Core CLI runner, file arithmetic, process execution, hashlib, json, logging, path manipulation | [PSFL-2.0](https://docs.python.org/3/license.html) | [python/cpython](https://github.com/python/cpython) |
-| **tomli** (Python < 3.11) | Standard TOML parsing fallback for Python 3.10 runtime environments | [MIT](https://github.com/hukkin/tomli/blob/master/LICENSE) | [hukkin/tomli](https://github.com/hukkin/tomli) |
+| Component / Artifact | Type | Declared License | Upstream Source | Copyleft / AGPL | Role & Scope |
+|:---|:---|:---|:---|:---|:---|
+| **Python Standard Library** | Runtime Core | [PSFL-2.0](https://docs.python.org/3/license.html) | [python/cpython](https://github.com/python/cpython) | **None** (100% Permissive) | File I/O, process, hashlib, json, logging, path manipulation |
+| **tomli** (Python < 3.11) | Runtime Fallback | [MIT](https://github.com/hukkin/tomli/blob/master/LICENSE) | [hukkin/tomli](https://github.com/hukkin/tomli) | **None** (100% Permissive) | Python 3.10 TOML parsing compatibility fallback |
+| **pytest** | Development / Test | [MIT](https://github.com/pytest-dev/pytest/blob/main/LICENSE) | [pytest-dev/pytest](https://github.com/pytest-dev/pytest) | **None** (100% Permissive) | Test execution and contract verification runner |
+| **ruff** | Development / QA | [MIT / Apache-2.0](https://github.com/astral-sh/ruff/blob/main/LICENSE-MIT) | [astral-sh/ruff](https://github.com/astral-sh/ruff) | **None** (100% Permissive) | Static linting and code style gate |
+| **setuptools** | Build Backend | [MIT](https://github.com/pypa/setuptools/blob/main/LICENSE) | [pypa/setuptools](https://github.com/pypa/setuptools) | **None** (100% Permissive) | PEP 517 / PEP 621 packaging build backend |
+| **flask** | Optional Watcher UI | [BSD-3-Clause](https://github.com/pallets/flask/blob/main/LICENSE.txt) | [pallets/flask](https://github.com/pallets/flask) | **None** (100% Permissive) | Optional localhost daemon & browser UI runner |
+| **anyio** | Development / Test | [MIT](https://github.com/agronholm/anyio/blob/master/LICENSE) | [agronholm/anyio](https://github.com/agronholm/anyio) | **None** (100% Permissive) | Concurrency testing abstraction fixture |
+
+### Zero-Runtime-Dependency & Zero-Copyleft Isolation Guarantee
+
+The core runtime of `lock-master` executes with **zero external dependencies** (`dependencies = []` in `pyproject.toml`) and guarantees:
+- **Zero-Runtime-Dependency Guarantee**: Pure Python standard library (3.10+) provides 100% of all locking, scanning, parsing, pruning, and verification logic.
+- **Zero-Copyleft Isolation Guarantee**: 0% GPL, 0% AGPL, and 0% reciprocal licenses at runtime or in build paths. All dependencies are MIT, Apache-2.0, PSFL-2.0, or BSD-3-Clause.
+- **Unprivileged User-Mode Execution (`RunAsInvoker`)**: Never attempts administrative privilege escalation, UAC prompts, or root filesystem writes.
 
 ---
 
-## Development & Quality Assurance Tooling
+## Invariant Cross-Reference Matrix
 
-| Package | Usage & Purpose | License | Source / Upstream |
-|:---|:---|:---|:---|
-| **pytest** | Automated test runner, contract verification suites, mock fixtures | [MIT](https://github.com/pytest-dev/pytest/blob/main/LICENSE) | [pytest-dev/pytest](https://github.com/pytest-dev/pytest) |
-| **ruff** | High-performance Python linter and code formatting enforcement | [MIT / Apache-2.0](https://github.com/astral-sh/ruff/blob/main/LICENSE-MIT) | [astral-sh/ruff](https://github.com/astral-sh/ruff) |
-| **setuptools** | Standard package build backend (PEP 517 / PEP 621 compliant) | [MIT](https://github.com/pypa/setuptools/blob/main/LICENSE) | [pypa/setuptools](https://github.com/pypa/setuptools) |
-| **flask** | Optional lightweight localhost web UI daemon runner in `pure-locking/watcher/` | [BSD-3-Clause](https://github.com/pallets/flask/blob/main/LICENSE.txt) | [pallets/flask](https://github.com/pallets/flask) |
-| **anyio** | Optional asynchronous networking concurrency abstraction for test harnesses | [MIT](https://github.com/agronholm/anyio/blob/master/LICENSE) | [agronholm/anyio](https://github.com/agronholm/anyio) |
+| Invariant ID | Name & Semantic Contract | Verification Mechanism & Implementation Component |
+|:---|:---|:---|
+| **INV-LOCAL-01** | 100% Local-First & Zero Egress | `pure-locking/lock_utils.py`, `tests/test_metadata.py::test_ast_zero_hardcoded_secrets_and_personal_paths` |
+| **INV-SEC-02** | Unprivileged User-Mode (`RunAsInvoker`) | `team-lock/team_lock.py`, `pure-locking/lock_create.py` (Local user space only) |
+| **INV-FAIL-03** | Fail-Closed Default Semantics | `pure-locking/lock_utils.py` (`active_locks()`, read-only error defaults) |
+| **INV-SCOPE-04** | Scoped & Component Granularity | `pure-locking/lock_utils.py` (`parse_lock_file()`, `LOCK.<scope>.txt`) |
+| **INV-TEAM-05** | Intra-Host Multi-Agent Teams | `team-lock/_lock_master_team/api.py`, `LOCK.team.<host>.txt` sub-claims |
+| **INV-TTL-06** | Deterministic TTL & Safe Stale Pruning | `pure-locking/prune_stale_locks.py` (`--dry-run` and explicit `expires_after`) |
+| **INV-PERM-07** | Declarative Permission Engine | `permission-control/permissions.py` (`LOCK.permissions.json` deny > ask > allow) |
+| **INV-AUDIT-08** | Read-Only Inspection & Atomic Cache | `pure-locking/lock_scan.py` (`--write-cache` to `LOCK-CACHE.md`) |
+| **INV-LIC-09** | Permissive Audited Dependency Stack | `THIRD_PARTY_LICENSES.md`, `tests/test_metadata.py::test_supply_chain_zero_external_runtime_imports` |
+| **INV-SLA-10** | Dual Security Response & Triage SLA | `SECURITY.md`, `tests/test_metadata.py::test_security_slas_and_30d_remediation` |
 
 ---
 

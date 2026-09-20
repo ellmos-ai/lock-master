@@ -7,6 +7,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.6.3]
 
+### Changed (Pfad B Discoverability, Visual Architecture & Level 1 SBOM Audit - 2026-09-20)
+
+- **18-Point Bilingual Navigation Parity**: Restructured `README.md` and `README_de.md` quick navigation to the complete 18-point architecture standard with 100% bidirectional HTML anchor parity (`<a id="..."></a>`) preserving legacy backward compatibility aliases.
+- **Visual Architecture & Dual Mermaid Lifecycle**: Introduced modern `flowchart TD` architecture topology across 4 decoupled tiers and comprehensive `sequenceDiagram` detailing end-to-end multi-agent locking, contested lock discovery, scoped parallelism, team sub-claims, and safe stale lock recovery (with `autonumber` and zero semicolons).
+- **Target Personas & SEO Discovery Queries**: Codified 4 formal user personas (`[PERSONA-01]` to `[PERSONA-04]`) covering autonomous AI agent engineers, cloud-sync workspace developers, local-first air-gapped tool builders, and enterprise safety officers alongside high-intent search queries in both READMEs.
+- **10-Dimension Comparative Matrix**: Integrated comparative evaluation matrix benchmarking `lock-master` against OS kernel locking (`flock`/`fcntl`), distributed locks (Redis Redlock/etcd), DB advisory locks (SQLite/PostgreSQL), and ad-hoc shell flag files across all 10 runtime invariants (`INV-LOCAL-01` to `INV-SLA-10`).
+- **Level 1 SBOM & Notice Attribution**: Upgraded `THIRD_PARTY_LICENSES.md` to 2026-09-20 audit with a complete Level 1 Software Bill of Materials (SBOM), Invariant Cross-Reference Matrix table, RunAsInvoker non-elevation certification, and added formal `NOTICE` attribution file in the repository root.
+- **Statutory Notice & Liability Limitation (§ 521 BGB)**: Formalized German statutory liability disclaimer (§ 521 BGB Gefälligkeitsrecht / unentgeltliche Schenkung, Vorsatz und grobe Fahrlässigkeit) in Section 18 of both READMEs.
+- **PEP 639 Standard Compliance**: Updated `pyproject.toml` with `license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]` and added keywords `zero-egress`, `ellmos-ai`, and `open-bricks`.
+- **Contract Test Suite Expansion**: Added automated contract tests in `tests/test_metadata.py` verifying 18-point dual navigation anchors, target personas, comparative matrix, Level 1 SBOM, RunAsInvoker guarantee, § 521 BGB disclaimer, NOTICE attribution, and semicolon-free Mermaid diagrams.
+
 ### Changed (AI Security & Dependency Audit - 2026-09-18)
 
 - **PEP 639 License Standard Compliance**: Formally declared `license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]` and explicit `dependencies = []` (guaranteeing zero external runtime dependencies) in `pyproject.toml`. Added `[project.optional-dependencies]` dev tooling (`pytest>=8.0`, `ruff>=0.6.0`).

@@ -98,3 +98,15 @@ German (DE):
 - Automated Stale Lifecycle: Codified `.github/workflows/stale.yml` using `actions/stale@v9` with `timeout-minutes: 10` for issues and pull requests.
 - Multi-Host Sync Defense: Codified `.gitignore` patterns protecting against cloud sync conflict files across multi-host environments (`WORKSTATION-LG`, `ASUS-GEI`).
 - Verification Baseline: 228 passing tests (100% green), clean Ruff linting, clean bytecode compilation, and wheel smoke verification.
+
+================================================================================
+7. PFAD B DISCOVERABILITY, VISUAL ARCHITECTURE & LEVEL 1 SBOM AUDIT (2026-09-20)
+================================================================================
+- 18-Point Bilingual Navigation Parity: Expanded README.md & README_de.md to full 18-point quick navigation with dual reciprocal HTML anchor tags (<a id="..."></a>) and legacy backwards-compatibility aliases.
+- Visual Architecture & Dual Mermaid Lifecycle: Integrated flowchart TD Architecture Topology across 4 tiers and sequenceDiagram End-to-End Multi-Agent Lock, Contested Acquisition, Sub-Claim & Expiry/Pruning Lifecycle (with autonumber and 0 semicolons).
+- 4 Formal Target Personas: Codified [PERSONA-01] Autonomous AI Agent & Multi-Agent Swarm Engineers, [PERSONA-02] Cloud-Sync & Multi-Device Workspace Developers, [PERSONA-03] Local-First, Zero-Egress & Air-Gapped Tool Builders, and [PERSONA-04] Enterprise Safety, Governance & Compliance Officers across both READMEs.
+- 10-Dimension Comparative Matrix: Codified comparative advantage vs 4 alternatives (OS flock/fcntl, Redis Redlock, SQLite Advisory Locks, Ad-hoc shell flag files) mapped across all 10 technical invariants (INV-LOCAL-01 to INV-SLA-10).
+- Level 1 SBOM & Notice: Upgraded THIRD_PARTY_LICENSES.md to 2026-09-20 audit with Level 1 SBOM, Invariant Cross-Reference Matrix table, RunAsInvoker non-elevation certification, and added formal NOTICE file in repository root.
+- Statutory Liability Disclaimer: Formalized German statutory liability disclaimer (§ 521 BGB Gefälligkeitsrecht) in Section 18 of both READMEs.
+- PEP 639 Standard: Added license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"] to pyproject.toml.
+- Contract Verification: Automated contract tests in tests/test_metadata.py verifying 18-point dual anchors, personas, comparative matrix, Level 1 SBOM, RunAsInvoker, § 521 BGB disclaimer, and NOTICE attribution.

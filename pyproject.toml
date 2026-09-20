@@ -11,7 +11,7 @@ authors = [
   { name = "Lukas Geiger" }
 ]
 license = "MIT"
-license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.10"
 dependencies = []
 keywords = [
@@ -28,9 +28,12 @@ keywords = [
   "claude-code",
   "codex-cli",
   "local-first",
+  "zero-egress",
   "lock-files",
   "cloud-sync",
-  "team-coordination"
+  "team-coordination",
+  "ellmos-ai",
+  "open-bricks"
 ]
 classifiers = [
   "Development Status :: 5 - Production/Stable",

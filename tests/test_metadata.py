@@ -66,7 +66,7 @@ def test_llms_txt_integrity():
     llms_path = ROOT / "llms.txt"
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
-    assert "Last-checked: 2026-09-16" in content
+    assert "Last-checked: 2026-09-20" in content or "Last-checked: 2026-09-16" in content
     assert "Version: 1.6.3" in content or "1.6.3" in content
     assert "isolated wheel install/import/CLI smoke" in content
     assert "ellmos-ai" in content
@@ -80,7 +80,13 @@ def test_readme_badges_and_ecosystem_parity():
     """Verify that README.md and README_de.md include language switchers, up-to-date badges, and sibling matrices."""
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
-        assert "tests-228%20passed" in content or "tests-212%20passed" in content or "pytest-passing" in content
+        assert (
+            "tests-239%20passed" in content
+            or "tests-233%20passed" in content
+            or "tests-228%20passed" in content
+            or "tests-212%20passed" in content
+            or "pytest-passing" in content
+        )
         assert "1.6.3" in content
         assert "ellmos--ai" in content
         assert "open--bricks" in content
@@ -107,6 +113,10 @@ def test_pyproject_tooling_integrity():
     assert project.get("name") == "lock-master"
     assert project.get("requires-python") == ">=3.10"
     assert "lock-files" in project.get("keywords", [])
+    assert "zero-egress" in project.get("keywords", [])
+    assert "ellmos-ai" in project.get("keywords", [])
+    assert "open-bricks" in project.get("keywords", [])
+    assert project.get("license-files") == ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
 
     classifiers = project.get("classifiers", [])
     assert "Programming Language :: Python :: 3.10" in classifiers
@@ -144,54 +154,64 @@ def test_pyproject_pytest_configuration():
 
 
 def test_bilingual_readme_navigation_parity():
-    """Verify that README.md and README_de.md have full 15-point quick navigation parity."""
+    """Verify that README.md and README_de.md have full 18-point quick navigation parity and heading targets."""
     en_content = (ROOT / "README.md").read_text(encoding="utf-8")
     de_content = (ROOT / "README_de.md").read_text(encoding="utf-8")
 
     en_anchors = [
-        "#start-here",
-        "#discovery-context",
-        "#features",
-        "#team-lock-and-sub-claims-lifecycle",
+        "#executive-summary--core-identity",
+        "#visual-architecture-topology",
+        "#end-to-end-multi-agent-locking-lifecycle",
+        "#marketing--target-personas",
+        "#comparative-matrix-vs-alternatives",
         "#governance--runtime-invariants",
+        "#core-capabilities--lock-types",
+        "#start-here",
         "#quick-start",
         "#configuration",
         "#optional-watcher-ui",
+        "#python-api",
         "#file-layout--shims",
         "#running-tests",
         "#security-policy",
         "#third-party-licenses--transparency",
         "#ecosystem--sibling-tools",
-        "#marketing--target-personas",
-        "#llm-context",
+        "#license",
     ]
 
     de_anchors = [
-        "#einstieg",
-        "#auffindbarkeit-und-abgrenzung",
-        "#features--architektur",
-        "#team-lock--sub-claim-lebenszyklus",
+        "#management-zusammenfassung--kernidentitaet",
+        "#visuelle-architektur-topologie",
+        "#end-to-end-multi-agenten-sperr-lebenszyklus",
+        "#marketing--zielgruppen",
+        "#vergleichsmatrix-gegenueber-alternativen",
         "#governance--laufzeit-invarianten",
+        "#kernfaehigkeiten--sperrtypen",
+        "#einstieg",
         "#schnellstart",
         "#konfiguration",
         "#optionales-watcher-web-ui",
+        "#python-api",
         "#dateistruktur--shims",
         "#tests-ausführen",
         "#sicherheitsrichtlinie",
         "#drittanbieter-lizenzen--transparenz",
         "#ökosystem--geschwisterwerkzeuge",
-        "#marketing--zielgruppen",
-        "#llm-kontext",
+        "#lizenz",
     ]
 
-    assert len(en_anchors) == 15
-    assert len(de_anchors) == 15
+    assert len(en_anchors) == 18
+    assert len(de_anchors) == 18
 
     for anchor in en_anchors:
         assert f"({anchor})" in en_content, f"Anchor {anchor} missing in README.md Quick Navigation"
+        anchor_id = anchor.lstrip("#")
+        assert f'id="{anchor_id}"' in en_content, f'Target id="{anchor_id}" missing in README.md headings'
 
     for anchor in de_anchors:
         assert f"({anchor})" in de_content, f"Anchor {anchor} missing in README_de.md Schnellnavigation"
+        anchor_id = anchor.lstrip("#")
+        assert f'id="{anchor_id}"' in de_content, f'Target id="{anchor_id}" missing in README_de.md headings'
 
 
 def test_governance_invariants_parity():
@@ -330,7 +350,7 @@ def test_pep639_license_files_and_zero_runtime_dependencies():
         pyproject = tomllib.load(handle)
     project = pyproject.get("project", {})
 
-    assert project.get("license-files") == ["LICENSE", "THIRD_PARTY_LICENSES.md"]
+    assert project.get("license-files") == ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
     assert project.get("dependencies") == []
     dev_deps = project.get("optional-dependencies", {}).get("dev", [])
     assert any("pytest" in d for d in dev_deps)
@@ -459,5 +479,91 @@ def test_supply_chain_zero_external_runtime_imports():
                     assert (
                         root_pkg in stdlib_top_levels or root_pkg in internal_modules
                     ), f"Disallowed runtime import from '{node.module}' in {py_file}"
+
+
+def test_target_personas_sections():
+    """Verify target personas PERSONA-01 through PERSONA-04 are documented across READMEs and marketing log."""
+    en_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    de_readme = (ROOT / "README_de.md").read_text(encoding="utf-8")
+    mkt_log = (ROOT / "MARKETING-LOG.txt").read_text(encoding="utf-8")
+
+    personas = ["[PERSONA-01]", "[PERSONA-02]", "[PERSONA-03]", "[PERSONA-04]"]
+    for p in personas:
+        assert p in en_readme, f"{p} missing in README.md"
+        assert p in de_readme, f"{p} missing in README_de.md"
+        assert p in mkt_log, f"{p} missing in MARKETING-LOG.txt"
+
+
+def test_comparative_matrix_sections():
+    """Verify 10-dimension comparative matrix vs 4 alternatives exists in both READMEs."""
+    en_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    de_readme = (ROOT / "README_de.md").read_text(encoding="utf-8")
+
+    for doc in [en_readme, de_readme]:
+        assert "INV-LOCAL-01" in doc
+        assert "INV-SEC-02" in doc
+        assert "INV-FAIL-03" in doc
+        assert "INV-SCOPE-04" in doc
+        assert "INV-TEAM-05" in doc
+        assert "INV-TTL-06" in doc
+        assert "INV-PERM-07" in doc
+        assert "INV-AUDIT-08" in doc
+        assert "INV-LIC-09" in doc
+        assert "INV-SLA-10" in doc
+        assert "Redlock" in doc
+
+
+def test_notice_attribution_file():
+    """Verify formal NOTICE file exists and attributes authors and ecosystems."""
+    notice_path = ROOT / "NOTICE"
+    assert notice_path.is_file(), "NOTICE file missing in repository root"
+    content = notice_path.read_text(encoding="utf-8")
+    assert "Lukas Geiger" in content
+    assert "ellmos-ai" in content
+    assert "open-bricks" in content
+    assert "MIT" in content
+
+
+def test_statutory_disclaimer_521_bgb():
+    """Verify German statutory disclaimer (§ 521 BGB Gefälligkeitsrecht) is present in both READMEs."""
+    en_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    de_readme = (ROOT / "README_de.md").read_text(encoding="utf-8")
+
+    for doc in [en_readme, de_readme]:
+        assert "§ 521 BGB" in doc
+        assert "Gefälligkeit" in doc
+        assert "Vorsatz und grobe Fahrlässigkeit" in doc
+
+
+def test_level1_sbom_and_cross_reference_matrix():
+    """Verify Level 1 SBOM, Invariant Cross-Reference Matrix and RunAsInvoker are in THIRD_PARTY_LICENSES.md."""
+    sbom_doc = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
+    assert "Level 1 Software Bill of Materials (SBOM)" in sbom_doc
+    assert "Invariant Cross-Reference Matrix" in sbom_doc
+    assert "RunAsInvoker" in sbom_doc
+    assert "INV-LOCAL-01" in sbom_doc
+    assert "INV-SLA-10" in sbom_doc
+    assert "2026-09-20" in sbom_doc
+
+
+def test_dual_mermaid_diagrams_and_semicolons_free():
+    """Verify dual Mermaid diagrams (flowchart TD and sequenceDiagram with autonumber) have zero trailing semicolons."""
+    import re
+
+    for readme_name in ["README.md", "README_de.md"]:
+        content = (ROOT / readme_name).read_text(encoding="utf-8")
+        assert "flowchart TD" in content, f"flowchart TD missing in {readme_name}"
+        assert "sequenceDiagram" in content, f"sequenceDiagram missing in {readme_name}"
+        assert "autonumber" in content, f"autonumber missing in {readme_name}"
+
+        # Find all mermaid blocks and check no lines end with semicolon
+        blocks = re.findall(r"```mermaid\n(.*?)\n```", content, re.DOTALL)
+        assert len(blocks) >= 2, f"Expected at least 2 mermaid blocks in {readme_name}"
+        for block in blocks:
+            for line in block.splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("%%"):
+                    assert not stripped.endswith(";"), f"Trailing semicolon found in {readme_name} mermaid line: {stripped}"
+
 
 

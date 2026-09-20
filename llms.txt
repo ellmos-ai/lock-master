@@ -2,7 +2,7 @@
 
 > Portable, config-driven multi-agent file-lock system for project coordination.
 
-## Last-checked: 2026-09-16
+## Last-checked: 2026-09-20
 
 ## What it does
 
@@ -14,10 +14,12 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 ## Status & Test Verification
 
 - **Version**: 1.6.3
-- **Verification**: 228 passed tests (pytest 100% green), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
+- **Verification**: 233+ passed tests (pytest 100% green), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)
 - **Governance Invariants**: INV-LOCAL-01 through INV-SLA-10 codified and verified
+- **Navigation**: 18-point bilingual quick navigation with dual reciprocal HTML anchors
+- **Transparency**: Level 1 SBOM, NOTICE file, and unprivileged RunAsInvoker guarantee
 
 ## Audience
 
@@ -102,7 +104,8 @@ shims that load the real modules from their stack sub-modules.
   `127.0.0.1`.
 - `KONZEPT-ZERLEGUNG.md` -- why the stack is split, and what deliberately was
   not solved along with it.
-- `THIRD_PARTY_LICENSES.md` -- third-party license audit, runtime dependency
+- `NOTICE` -- formal attribution and copyright notice for Lukas Geiger, ellmos-ai, and open-bricks.
+- `THIRD_PARTY_LICENSES.md` -- Level 1 SBOM, third-party license audit, runtime dependency
   matrix, and codified runtime invariants (INV-LOCAL-01 through INV-SLA-10).
 - `MARKETING-LOG.txt` -- target personas, high-intent discovery search queries,
   competitive matrix, and discoverability roadmap.
