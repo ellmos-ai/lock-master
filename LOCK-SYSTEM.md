@@ -529,8 +529,20 @@ but a guard hook present" as its own outcome (exit 2).
 ## Lifecycle: RESPECT -> CLAIM -> RELEASE
 
 1. **RESPECT:** check for an active lock on the area before working.
-2. **CLAIM:** create your own `LOCK.txt` or `LOCK.<scope>.txt` from the
-   template (`owner`, ISO `created`, `expires_after`, `purpose`).
+2. **CLAIM:** create your own `LOCK.txt` or `LOCK.<scope>.txt` **with
+   `lock_create.py`**:
+
+   ```
+   python <deploy>/lock_create.py <project dir> --scope <area> --owner <agent> \
+       --purpose "<why>"
+   ```
+
+   The tool creates the file **exclusively** (`open("x")`, see Stage 1 under
+   "Contested Locks"), fills the required fields and hands out the fencing
+   number. **Written by hand from `LOCK_TEMPLATE.txt` the lock has neither** --
+   no protection against a second creator in the same moment, and no number by
+   which a displaced holder can tell it lost the lock. The template stays the
+   field reference; it is not a creation procedure.
 3. **RELEASE:** delete the lock file you created when done. Active release
    by the creator is required; the 24h expiry is only a safety net for
    forgotten locks. If work takes longer, renew `created` so the lock does
@@ -546,7 +558,8 @@ demonstrably first. With cloud sync at 30 s – 5 min latency **both** see an em
 folder, both create, and both consider themselves the holder. This is not an edge
 case: scheduled automations start on several hosts at the same clock time.
 
-**Stage 1 — exclusive creation (always on).** `lock_create.py` creates the lock
+**Stage 1 — exclusive creation (always on).** `lock_create.py` (deployed next to
+`lock_scan.py`) creates the lock
 file exclusively (`open("x")`) instead of checking and then writing. Between the
 check and the write there used to be a window in which a second process creates
 the same file. `--force` still overwrites deliberately.

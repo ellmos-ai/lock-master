@@ -495,7 +495,7 @@ Latenz sehen **beide** einen leeren Ordner, beide legen an, und beide halten sic
 fuer den Inhaber. Das ist kein Randfall: Zeitgesteuerte Automationen starten auf
 mehreren Hosts zur selben Uhrzeit.
 
-**Stufe 1 — exklusives Anlegen (immer aktiv).** `lock_create.py` legt die
+**Stufe 1 — exklusives Anlegen (immer aktiv).** `<OneDrive>/_scripts/lock_create.py` legt die
 Lockdatei exklusiv an (`open("x")`), statt erst zu pruefen und dann zu schreiben.
 Zwischen Pruefung und Schreiben lag frueher ein Fenster, in dem ein zweiter
 Prozess dieselbe Datei anlegt. `--force` ueberschreibt weiterhin bewusst.
@@ -592,7 +592,20 @@ Neue Pipelines duerfen das Muster uebernehmen, wenn Teamarbeit mehr braucht als 
 ## Lebenszyklus: BEACHTEN -> CLAIMEN -> FREIGEBEN
 
 1. **BEACHTEN:** aktive Sperre fuer den Bereich pruefen (Stufe 1).
-2. **CLAIMEN:** eigene `LOCK.txt` bzw. `LOCK.<scope>.txt` nach Vorlage anlegen (`owner`, `created` ISO, `expires_after` 24h, `purpose`).
+2. **CLAIMEN:** eigene `LOCK.txt` bzw. `LOCK.<scope>.txt` **mit `lock_create.py` anlegen**:
+
+   ```
+   PYTHONIOENCODING=utf-8 python "<OneDrive>/_scripts/lock_create.py" <projektordner> \
+       --scope <bereich> --owner <agent> --purpose "<warum>"
+   ```
+
+   Das Werkzeug legt die Datei **exklusiv** an (`open("x")`, siehe Stufe 1 unter
+   „Umstrittene Locks"), fuellt die Pflichtfelder und vergibt die Fencing-Nummer.
+   **Von Hand aus `LOCK_TEMPLATE.txt` geschrieben, hat der Lock beides nicht** —
+   kein Schutz gegen den zweiten Anleger im selben Moment und keine Nummer, an der
+   ein abgeloester Halter merkt, dass er die Sperre verlor. Die Vorlage bleibt die
+   Feldreferenz; sie ist kein Anlegeverfahren.
+   [C 2026-09-20 T-20260920-699139879]
 3. **FREIGEBEN:** die selbst angelegte Lock-Datei am Ende **selbst loeschen**. Aktives Freigeben durch den Ersteller ist Pflicht; der 24h-Verfall ist nur ein **Sicherheitsnetz** fuer vergessene Locks. Bei langer Laufzeit `created` erneuern, damit die Sperre nicht vorzeitig verfaellt.
 
 ---
