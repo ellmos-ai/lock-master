@@ -29,7 +29,7 @@ class LockDB:
                 filename TEXT NOT NULL,
                 project_dir TEXT NOT NULL,
                 scope TEXT,
-                lock_type TEXT DEFAULT 'exclusive' CHECK(lock_type IN ('exclusive', 'team', 'user', 'condition', 'legacy')),
+                lock_type TEXT DEFAULT 'exclusive' CHECK(lock_type IN ('exclusive', 'team', 'user', 'condition', 'until', 'legacy')),
                 is_legacy INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'active' CHECK(status IN ('active', 'expired', 'deleted')),
                 owner TEXT,
@@ -113,7 +113,7 @@ class LockDB:
         row = self._conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='locks'"
         ).fetchone()
-        if row is None or "'condition'" in (row[0] or ""):
+        if row is None or ("'condition'" in (row[0] or "") and "'until'" in (row[0] or "")):
             return
 
         cols = [
