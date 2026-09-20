@@ -26,7 +26,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from lock_utils import is_lock_file
+from lock_utils import is_lock_file, new_fence
 
 _SCOPE_OK = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
@@ -69,6 +69,12 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
         # strukturell immer. lock_utils._parse_created liest Sekunden bereits.
         f"created: {datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}",
         f"host: {args.host}",
+        # Fencing token: jede Vergabe bekommt eine Nummer, die nur steigen
+        # kann. Der Halter merkt sie sich und prueft sie vor jedem Schreiben
+        # (lock_utils.fence_status). Ohne sie kann ein Halter, der laenger als
+        # seine TTL stillstand, nicht bemerken, dass die Sperre weitergegeben
+        # wurde -- der Fehlerfall, den TTL allein nicht abdeckt.
+        f"fence: {args.fence}",
     ]
     if args.user:
         lines.append("removable_by: user")
@@ -175,6 +181,10 @@ def main(argv: list[str] | None = None) -> int:
         args.host = args.host or platform.node() or "unknown"
     args.owner = args.owner or f"lock_create/{args.host}"
 
+    # Neue Vergabe = neue Nummer. Auch bei --force: ein Ueberschreiben ist eine
+    # neue Vergabe, und genau dann muss ein alter Halter auffliegen.
+    args.fence = new_fence()
+
     name = build_lock_name(args.scope, args.team, args.user, args.condition)
     if not is_lock_file(name):  # defence in depth: must match the canonical regex
         raise SystemExit(f"error: generated name {name!r} is not a valid lock name")
@@ -198,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"error: {lock_path} already exists (use --force to overwrite)"
             ) from None
     print(f"created: {lock_path}")
+    print(f"fence: {args.fence}")
+    print("hint: merke dir die Nummer und pruefe sie vor jedem Schreiben --")
+    print(f"      set LOCK_FENCE={args.fence}")
+    print(f"      set LOCK_FENCE_FILE={lock_path}")
 
     # --- Stufe 2: gleichzeitiger Anspruch ueber einen Sync-Ordner ----------
     # Exklusives Anlegen schuetzt nur lokal. Liegt der Bereich in einem

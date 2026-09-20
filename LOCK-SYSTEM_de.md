@@ -342,8 +342,99 @@ Vorlage: `_scripts/LOCK_TEMPLATE.txt`. Zeilen mit `#` = Kommentar, Leerzeilen ig
 | `mode` | optional | `hard` (keine Aenderung, Default) \| `soft` (Lesen/Hinweis ok). |
 | `purpose` | optional | Freitext: warum gesperrt / was laeuft gerade. |
 | `scope` | optional | nur informativ; autoritativ ist der Dateiname. |
+| `fence` | optional | **Vergabenummer** (Epoch-Mikrosekunden), von `lock_create.py` geschrieben. Steigt je Bereich nur. Der Halter merkt sie sich beim Erwerb und prueft sie vor jedem Schreiben — siehe Abschnitt „Fencing-Tokens“. Fehlt das Feld, ist es ein Lock aus der Zeit davor und wird behandelt wie bisher. |
 
 Fehlt `created` (oder unparsebar), gilt die Datei-mtime als Fallback fuer den Verfall.
+
+---
+
+## Fencing-Tokens: wenn der Halter nicht merkt, dass er die Sperre verloren hat
+
+Eine Frist allein verhindert den bekanntesten Fehler von Lease-Verfahren nicht
+(Martin Kleppmann, „How to do distributed locking“):
+
+1. Agent A erwirbt den Lock und arbeitet.
+2. A pausiert laenger als die TTL — Garbage Collection, Swap, Standby, haengender
+   Sync-Aufruf, unterbrochene SSH-Sitzung.
+3. Die Sperre verfaellt. `prune_stale_locks.py` raeumt sie, oder Agent B erwirbt sie.
+4. A arbeitet weiter. **A weiss nicht, dass er die Sperre verloren hat**, und schreibt
+   in denselben Bereich wie B.
+
+Der Fehler ist still: beide melden Erfolg, und ueber OneDrive kann daraus zusaetzlich
+eine Konfliktkopie werden (Abweichung A7). Die Frist kann das nicht fangen, weil A
+nach dem Aufwachen gar nichts mehr liest.
+
+**Die Nummer schliesst die Luecke.** Jede Vergabe erhaelt eine Zahl im Feld
+`fence:`, die je Bereich nur steigen kann. Der Halter merkt sie sich und prueft sie
+**vor jedem Schreib- oder Push-Vorgang** gegen die Datei am Zielort. Eine hoehere
+Nummer heisst: das Lease ist weitergegangen — Schreibvorgang ablehnen, nicht
+heimlich fortsetzen.
+
+```
+python lock_create.py <projekt> --scope docs --owner agent-A
+  created: ...\LOCK.docs.txt
+  fence: 1789902599751740
+  hint: merke dir die Nummer und pruefe sie vor jedem Schreiben --
+        set LOCK_FENCE=1789902599751740
+        set LOCK_FENCE_FILE=...\LOCK.docs.txt
+```
+
+Geprueft wird entweder im Prozess
+
+```python
+status, grund = lock_utils.fence_status(lock_path, mein_fence)   # "held" | "lost" | "unknown"
+```
+
+oder von der Shell aus (Exit 0 = gilt noch, 1 = verloren):
+
+```
+python lock_scan.py --verify-fence <LOCK-Datei> --fence <n>
+```
+
+**Was als „verloren“ gilt (fail-closed).** Alles, was nicht nachweislich noch der
+eigene Anspruch ist: die Datei ist verschwunden; sie traegt eine hoehere (oder
+niedrigere) Nummer; sie traegt gar keine Nummer mehr, weil ein aelterer Schreiber sie
+neu angelegt hat; oder der **eigene** Anspruch ist abgelaufen, obwohl die Datei noch
+daliegt — das Fenster zwischen Fristablauf und `prune`.
+
+**Warum Uhrzeit und kein Zaehler.** Ein Zaehler braucht ein atomares Inkrement, das
+alle Schreiber teilen. Ueber einen Cloud-Ordner mit 30 s bis 5 min Sync-Latenz gibt es
+das nicht: zwei Hosts lesen beide 5 und schreiben beide 6. Eine per Rename erzeugte
+Sequenzdatei hat dieselbe Luecke — das Rename ist auf jedem Host fuer sich atomar, und
+genau das hilft einem gemeinsamen Zaehler nicht. Die Uhrzeit hat diese Luecke nicht,
+weil eine Vergabe immer **nach** der Vergabe liegt, die sie abloest: B kann erst
+erwerben, wenn A's TTL abgelaufen ist, also liegen beide mindestens eine TTL
+auseinander — weit ueber jedem plausiblen Uhrenversatz zwischen Hosts.
+
+Das leiht sich keine neue Annahme: `expires_after` wird **ohnehin schon** gegen die
+lokale Uhr jedes Hosts gerechnet, und das Contest-Verfahren ordnet Anspruechen
+**ohnehin schon** nach `created` mit Host-Tiebreak. Driften die Uhren weit genug,
+um Fencing zu brechen, war der Verfall vorher kaputt.
+
+**Verbleibende Luecke, ausdruecklich benannt:** Fencing ist hier so stark wie die
+Uhren-Uebereinstimmung der Hosts, und die Durchsetzung bleibt kooperativ — ein
+Schreiber, der seine Nummer nie liest, wird von keinem Dateisystem gestoppt. Gewonnen
+ist, dass ein Schreiber, der **prueft**, sich nicht mehr darueber irren kann, ob er die
+Sperre noch haelt. Ein Wachprozess, der das erzwingt statt es anzubieten, waere ein
+eigener Baustein und ist hier nicht gebaut.
+
+**Der Push-Guard prueft dieselbe Bedingung.**
+`~/.claude/hooks/lock_push_guard.py` wertet `LOCK_FENCE` und `LOCK_FENCE_FILE` aus und
+blockiert den Push, sobald der Anspruch nicht mehr gilt. Ohne gesetztes `LOCK_FENCE`
+aendert sich am bisherigen Verhalten nichts; ist `LOCK_FENCE` gesetzt, aber
+`LOCK_FENCE_FILE` nicht, blockiert er ebenfalls — ein deklarierter, aber nicht
+pruefbarer Anspruch ist kein Freibrief.
+
+**Rueckwaertskompatibel in beide Richtungen.** Fehlt `fence`, gilt der bisherige
+Zustand; bestehende Sperren brechen nicht und laufen unveraendert ab. Umgekehrt ist
+`fence:` fuer jeden aelteren Leser nur eine weitere `key: value`-Zeile, die er wie alle
+ihm unbekannten Felder ignoriert. `fence` fehlt ist **nicht** `fence: 0` — wer beides
+gleichsetzt, sperrt alte Locks aus.
+
+**Bei Erneuerung** (`created` nachziehen, damit eine lange Arbeit nicht verfaellt) bleibt
+`fence` stehen. Erneuert wird dasselbe Lease, nicht ein neues vergeben. Nur `--force`
+zaehlt als neue Vergabe und bekommt eine neue Nummer — dort soll ein alter Halter ja
+gerade auffliegen.
 
 ---
 

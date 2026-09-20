@@ -25,6 +25,11 @@
 #   mode              (optional) hard (keine Aenderungen, Default) | soft (Lesen/Hinweis ok).
 #   purpose           (optional) Freitext: warum gesperrt / was laeuft gerade.
 #   scope             (optional) nur informativ; autoritativ ist der Dateiname.
+#   fence             (optional) Vergabenummer (Epoch-Mikrosekunden), von lock_create.py
+#                                gesetzt. Steigt je Bereich nur. Der Halter merkt sie sich
+#                                und prueft sie vor jedem Schreiben (lock_utils.fence_status /
+#                                lock_scan.py --verify-fence). Ohne das Feld gilt der
+#                                bisherige Zustand. Abschnitt "Fencing-Tokens" in der Spec.
 #
 # Freigeben: diese Datei loeschen. Abgelaufene Locks (> expires_after) entfernt
 # der systemweite Stale-Cleanup (_scripts/prune_stale_locks.py) automatisch.
@@ -43,3 +48,7 @@ release_condition: [Bedingung oder leer lassen]
 mode: hard
 purpose: [Warum ist der Bereich gesperrt? Was wird gerade gemacht?]
 scope: [project | <scope>]
+# Vergabenummer: NICHT von Hand setzen, sondern den Lock mit lock_create.py anlegen.
+# Bei Erneuerung (created nachziehen) bleibt die Nummer stehen - erneuert wird dasselbe
+# Lease, nicht ein neues vergeben.
+#   fence: 1789902599751740

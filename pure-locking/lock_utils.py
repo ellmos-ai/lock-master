@@ -38,6 +38,14 @@ File format (one setting per line, stdlib parser, no extra dependency):
     mode              (optional)  "hard" (default) | "soft".
     purpose           (optional)  Free-text description.
     scope             (optional)  Informational only; AUTHORITATIVE is the filename.
+    fence             (optional)  Grant number (epoch microseconds) written by
+                                  lock_create.py. Only ever goes up for a given
+                                  area. The holder records it at acquisition and
+                                  re-checks it before every write, so a holder
+                                  that stalled past its TTL finds out that the
+                                  lease moved on instead of writing blind --
+                                  see fence_status(). Absent = a lock from
+                                  before fencing; handled exactly as before.
 """
 
 from __future__ import annotations
@@ -455,6 +463,104 @@ def lock_host(lock_path: Path) -> str | None:
     coordination). Returns None when the field is absent (backwards
     compatible)."""
     return parse_lock_file(lock_path).get("host") or None
+
+
+# ---------------------------------------------------------------------------
+# Fencing tokens -- a grant number that survives a lost lease
+# ---------------------------------------------------------------------------
+# A TTL lock alone cannot stop the classic failure (Kleppmann, "How to do
+# distributed locking"): holder A stalls past its TTL, prune or holder B takes
+# the lock, A wakes up and keeps writing. A never learns it was displaced.
+#
+# The fix is a number handed out with every grant that only ever goes up. The
+# holder remembers it, and every write checks it against the lock on disk. A
+# lower number means: the lease moved on without you.
+#
+# WHY WALL-CLOCK MICROSECONDS AND NOT A COUNTER FILE.
+# A counter needs an atomic increment shared by all writers. Over a cloud
+# folder with 30 s to 5 min sync latency there is none: two hosts both read 5
+# and both write 6. A rename-created sequence file has the same hole -- the
+# rename is atomic on each host separately, which is exactly not what a
+# counter needs. Wall-clock time has no such hole, because a grant can only
+# ever happen after the grant it replaces:
+#
+#     fence(B) > fence(A)  whenever B acquires after A's grant
+#
+# and B can only acquire after A's TTL has run out, so the two are at least
+# one TTL apart. That is far above any plausible clock skew between hosts.
+#
+# This borrows no new assumption: `expires_after` is ALREADY compared against
+# each host's local clock, and contested.py ALREADY orders claims by `created`
+# with a host tiebreak. If clocks drift far enough to break fencing, expiry
+# itself was broken first.
+#
+# RESIDUAL GAP (named on purpose, not papered over): fencing here is as strong
+# as clock agreement between hosts, and enforcement is cooperative -- a writer
+# that never reads its fence is not stopped by anything on the filesystem.
+# What this buys is that a writer which DOES check can no longer be wrong
+# about holding the lock.
+
+_FENCE_RE = re.compile(r"^\d{1,19}$")
+
+FENCE_HELD = "held"
+FENCE_LOST = "lost"
+FENCE_UNKNOWN = "unknown"
+
+
+def new_fence(now: datetime | None = None) -> int:
+    """Grant number for a NEW acquisition: epoch microseconds."""
+    now = now or datetime.now()
+    return int(now.timestamp() * 1_000_000)
+
+
+def lock_fence(lock_path: Path) -> int | None:
+    """Grant number from the 'fence' field, or None when absent/unparsable.
+
+    None means "this file predates fencing" -- NOT "fence 0". Callers must
+    keep the two apart; that distinction is what makes old locks keep working.
+    """
+    raw = (parse_lock_file(lock_path).get("fence") or "").strip()
+    if not _FENCE_RE.match(raw):
+        return None
+    return int(raw)
+
+
+def fence_status(lock_path: Path, my_fence: int | None,
+                 now: datetime | None = None) -> tuple[str, str]:
+    """Do I still hold the grant I acquired? Returns (status, reason).
+
+    This is the single gate every writer should pass before touching the
+    locked area -- one guard where all callers route through, rather than one
+    per caller.
+
+    'unknown' only when the caller never recorded a fence (pre-fencing
+    holder); then the old, unchecked behaviour applies and nothing changes.
+    Everything else is fail-closed: anything that is not provably still my
+    grant is reported as 'lost'.
+    """
+    if my_fence is None:
+        return FENCE_UNKNOWN, "caller recorded no fence (pre-fencing holder)"
+    if not lock_path.exists():
+        return FENCE_LOST, f"lock file is gone: {lock_path.name}"
+    current = lock_fence(lock_path)
+    if current is None:
+        return FENCE_LOST, (
+            f"{lock_path.name} carries no fence -- it was re-created by a "
+            "writer that does not know about fencing"
+        )
+    if current > my_fence:
+        return FENCE_LOST, f"lease moved on: fence {current} > own fence {my_fence}"
+    if current < my_fence:
+        return FENCE_LOST, (
+            f"fence went backwards: {current} < own fence {my_fence} -- "
+            "clock jump or a restored copy; refusing either way"
+        )
+    if is_expired(lock_path, now):
+        return FENCE_LOST, (
+            "own grant expired (TTL passed) -- the file is still here but the "
+            "lease is not; renew before continuing"
+        )
+    return FENCE_HELD, f"fence {my_fence} still current"
 
 
 def find_lock_files(project_dir: Path, include_legacy: bool = True):

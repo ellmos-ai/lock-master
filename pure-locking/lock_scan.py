@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -205,6 +206,7 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
                 "operations": data.get("operations", ""),
                 "release_condition": data.get("release_condition", ""),
                 "not_before": data.get("not_before", ""),
+                "fence": data.get("fence", ""),
                 "remaining": remaining,
             })
     out.sort(key=lambda r: r["path"])
@@ -446,7 +448,37 @@ def main() -> int:
         "present (default: guard hooks are reported but do not change the "
         "exit code).",
     )
+    parser.add_argument(
+        "--verify-fence",
+        metavar="LOCKFILE",
+        help="Check whether the grant number given with --fence is still the "
+        "current one for LOCKFILE. Exit 0 = still held, 1 = lost (the lease "
+        "moved on, the file is gone, or the own grant expired), 2 = usage "
+        "error. Fail-closed: anything that is not provably still your grant "
+        "counts as lost.",
+    )
+    parser.add_argument(
+        "--fence",
+        type=int,
+        default=None,
+        help="With --verify-fence: the grant number recorded at acquisition "
+        "(printed by lock_create.py).",
+    )
     args = parser.parse_args()
+
+    if args.verify_fence:
+        if args.fence is None:
+            print("lock_scan --verify-fence: --fence <n> is required",
+                  file=sys.stderr)
+            return 2
+        status, reason = lock_utils.fence_status(Path(args.verify_fence), args.fence)
+        if args.json:
+            print(json.dumps({"lock": args.verify_fence, "fence": args.fence,
+                              "status": status, "reason": reason},
+                             ensure_ascii=False))
+        else:
+            print(f"lock_scan --verify-fence: {status.upper()} -- {reason}")
+        return 0 if status == lock_utils.FENCE_HELD else 1
 
     if args.check_dir:
         return _check_dir(Path(args.check_dir), args.json, args.strict,
@@ -481,6 +513,7 @@ def main() -> int:
         print(
             f"      scope={r['scope']} owner={owner} created={r['created']} "
             f"({r['created_source']}) remaining={r['remaining']}"
+            + (f" fence={r['fence']}" if r.get("fence") else "")
         )
     return 0
 
