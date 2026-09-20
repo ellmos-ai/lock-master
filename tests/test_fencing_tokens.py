@@ -15,6 +15,7 @@ Ticket T-20260920-692115839.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -222,3 +223,142 @@ def test_verify_fence_cli_exit_codes(tmp_path):
 
     assert verify(fence_a) == 0
     assert verify(fence_a - 1) == 1
+
+
+
+# --- fail-closed: aus einem Fehler darf kein Besitznachweis werden ---------
+# Alle Faelle hier stammen aus dem Codex-Review zu PR #8 (Punkt 3). Sie sind
+# das Gegenteil eines Randfalls: jeder einzelne meldete vorher "held" fuer
+# einen Halter, dem die Bibliothek den Anspruch laengst abspricht.
+
+def test_verdict_comes_from_exactly_one_read(tmp_path, monkeypatch):
+    """Zwei Reads = zwei Zustaende. Der Verdict braucht genau einen.
+
+    Vorher las fence_status() erst die Nummer und dann den Ablauf. Wurde die
+    Datei dazwischen ersetzt, entstand ein MISCHURTEIL aus zwei Zustaenden --
+    A's Nummer gegen B's Ablauf -- und meldete 'held' fuer einen Halter, den
+    ein einzelner Read als verloren ausweist.
+
+    Getestet wird die Ursache, nicht das Symptom: dass ueberhaupt nur einmal
+    gelesen wird. Dass ein Wechsel NACH dem Read unbemerkt bleibt, ist keine
+    Schwaeche dieses Fixes, sondern die Architekturgrenze aus Punkt 1 des
+    Reviews -- eine Pruefung vor dem Schreiben ist keine Durchsetzung am
+    Schreibziel, und kein Lesevorgang kann die Zukunft kennen.
+    """
+    lock = tmp_path / "LOCK.work.txt"
+    fence_a = _acquire(tmp_path, "agent-A")
+
+    real_read = Path.read_text
+    reads = []
+
+    def counting_read(self, *args, **kwargs):
+        if self == lock:
+            reads.append(1)
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read)
+    status, _ = lock_utils.fence_status(lock, fence_a)
+    monkeypatch.undo()
+
+    assert len(reads) == 1, f"genau ein Read erwartet, waren {len(reads)}"
+    assert status == lock_utils.FENCE_HELD
+
+    # Und der Gegenbeweis: mit B in der Datei faellt derselbe eine Read anders
+    # aus -- die beiden Zustaende sind also wirklich unterscheidbar, der Test
+    # oben zeigt nicht nur ein zufaellig gleiches Ergebnis.
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    lock.write_text(f"owner: agent-B\ncreated: {stamp}\n"
+                    f"expires_after: 24h\nfence: {fence_a + 999}\n", encoding="utf-8")
+    assert lock_utils.fence_status(lock, fence_a)[0] == lock_utils.FENCE_LOST
+
+
+def test_unreadable_lock_is_lost_not_a_default(tmp_path, monkeypatch):
+    """Ein Lesefehler darf nicht ueber den 24h-Default zu 'held' werden."""
+    lock = tmp_path / "LOCK.work.txt"
+    fence_a = _acquire(tmp_path, "agent-A")
+
+    def boom(self, *args, **kwargs):
+        if self == lock:
+            raise PermissionError("locked by another process")
+        return Path.read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", boom)
+    status, reason = lock_utils.fence_status(lock, fence_a)
+    monkeypatch.undo()
+    assert status == lock_utils.FENCE_LOST, reason
+    assert "unreadable" in reason or "gone" in reason
+
+
+def test_duplicate_fields_last_value_wins(tmp_path):
+    """Doppelte Felder: der letzte Wert gilt -- und der Guard spiegelt das.
+
+    Der Hook nahm per Regex den ERSTEN Treffer, der Dict-Parser den letzten.
+    Damit urteilten Bibliothek und Guard verschieden ueber dieselbe Datei.
+    """
+    lock = tmp_path / "LOCK.work.txt"
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    lock.write_text(
+        f"owner: A\ncreated: {stamp}\nexpires_after: 24h\nfence: 1000\nfence: 2000\n",
+        encoding="utf-8")
+    assert lock_utils.lock_fence(lock) == 2000
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST
+    assert lock_utils.fence_status(lock, 2000)[0] == lock_utils.FENCE_HELD
+
+
+def test_legacy_expiry_paths_still_expire(tmp_path):
+    """Fehlende/kaputte Zeitfelder bedeuten Default bzw. mtime, nie 'unbegrenzt'.
+
+    Der Hook liess genau diese drei Faelle als gueltig durchgehen, obwohl
+    lock_utils sie als verfallen meldet -- die Tabelle im Codex-Review.
+    """
+    stale = (datetime.now() - timedelta(hours=30))
+    for name, body in (
+        ("LOCK.a.txt", f"owner: A\ncreated: {stale:%Y-%m-%dT%H:%M:%S}\nfence: 1000\n"),
+        ("LOCK.b.txt", f"owner: A\ncreated: {stale:%Y-%m-%dT%H:%M:%S}\n"
+                       "expires_after: broken\nfence: 1000\n"),
+        ("LOCK.c.txt", "owner: A\nexpires_after: 24h\nfence: 1000\n"),
+    ):
+        lock = tmp_path / name
+        lock.write_text(body, encoding="utf-8")
+        os.utime(lock, (stale.timestamp(), stale.timestamp()))
+        assert lock_utils.is_expired(lock), f"{name}: 30h alt muss verfallen sein"
+        assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST, name
+
+
+# --- die Grenze selbst, als Test festgehalten -----------------------------
+
+def test_pause_between_check_and_write_is_not_prevented(tmp_path):
+    """Die Luecke, die dieses Verfahren NICHT schliesst -- bewusst als Test.
+
+    Codex' Reproduktion `pause_between_check_and_write`: A prueft erfolgreich,
+    pausiert, verliert das Lease per TTL, B erwirbt und schreibt, A fuehrt den
+    laengst freigegebenen Schreibvorgang aus und ueberschreibt B. Alle haben
+    geprueft; die Daten sind trotzdem kaputt.
+
+    Dieser Test behauptet kein Versagen, das behoben werden muesste -- er haelt
+    den Funktionsvertrag fest. Faellt er eines Tages um, weil jemand echte
+    Durchsetzung am Schreibziel gebaut hat, gehoert der Vertrag geaendert.
+    """
+    resource = tmp_path / "daten.txt"
+    lock = tmp_path / "LOCK.work.txt"
+
+    fence_a = _acquire(tmp_path, "agent-A", expires="1h")
+    assert lock_utils.fence_status(lock, fence_a)[0] == lock_utils.FENCE_HELD
+
+    _age(lock, hours=2)                       # A pausiert ueber seine TTL
+    prune_stale_locks.prune({"roots": [{"path": str(tmp_path)}]}, dry_run=False)
+    fence_b = _acquire(tmp_path, "agent-B", expires="1h")
+    resource.write_text("B", encoding="utf-8")
+
+    resource.write_text("A", encoding="utf-8")  # A's alter, freigegebener Write
+    assert resource.read_text(encoding="utf-8") == "A", (
+        "kooperative Erkennung verhindert diesen Schreibvorgang NICHT"
+    )
+
+    # Was das Verfahren leistet: die erneute Pruefung nach der Pause deckt es
+    # auf. Genau deshalb sagt der Vertrag 'unmittelbar vor dem Schreiben
+    # pruefen' -- und nicht 'einmal am Anfang'.
+    status, reason = lock_utils.fence_status(lock, fence_a)
+    assert status == lock_utils.FENCE_LOST, reason
+    assert str(fence_b) in reason
+    assert lock_utils.fence_status(lock, fence_b)[0] == lock_utils.FENCE_HELD

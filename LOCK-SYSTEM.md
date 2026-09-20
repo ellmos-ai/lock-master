@@ -452,11 +452,40 @@ host's local clock, and the contest procedure **already** orders claims by `crea
 with a host tiebreak. If clocks drift far enough to break fencing, expiry itself was
 broken first.
 
-**Residual gap, named on purpose:** fencing here is as strong as clock agreement
-between hosts, and enforcement stays cooperative — a writer that never reads its
-number is stopped by nothing on the filesystem. What this buys is that a writer which
-**does** check can no longer be wrong about holding the lock. A supervisor that
-enforces rather than offers would be a separate building block and is not built here.
+### What this promises, and what it explicitly does not
+
+**This is cooperative DETECTION, not enforcement** -- deliberately the smaller of the
+two claims, because the larger one is not deliverable on this medium and an earlier
+version of this section made it anyway.
+
+**Detected**, for a writer that asks: the lease was handed on (higher number), the
+lease ran out underneath it, the lock file is gone.
+
+**Not prevented:** a write by a holder that has already lost the lock. That is exactly
+Kleppmann's point -- the pause **between the last check and the write**. A checks,
+stalls, loses the lease, B acquires and writes, A's long-approved write lands on top.
+Everyone checked; the data is corrupted anyway. Closing this requires the **storage**
+to validate the token as part of the write -- an atomic compare-and-set on the target.
+A directory synced through a cloud folder has no such operation, and no amount of care
+on this side creates one. A check-write-recheck wrapper shrinks the window, it does not
+close it: its own recheck and rollback carry the same gap.
+
+**How a caller keeps the window small:** check immediately before the write rather than
+at the top of the function; re-check after anything that can block (network, sync,
+subprocess, sleep); size the TTL to the real work so a stall expires instead of
+lingering; and where a true guarantee is required, use a store with a conditional write
+-- a database row, not a file in a synced folder.
+
+**Second limit:** the numbers are wall-clock based, so ordering between hosts is only as
+good as clock agreement. Not a new assumption -- expiry already compares `created`
+against each host's local clock -- but a real one: a clock stepped backwards can produce
+a number that does not rise. `new_fence(previous=...)` covers the takeover case; it
+cannot cover a host that was never told what it replaces.
+
+**Established by adversarial review** (Codex, 2026-09-20, PR #8): the reproduction
+`pause_between_check_and_write` demonstrates the sequence end to end. The earlier claim
+that a checking writer "can no longer be wrong about holding the lock" was false and has
+been removed rather than softened.
 
 **The push guard checks the same condition.** `lock_push_guard.py` reads `LOCK_FENCE`
 and `LOCK_FENCE_FILE` and blocks the push as soon as the grant no longer holds.

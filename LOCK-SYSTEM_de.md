@@ -411,12 +411,45 @@ lokale Uhr jedes Hosts gerechnet, und das Contest-Verfahren ordnet Anspruechen
 **ohnehin schon** nach `created` mit Host-Tiebreak. Driften die Uhren weit genug,
 um Fencing zu brechen, war der Verfall vorher kaputt.
 
-**Verbleibende Luecke, ausdruecklich benannt:** Fencing ist hier so stark wie die
-Uhren-Uebereinstimmung der Hosts, und die Durchsetzung bleibt kooperativ — ein
-Schreiber, der seine Nummer nie liest, wird von keinem Dateisystem gestoppt. Gewonnen
-ist, dass ein Schreiber, der **prueft**, sich nicht mehr darueber irren kann, ob er die
-Sperre noch haelt. Ein Wachprozess, der das erzwingt statt es anzubieten, waere ein
-eigener Baustein und ist hier nicht gebaut.
+### Was das zusagt — und was ausdruecklich nicht
+
+**Dies ist kooperative ERKENNUNG, keine Durchsetzung.** Die kleinere der beiden
+Zusagen, bewusst: Die groessere ist auf diesem Medium nicht einloesbar, und eine
+fruehere Fassung dieses Abschnitts hat sie trotzdem gegeben.
+
+**Erkannt wird** — fuer einen Schreiber, der fragt: die Sperre wurde weitergegeben
+(hoehere Nummer), das Lease ist unter ihm abgelaufen, die Lockdatei ist verschwunden.
+
+**NICHT verhindert** wird der Schreibvorgang eines Halters, der die Sperre schon
+verloren hat. Genau darum geht es bei Kleppmann: um die **Pause zwischen der letzten
+Pruefung und dem Schreiben**. A prueft, pausiert, verliert das Lease, B erwirbt und
+schreibt, A's laengst freigegebener Schreibvorgang landet obendrauf. Alle haben
+geprueft, die Daten sind trotzdem kaputt. Das zu schliessen verlangt, dass der
+**Speicher** die Nummer als Teil des Schreibvorgangs prueft — ein atomares
+Compare-and-Set am Ziel. Ein ueber einen Cloud-Ordner synchronisiertes Verzeichnis
+kennt diese Operation nicht; keine Sorgfalt auf dieser Seite erzeugt sie. Ein
+Wrapper „pruefen, schreiben, nachpruefen" verkleinert das Fenster, schliesst es
+nicht: seine eigene Nachpruefung und sein Rollback haben dieselbe Luecke.
+
+**Was der Aufrufer praktisch tun kann, um das Fenster klein zu halten:**
+
+- unmittelbar vor dem Schreiben pruefen, nicht am Anfang der Funktion
+- nach allem, was blockieren kann, erneut pruefen (Netz, Sync, Subprozess, Warten)
+- die TTL an der tatsaechlichen Arbeitsdauer ausrichten, damit ein Stillstand
+  ablaeuft statt liegenzubleiben
+- wo eine echte Garantie noetig ist, ein Medium mit bedingtem Schreiben waehlen —
+  eine Datenbankzeile, keine Datei in einem synchronisierten Ordner
+
+**Zweite Grenze:** Die Nummern sind wanduhrbasiert, die Ordnung zwischen Hosts also
+nur so gut wie die Uhren-Uebereinstimmung. Das ist keine neue Annahme — `expires_after`
+rechnet ohnehin gegen die lokale Uhr —, aber eine echte: Eine zurueckgestellte Uhr
+kann eine Nummer erzeugen, die nicht steigt. `new_fence(previous=...)` deckt den
+Uebernahmefall ab; einen Host, dem nie gesagt wurde, was er abloest, deckt es nicht.
+
+**Belegt durch Gegenpruefung** (Codex, 2026-09-20, PR #8): Die Reproduktion
+`pause_between_check_and_write` zeigt den Ablauf vollstaendig. Die fruehere Zusage,
+ein pruefender Schreiber koenne sich „nicht mehr darueber irren, ob er die Sperre
+haelt", war falsch und wurde entfernt statt abgeschwaecht.
 
 **Der Push-Guard prueft dieselbe Bedingung.**
 `~/.claude/hooks/lock_push_guard.py` wertet `LOCK_FENCE` und `LOCK_FENCE_FILE` aus und
