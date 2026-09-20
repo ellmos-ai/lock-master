@@ -507,10 +507,33 @@ FENCE_LOST = "lost"
 FENCE_UNKNOWN = "unknown"
 
 
-def new_fence(now: datetime | None = None) -> int:
-    """Grant number for a NEW acquisition: epoch microseconds."""
-    now = now or datetime.now()
-    return int(now.timestamp() * 1_000_000)
+# Last number handed out in THIS process. The system clock is not fine-grained
+# enough to rely on alone: Windows ticks at roughly 15.6 ms, so two grants a few
+# lines apart read the same microsecond value. Measured in CI on windows-latest
+# 3.11/3.12, where --force right after an acquisition produced an IDENTICAL
+# number -- which would have left the displaced holder reading "held".
+_last_fence = 0
+
+
+def new_fence(previous: int | None = None, now: datetime | None = None) -> int:
+    """Grant number for a NEW acquisition: epoch microseconds, forced upward.
+
+    `previous` is the number the area carries right now, if any. Passing it is
+    what makes the guarantee hold ACROSS processes: a takeover (--force) reads
+    the number it displaces and steps past it, instead of trusting that the
+    clock has moved on since. Without that, the one case fencing exists for --
+    replacing a stalled holder -- is the case where it can silently fail.
+
+    The wall clock still sets the value whenever it is ahead, so numbers stay
+    comparable between hosts (see the block above for why time and not a
+    counter). The floor only ever nudges, never resets.
+    """
+    global _last_fence
+    candidate = int((now or datetime.now()).timestamp() * 1_000_000)
+    floor = max(_last_fence, previous or 0) + 1
+    fence = max(candidate, floor)
+    _last_fence = fence
+    return fence
 
 
 def lock_fence(lock_path: Path) -> int | None:

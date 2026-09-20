@@ -26,7 +26,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from lock_utils import is_lock_file, new_fence
+from lock_utils import is_lock_file, lock_fence, new_fence
 
 _SCOPE_OK = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
@@ -181,15 +181,19 @@ def main(argv: list[str] | None = None) -> int:
         args.host = args.host or platform.node() or "unknown"
     args.owner = args.owner or f"lock_create/{args.host}"
 
-    # Neue Vergabe = neue Nummer. Auch bei --force: ein Ueberschreiben ist eine
-    # neue Vergabe, und genau dann muss ein alter Halter auffliegen.
-    args.fence = new_fence()
-
     name = build_lock_name(args.scope, args.team, args.user, args.condition)
     if not is_lock_file(name):  # defence in depth: must match the canonical regex
         raise SystemExit(f"error: generated name {name!r} is not a valid lock name")
 
     lock_path = project_dir / name
+
+    # Neue Vergabe = neue Nummer. Auch bei --force: ein Ueberschreiben IST eine
+    # neue Vergabe, und genau dann muss ein alter Halter auffliegen. Deshalb die
+    # abzuloesende Nummer mitgeben statt darauf zu vertrauen, dass die Uhr
+    # inzwischen weitergelaufen ist -- bei 15,6 ms Windows-Takt tut sie das
+    # zwischen zwei Aufrufen oft nicht.
+    args.fence = new_fence(lock_fence(lock_path) if lock_path.exists() else None)
+
     scope_label = args.scope or "project"
     body = build_lock_body(args, scope_label)
 

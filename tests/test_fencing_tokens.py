@@ -176,6 +176,36 @@ def test_force_overwrite_counts_as_a_new_grant(tmp_path):
     assert lock_utils.fence_status(lock, fence_a)[0] == lock_utils.FENCE_LOST
 
 
+def test_same_clock_tick_still_yields_a_higher_number():
+    """A coarse clock must not hand out the same number twice.
+
+    Windows ticks at roughly 15.6 ms, so two grants a few lines apart read the
+    same microsecond value -- CI on windows-latest 3.11/3.12 produced exactly
+    that, and the displaced holder would have read "held". Pinning `now` here
+    reproduces it on every platform instead of leaving it to the scheduler.
+    """
+    frozen = datetime(2026, 9, 20, 12, 0, 0)
+    saved = lock_utils._last_fence
+    try:
+        lock_utils._last_fence = 0
+        first = lock_utils.new_fence(now=frozen)
+        second = lock_utils.new_fence(now=frozen)
+        assert second > first, "same tick must still move the number"
+
+        # Across processes the in-process floor is gone, so a takeover steps
+        # past the number it displaces -- that is what `previous` is for.
+        lock_utils._last_fence = 0
+        assert lock_utils.new_fence(previous=10**18, now=frozen) > 10**18
+
+        # The floor only ever nudges: a clock that IS ahead still sets the
+        # value, so numbers stay comparable between hosts.
+        lock_utils._last_fence = 0
+        ahead = datetime(2099, 1, 1)
+        assert lock_utils.new_fence(now=ahead) == int(ahead.timestamp() * 1_000_000)
+    finally:
+        lock_utils._last_fence = saved
+
+
 # --- CLI -------------------------------------------------------------------
 
 def test_verify_fence_cli_exit_codes(tmp_path):
