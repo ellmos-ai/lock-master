@@ -9,7 +9,8 @@
   "visibility": "public",
   "provides": [
     "control.locks",
-    "control.permissions"
+    "control.permissions",
+    "coordination.locking"
   ],
   "requires": [],
   "optional": [],
@@ -39,4 +40,3 @@
   },
   "adapters": []
 }
-
