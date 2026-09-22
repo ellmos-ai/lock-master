@@ -319,8 +319,22 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     (T-20260906-910508487). "Free" below means "no LOCK file", not
     "pushable". Hooks are reported as a warning and do NOT change the
     Exit 0/1 semantics unless --strict is given (then: 2 = free of LOCK
-    files but a guard hook is present)."""
+    files but a guard hook is present).
+
+    A target that does not exist (typo'd or stale path) is a usage error,
+    not "free": Path.resolve() normalizes a nonexistent path without
+    raising, so without this check a mistyped --check-dir call silently
+    reported exit 0 "free" -- worse than any other failure mode, since it
+    looks identical to a genuinely clear directory (T-20260922-626871087)."""
     target = target.resolve()
+    if not target.is_dir():
+        msg = f"lock_scan --check-dir: {target} does not exist -- not 'free', a usage error."
+        if as_json:
+            print(json.dumps({"checked": str(target), "error": "target-not-found"},
+                              ensure_ascii=False))
+        else:
+            print(msg, file=sys.stderr)
+        return 2
     now = datetime.now()
     hits = lock_utils.active_locks_for_path(target, now)
 
@@ -438,8 +452,8 @@ def main() -> int:
         "checked too (T-20260903-592302105). Also reports active git guard "
         "hooks (pre-push/pre-commit/pre-receive) for PATH -- 'free' means "
         "no LOCK file, not 'pushable' (T-20260906-910508487). "
-        "Exit 0 = free, 1 = locked, 2 = free but a guard hook is present "
-        "(only with --strict).",
+        "Exit 0 = free, 1 = locked, 2 = usage error (PATH does not exist, "
+        "or -- only with --strict -- free but a guard hook is present).",
     )
     parser.add_argument(
         "--strict",

@@ -517,6 +517,15 @@ Warnung neben dem Lock-Ergebnis gemeldet, nie als Sperre gewertet — ausser
 Guard-Hook vorhanden. Wer automatisiert pusht, prueft also beides: den Lock
 **und** die Guard-Zeile.
 
+**Exit 2 bedeutet zusaetzlich: PATH existiert nicht.** `Path.resolve()`
+normalisiert einen nicht existierenden Pfad ohne Fehler — ohne diese Pruefung
+las ein vertippter oder veralteter PATH stillschweigend als "frei". Live-Fall
+(T-20260922-626871087): `--check-dir .../.HACKATHONS/2026-roshambo` (ohne das
+Segment `.TOPICS`) meldete Exit 0, obwohl der echte Ordner ein aktives
+`LOCK.user.txt` trug. Kein Zwillings-/Zwei-Baeume-Problem — die
+Zwillingsaufloesung oben funktionierte bereits korrekt; der fehlende Pfad
+wurde nur nie als Fehler erkannt.
+
 ---
 
 ## Umstrittene Locks: gleichzeitige Claims ueber einen synchronisierten Ordner

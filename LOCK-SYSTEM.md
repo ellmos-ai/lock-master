@@ -687,9 +687,12 @@ python lock_scan.py --check-dir /path/to/project
 python lock_scan.py --check-dir /path/to/project --json
 python lock_scan.py --check-dir /path/to/project --strict
 ```
-Exit 0 = free, 1 = a LOCK file applies, 2 = free of LOCK files but a guard
-hook is present (only with `--strict`; without it, guard hooks are reported
-but never change the exit code).
+Exit 0 = free, 1 = a LOCK file applies, 2 = usage error -- PATH does not
+exist (Path.resolve() normalizes a nonexistent path without raising, so
+without this check a mistyped or stale PATH silently read as "free";
+T-20260922-626871087), or -- only with `--strict` -- free of LOCK files but
+a guard hook is present (without `--strict`, guard hooks are reported but
+never change the exit code).
 
 **Remove expired locks:**
 ```

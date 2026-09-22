@@ -165,6 +165,40 @@ def test_andere_pointer_schemata_gelten_als_lesbar():
     assert lock_utils._pointer_repo_name({"schema": "x"}) is None
 
 
+def test_check_dir_nichtexistenter_pfad_ist_kein_frei():
+    """Regressionsfall T-20260922-626871087: ein vertippter/veralteter Pfad
+    wurde als 'free' (Exit 0) gemeldet -- Path.resolve() normalisiert einen
+    nicht existierenden Pfad ohne Fehler, ohne expliziten Existenz-Check sieht
+    das wie ein echtes 'frei' aus. Live-Fall: --check-dir bekam
+    '.../.HACKATHONS/2026-roshambo' (ohne '.TOPICS') und meldete Exit 0,
+    obwohl der echte Ordner ein aktives LOCK.user.txt trug. Das ist KEIN
+    Zwillings-/Zwei-Baeume-Problem -- die Zwillingsaufloesung selbst
+    funktioniert (siehe alle Tests oben); der fehlende Pfad wurde nur nie
+    als Fehler erkannt."""
+    with tempfile.TemporaryDirectory() as td:
+        roots = Path(td) / "lock_roots.json"
+        roots.write_text(json.dumps({
+            "default_max_depth": 4, "shallow_depth": 2, "skip_dirs": [],
+            "roots": [],
+        }, ensure_ascii=False), encoding="utf-8")
+        missing = Path(td) / "does-not-exist" / "2026-roshambo"
+
+        result = subprocess.run(
+            [sys.executable, str(CODE_DIR / "lock_scan.py"),
+             "--check-dir", str(missing), "--roots-file", str(roots)],
+            capture_output=True, text=True)
+        assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+        assert "does not exist" in (result.stdout + result.stderr)
+
+        result_json = subprocess.run(
+            [sys.executable, str(CODE_DIR / "lock_scan.py"),
+             "--check-dir", str(missing), "--roots-file", str(roots), "--json"],
+            capture_output=True, text=True)
+        assert result_json.returncode == 2, result_json.returncode
+        payload = json.loads(result_json.stdout)
+        assert payload["error"] == "target-not-found"
+
+
 def test_check_dir_exitcodes_end_to_end():
     """lock_scan --check-dir: Exit 1 ueber den Zwilling, Exit 0 ohne Lock.
     Exitcode OHNE Pipe messen -- sonst misst man die Pipe (LOCK-SYSTEM.md)."""
