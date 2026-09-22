@@ -119,6 +119,7 @@ are ignored.
 | `mode`             | optional | `hard` (no changes, default) \| `soft` (reads/hints ok). |
 | `purpose`          | optional | Free text: why locked / what is running. |
 | `scope`            | optional | Informational only; the filename is authoritative. |
+| `fence`            | optional | **Grant number** (epoch microseconds), written by `lock_create.py`. Only ever goes up for a given area. The holder records it at acquisition and re-checks it before every write — see "Fencing Tokens". Absent = a lock from before fencing, handled exactly as before. |
 
 If `created` is missing or unparseable, the file's mtime is used as fallback
 for expiry calculation.
@@ -393,6 +394,117 @@ roots (`lock_roots.json`) in one step:
 
 ---
 
+## Fencing Tokens: when the holder does not notice it lost the lock
+
+A deadline alone does not prevent the best-known failure of lease schemes
+(Martin Kleppmann, "How to do distributed locking"):
+
+1. Agent A acquires the lock and starts working.
+2. A stalls for longer than the TTL — garbage collection, swap, standby, a hung
+   sync call, a dropped SSH session.
+3. The lease expires. `prune_stale_locks.py` clears it, or agent B acquires it.
+4. A carries on. **A does not know it lost the lock** and writes into the same
+   area as B.
+
+The failure is silent: both report success, and over a cloud folder it can also
+turn into a conflict copy. The deadline cannot catch it, because A reads nothing
+after waking up.
+
+**The grant number closes it.** Every acquisition gets a number in the `fence:`
+field that only ever goes up for a given area. The holder records it and checks it
+**before every write or push** against the file at the target. A higher number
+means the lease moved on: refuse the write instead of quietly continuing.
+
+```
+python lock_create.py <project> --scope docs --owner agent-A
+  created: ...\LOCK.docs.txt
+  fence: 1789902599751740
+```
+
+Check it in-process
+
+```python
+status, reason = lock_utils.fence_status(lock_path, my_fence)   # "held" | "lost" | "unknown"
+```
+
+or from a shell (exit 0 = still held, 1 = lost):
+
+```
+python lock_scan.py --verify-fence <LOCK file> --fence <n>
+```
+
+**What counts as "lost" (fail-closed).** Anything that is not provably still your
+grant: the file is gone; it carries a higher (or lower) number; it carries no number
+at all because a pre-fencing writer re-created it; or **your own** grant expired
+while the file is still lying there — the window between expiry and `prune`.
+
+**Why wall-clock time and not a counter.** A counter needs an atomic increment
+shared by all writers. Over a cloud folder with 30 s to 5 min sync latency there is
+none: two hosts both read 5 and both write 6. A rename-created sequence file has the
+same hole — the rename is atomic on each host separately, which is exactly not what a
+shared counter needs. Wall-clock time has no such hole, because a grant can only ever
+happen **after** the grant it replaces: B can acquire only once A's TTL has run out,
+so the two are at least one TTL apart — far above any plausible clock skew between
+hosts.
+
+This borrows no new assumption: `expires_after` is **already** compared against each
+host's local clock, and the contest procedure **already** orders claims by `created`
+with a host tiebreak. If clocks drift far enough to break fencing, expiry itself was
+broken first.
+
+### What this promises, and what it explicitly does not
+
+**This is cooperative DETECTION, not enforcement** -- deliberately the smaller of the
+two claims, because the larger one is not deliverable on this medium and an earlier
+version of this section made it anyway.
+
+**Detected**, for a writer that asks: the lease was handed on (higher number), the
+lease ran out underneath it, the lock file is gone.
+
+**Not prevented:** a write by a holder that has already lost the lock. That is exactly
+Kleppmann's point -- the pause **between the last check and the write**. A checks,
+stalls, loses the lease, B acquires and writes, A's long-approved write lands on top.
+Everyone checked; the data is corrupted anyway. Closing this requires the **storage**
+to validate the token as part of the write -- an atomic compare-and-set on the target.
+A directory synced through a cloud folder has no such operation, and no amount of care
+on this side creates one. A check-write-recheck wrapper shrinks the window, it does not
+close it: its own recheck and rollback carry the same gap.
+
+**How a caller keeps the window small:** check immediately before the write rather than
+at the top of the function; re-check after anything that can block (network, sync,
+subprocess, sleep); size the TTL to the real work so a stall expires instead of
+lingering; and where a true guarantee is required, use a store with a conditional write
+-- a database row, not a file in a synced folder.
+
+**Second limit:** the numbers are wall-clock based, so ordering between hosts is only as
+good as clock agreement. Not a new assumption -- expiry already compares `created`
+against each host's local clock -- but a real one: a clock stepped backwards can produce
+a number that does not rise. `new_fence(previous=...)` covers the takeover case; it
+cannot cover a host that was never told what it replaces.
+
+**Established by adversarial review** (Codex, 2026-09-20, PR #8): the reproduction
+`pause_between_check_and_write` demonstrates the sequence end to end. The earlier claim
+that a checking writer "can no longer be wrong about holding the lock" was false and has
+been removed rather than softened.
+
+**The push guard checks the same condition.** `lock_push_guard.py` reads `LOCK_FENCE`
+and `LOCK_FENCE_FILE` and blocks the push as soon as the grant no longer holds.
+Without `LOCK_FENCE` nothing about the previous behaviour changes; with `LOCK_FENCE`
+set but `LOCK_FENCE_FILE` missing it blocks as well — a declared but uncheckable
+claim is not a free pass.
+
+**Backwards compatible both ways.** A missing `fence` means the previous behaviour;
+existing locks do not break and expire unchanged. Conversely `fence:` is just one
+more `key: value` line to any older reader, ignored like every other field it does
+not know. Absent is **not** `fence: 0` — equating the two locks out old files.
+
+**On renewal** (bumping `created` so long work does not expire) the `fence` stays.
+Renewal extends the same lease; it does not hand out a new one. Only `--force` counts
+as a new grant and gets a new number — that is precisely where an old holder should
+fall out.
+
+---
+
 ## Two Tiers of Enforcement
 
 **Tier 1 -- RESPECT (always required, everywhere):**
@@ -446,8 +558,20 @@ but a guard hook present" as its own outcome (exit 2).
 ## Lifecycle: RESPECT -> CLAIM -> RELEASE
 
 1. **RESPECT:** check for an active lock on the area before working.
-2. **CLAIM:** create your own `LOCK.txt` or `LOCK.<scope>.txt` from the
-   template (`owner`, ISO `created`, `expires_after`, `purpose`).
+2. **CLAIM:** create your own `LOCK.txt` or `LOCK.<scope>.txt` **with
+   `lock_create.py`**:
+
+   ```
+   python <deploy>/lock_create.py <project dir> --scope <area> --owner <agent> \
+       --purpose "<why>"
+   ```
+
+   The tool creates the file **exclusively** (`open("x")`, see Stage 1 under
+   "Contested Locks"), fills the required fields and hands out the fencing
+   number. **Written by hand from `LOCK_TEMPLATE.txt` the lock has neither** --
+   no protection against a second creator in the same moment, and no number by
+   which a displaced holder can tell it lost the lock. The template stays the
+   field reference; it is not a creation procedure.
 3. **RELEASE:** delete the lock file you created when done. Active release
    by the creator is required; the 24h expiry is only a safety net for
    forgotten locks. If work takes longer, renew `created` so the lock does
@@ -463,7 +587,8 @@ demonstrably first. With cloud sync at 30 s – 5 min latency **both** see an em
 folder, both create, and both consider themselves the holder. This is not an edge
 case: scheduled automations start on several hosts at the same clock time.
 
-**Stage 1 — exclusive creation (always on).** `lock_create.py` creates the lock
+**Stage 1 — exclusive creation (always on).** `lock_create.py` (deployed next to
+`lock_scan.py`) creates the lock
 file exclusively (`open("x")`) instead of checking and then writing. Between the
 check and the write there used to be a window in which a second process creates
 the same file. `--force` still overwrites deliberately.

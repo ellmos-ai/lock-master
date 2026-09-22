@@ -38,6 +38,14 @@ File format (one setting per line, stdlib parser, no extra dependency):
     mode              (optional)  "hard" (default) | "soft".
     purpose           (optional)  Free-text description.
     scope             (optional)  Informational only; AUTHORITATIVE is the filename.
+    fence             (optional)  Grant number (epoch microseconds) written by
+                                  lock_create.py. Only ever goes up for a given
+                                  area. The holder records it at acquisition and
+                                  re-checks it before every write, so a holder
+                                  that stalled past its TTL finds out that the
+                                  lease moved on instead of writing blind --
+                                  see fence_status(). Absent = a lock from
+                                  before fencing; handled exactly as before.
 """
 
 from __future__ import annotations
@@ -259,7 +267,8 @@ def is_until_lock(name: str) -> bool:
     return m.group(1).split(".")[0].lower() == "until"
 
 
-def lock_not_before(lock_path: Path) -> datetime | None:
+def lock_not_before(lock_path: Path,
+                    data: dict[str, str] | None = None) -> datetime | None:
     """Absolute release moment from the 'not_before' field of an until lock.
 
     Accepts an ISO timestamp with or without a UTC offset, e.g.
@@ -270,7 +279,8 @@ def lock_not_before(lock_path: Path) -> datetime | None:
     Returns None when the field is missing or unparsable — callers MUST treat
     that as 'never expires' (fail-closed), never as 'expired'.
     """
-    raw = parse_lock_file(lock_path).get("not_before")
+    fields = parse_lock_file(lock_path) if data is None else data
+    raw = fields.get("not_before")
     if not raw:
         return None
     candidate = raw.strip()
@@ -329,12 +339,24 @@ def is_lock_file(name: str) -> bool:
 
 
 def parse_lock_file(lock_path: Path) -> dict[str, str]:
-    """Parse a LOCK file into a key:value dict (keys lowercased)."""
-    data: dict[str, str] = {}
+    """Parse a LOCK file into a key:value dict (keys lowercased).
+
+    An unreadable file yields {} -- indistinguishable from an empty one. Any
+    caller that must not treat a read failure as "no fields" reads the text
+    itself and hands it to _parse_lock_text (see fence_status)."""
     try:
         text = lock_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return data
+        return {}
+    return _parse_lock_text(text)
+
+
+def _parse_lock_text(text: str) -> dict[str, str]:
+    """The parser behind parse_lock_file, on text that was already read.
+
+    Last value wins on duplicate keys. The push guard mirrors this; a regex
+    taking the FIRST match made the two disagree about the same file."""
+    data: dict[str, str] = {}
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -389,10 +411,17 @@ def _parse_created(value: str | None) -> datetime | None:
     return None
 
 
-def lock_created_and_expiry(lock_path: Path) -> tuple[datetime, timedelta, str]:
+def lock_created_and_expiry(lock_path: Path,
+                            data: dict[str, str] | None = None
+                            ) -> tuple[datetime, timedelta, str]:
     """Return (created, expires_after, source).
-    source = 'header' if created came from the file, else 'mtime' (fallback)."""
-    data = parse_lock_file(lock_path)
+    source = 'header' if created came from the file, else 'mtime' (fallback).
+
+    `data` lets a caller pass fields it has already parsed, so a decision can
+    be made from ONE read of the file instead of several. Re-reading looks
+    harmless and is not: between two reads the file can be replaced, and the
+    caller then judges a state that never existed."""
+    data = parse_lock_file(lock_path) if data is None else data
     created = _parse_created(data.get("created"))
     expires = parse_duration(data.get("expires_after"))
     if created is not None:
@@ -401,8 +430,12 @@ def lock_created_and_expiry(lock_path: Path) -> tuple[datetime, timedelta, str]:
     return mtime, expires, "mtime"
 
 
-def is_expired(lock_path: Path, now: datetime | None = None) -> bool:
+def is_expired(lock_path: Path, now: datetime | None = None,
+               data: dict[str, str] | None = None) -> bool:
     """Time-based expiry.
+
+    `data` = already-parsed fields, so the whole verdict can come from one
+    read of the file (see lock_created_and_expiry).
 
     Until locks expire at the ABSOLUTE moment in their 'not_before' field.
     A missing or unparsable value is fail-closed: the lock never expires, so
@@ -427,7 +460,7 @@ def is_expired(lock_path: Path, now: datetime | None = None) -> bool:
     if is_ambiguous_lock(lock_path.name):
         return False
     if is_until_lock(lock_path.name):
-        moment = lock_not_before(lock_path)
+        moment = lock_not_before(lock_path, data)
         if moment is None:
             return False
         if now <= moment:
@@ -438,13 +471,13 @@ def is_expired(lock_path: Path, now: datetime | None = None) -> bool:
         # alone is enough; 'all'/default/invalid -> the tool cannot verify the
         # free-text condition, so it does not auto-release (fail-closed; the
         # condition side stays a human/agent decision).
-        data = parse_lock_file(lock_path)
-        if not data.get("release_condition"):
+        fields = parse_lock_file(lock_path) if data is None else data
+        if not fields.get("release_condition"):
             return True
-        return (data.get("release_mode") or "all").strip().lower() == "any"
+        return (fields.get("release_mode") or "all").strip().lower() == "any"
     if is_protected_lock(lock_path.name):
         return False
-    created, expires, _ = lock_created_and_expiry(lock_path)
+    created, expires, _ = lock_created_and_expiry(lock_path, data)
     return now > created + expires
 
 
@@ -455,6 +488,178 @@ def lock_host(lock_path: Path) -> str | None:
     coordination). Returns None when the field is absent (backwards
     compatible)."""
     return parse_lock_file(lock_path).get("host") or None
+
+
+# ---------------------------------------------------------------------------
+# Fencing tokens -- a grant number that survives a lost lease
+# ---------------------------------------------------------------------------
+# A TTL lock alone cannot stop the classic failure (Kleppmann, "How to do
+# distributed locking"): holder A stalls past its TTL, prune or holder B takes
+# the lock, A wakes up and keeps writing. A never learns it was displaced.
+#
+# The fix is a number handed out with every grant that only ever goes up. The
+# holder remembers it, and every write checks it against the lock on disk. A
+# lower number means: the lease moved on without you.
+#
+# WHY WALL-CLOCK MICROSECONDS AND NOT A COUNTER FILE.
+# A counter needs an atomic increment shared by all writers. Over a cloud
+# folder with 30 s to 5 min sync latency there is none: two hosts both read 5
+# and both write 6. A rename-created sequence file has the same hole -- the
+# rename is atomic on each host separately, which is exactly not what a
+# counter needs. Wall-clock time has no such hole, because a grant can only
+# ever happen after the grant it replaces:
+#
+#     fence(B) > fence(A)  whenever B acquires after A's grant
+#
+# and B can only acquire after A's TTL has run out, so the two are at least
+# one TTL apart. That is far above any plausible clock skew between hosts.
+#
+# This borrows no new assumption: `expires_after` is ALREADY compared against
+# each host's local clock, and contested.py ALREADY orders claims by `created`
+# with a host tiebreak. If clocks drift far enough to break fencing, expiry
+# itself was broken first.
+#
+# WHAT THIS DOES AND DOES NOT PROMISE -- read this before relying on it.
+#
+# This is COOPERATIVE DETECTION, not enforcement. It is deliberately the
+# smaller of the two claims, because the larger one is not deliverable on this
+# medium and an earlier version of this file made it anyway.
+#
+# It detects, for a writer that asks:
+#   the lease was handed to someone else    (higher number)
+#   the lease ran out under it              (own grant expired)
+#   the lock file went away                 (pruned or deleted)
+#
+# It does NOT prevent a write by a holder that has already lost the lock.
+# Kleppmann's point is precisely the pause BETWEEN the last check and the
+# write: A checks, stalls, loses the lease, B acquires and writes, A's
+# already-approved write lands on top. Every writer checked; the data is still
+# corrupted. Closing that needs the STORAGE to validate the token as part of
+# the write -- an atomic compare-and-set on the target. A directory synced
+# through a cloud folder offers no such operation, so no amount of care on
+# this side produces the guarantee. A check-then-write wrapper would shrink
+# the window, not close it: its own re-check and rollback have the same gap.
+#
+# Practical consequence for callers -- this is how you keep the window small:
+#   check immediately before the write, not at the top of the function
+#   re-check after anything that can block (network, sync, subprocess, sleep)
+#   keep TTLs close to the real work, so a stall expires rather than lingers
+#   where a true guarantee is required, use a store that offers a conditional
+#     write -- a database row, not a file in a synced folder
+#
+# Second limit: the numbers are wall-clock based, so ordering between hosts is
+# only as good as clock agreement. That is not a new assumption -- expiry
+# already compares `created` against each host's local clock -- but it is a
+# real one, and a clock stepped backwards can produce a number that does not
+# rise. `new_fence(previous=...)` covers the takeover case; it cannot cover a
+# host that was never told what it is replacing.
+#
+# Verified by adversarial review (Codex, 2026-09-20, PR #8): the reproduction
+# `pause_between_check_and_write` shows the scenario above end to end. The
+# earlier claim here -- that a writer which checks "can no longer be wrong
+# about holding the lock" -- was false and has been removed rather than
+# softened.
+
+_FENCE_RE = re.compile(r"^\d{1,19}$")
+
+FENCE_HELD = "held"
+FENCE_LOST = "lost"
+FENCE_UNKNOWN = "unknown"
+
+
+# Last number handed out in THIS process. The system clock is not fine-grained
+# enough to rely on alone: Windows ticks at roughly 15.6 ms, so two grants a few
+# lines apart read the same microsecond value. Measured in CI on windows-latest
+# 3.11/3.12, where --force right after an acquisition produced an IDENTICAL
+# number -- which would have left the displaced holder reading "held".
+_last_fence = 0
+
+
+def new_fence(previous: int | None = None, now: datetime | None = None) -> int:
+    """Grant number for a NEW acquisition: epoch microseconds, forced upward.
+
+    `previous` is the number the area carries right now, if any. Passing it is
+    what makes the guarantee hold ACROSS processes: a takeover (--force) reads
+    the number it displaces and steps past it, instead of trusting that the
+    clock has moved on since. Without that, the one case fencing exists for --
+    replacing a stalled holder -- is the case where it can silently fail.
+
+    The wall clock still sets the value whenever it is ahead, so numbers stay
+    comparable between hosts (see the block above for why time and not a
+    counter). The floor only ever nudges, never resets.
+    """
+    global _last_fence
+    candidate = int((now or datetime.now()).timestamp() * 1_000_000)
+    floor = max(_last_fence, previous or 0) + 1
+    fence = max(candidate, floor)
+    _last_fence = fence
+    return fence
+
+
+def lock_fence(lock_path: Path) -> int | None:
+    """Grant number from the 'fence' field, or None when absent/unparsable.
+
+    None means "this file predates fencing" -- NOT "fence 0". Callers must
+    keep the two apart; that distinction is what makes old locks keep working.
+    """
+    return _fence_from(parse_lock_file(lock_path))
+
+
+def _fence_from(data: dict[str, str]) -> int | None:
+    """lock_fence() on already-parsed fields."""
+    raw = (data.get("fence") or "").strip()
+    if not _FENCE_RE.match(raw):
+        return None
+    return int(raw)
+
+
+def fence_status(lock_path: Path, my_fence: int | None,
+                 now: datetime | None = None) -> tuple[str, str]:
+    """Do I still hold the grant I acquired? Returns (status, reason).
+
+    This is the single gate every writer should pass before touching the
+    locked area -- one guard where all callers route through, rather than one
+    per caller.
+
+    'unknown' only when the caller never recorded a fence (pre-fencing
+    holder); then the old, unchecked behaviour applies and nothing changes.
+    Everything else is fail-closed: anything that is not provably still my
+    grant is reported as 'lost'.
+    """
+    if my_fence is None:
+        return FENCE_UNKNOWN, "caller recorded no fence (pre-fencing holder)"
+
+    # ONE read for the whole verdict. Reading the number and the expiry
+    # separately meant judging two different states: replacing the file
+    # between the two reads produced "held" for a holder that a single
+    # consistent read reports as lost. An unreadable file is 'lost', never a
+    # silent fallback -- parse_lock_file() swallows OSError and returns {},
+    # which the expiry path would have turned into a 24h default and thus
+    # into a POSITIVE ownership claim built out of a failure.
+    try:
+        data = _parse_lock_text(lock_path.read_text(encoding="utf-8", errors="replace"))
+    except OSError as exc:
+        return FENCE_LOST, f"lock file is gone or unreadable: {lock_path.name} ({exc.__class__.__name__})"
+
+    current = _fence_from(data)
+    if current is None:
+        return FENCE_LOST, (
+            f"{lock_path.name} carries no fence -- it was re-created by a "
+            "writer that does not know about fencing"
+        )
+    if current > my_fence:
+        return FENCE_LOST, f"lease moved on: fence {current} > own fence {my_fence}"
+    if current < my_fence:
+        return FENCE_LOST, (
+            f"fence went backwards: {current} < own fence {my_fence} -- "
+            "clock jump or a restored copy; refusing either way"
+        )
+    if is_expired(lock_path, now, data=data):
+        return FENCE_LOST, (
+            "own grant expired (TTL passed) -- the file is still here but the "
+            "lease is not; renew before continuing"
+        )
+    return FENCE_HELD, f"fence {my_fence} still current"
 
 
 def find_lock_files(project_dir: Path, include_legacy: bool = True):

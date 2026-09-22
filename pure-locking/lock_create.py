@@ -26,7 +26,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from lock_utils import is_lock_file
+from lock_utils import is_lock_file, lock_fence, new_fence
 
 _SCOPE_OK = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
@@ -69,6 +69,12 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
         # strukturell immer. lock_utils._parse_created liest Sekunden bereits.
         f"created: {datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}",
         f"host: {args.host}",
+        # Fencing token: jede Vergabe bekommt eine Nummer, die nur steigen
+        # kann. Der Halter merkt sie sich und prueft sie vor jedem Schreiben
+        # (lock_utils.fence_status). Ohne sie kann ein Halter, der laenger als
+        # seine TTL stillstand, nicht bemerken, dass die Sperre weitergegeben
+        # wurde -- der Fehlerfall, den TTL allein nicht abdeckt.
+        f"fence: {args.fence}",
     ]
     if args.user:
         lines.append("removable_by: user")
@@ -180,6 +186,14 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"error: generated name {name!r} is not a valid lock name")
 
     lock_path = project_dir / name
+
+    # Neue Vergabe = neue Nummer. Auch bei --force: ein Ueberschreiben IST eine
+    # neue Vergabe, und genau dann muss ein alter Halter auffliegen. Deshalb die
+    # abzuloesende Nummer mitgeben statt darauf zu vertrauen, dass die Uhr
+    # inzwischen weitergelaufen ist -- bei 15,6 ms Windows-Takt tut sie das
+    # zwischen zwei Aufrufen oft nicht.
+    args.fence = new_fence(lock_fence(lock_path) if lock_path.exists() else None)
+
     scope_label = args.scope or "project"
     body = build_lock_body(args, scope_label)
 
@@ -198,6 +212,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"error: {lock_path} already exists (use --force to overwrite)"
             ) from None
     print(f"created: {lock_path}")
+    print(f"fence: {args.fence}")
+    print("hint: merke dir die Nummer und pruefe sie vor jedem Schreiben --")
+    print(f"      set LOCK_FENCE={args.fence}")
+    print(f"      set LOCK_FENCE_FILE={lock_path}")
 
     # --- Stufe 2: gleichzeitiger Anspruch ueber einen Sync-Ordner ----------
     # Exklusives Anlegen schuetzt nur lokal. Liegt der Bereich in einem

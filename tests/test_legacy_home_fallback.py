@@ -58,11 +58,21 @@ def test_an_existing_path_is_left_alone():
 
 
 def test_environment_variables_still_expand():
-    """The added branch must not break the ordinary expansion."""
+    """The added branch must not break the ordinary expansion.
+
+    Both spellings are checked, because both occur in real configurations and
+    the code's own docstring names both. %VAR% is Windows-only -- POSIX
+    expandvars leaves it untouched -- so it is asserted only there. Written
+    with %VAR% alone, the test asserted something Linux and macOS cannot do and
+    failed on both for every Python version, while the code under test was
+    correct all along.
+    """
     with tempfile.TemporaryDirectory() as td:
         os.environ["LOCK_TEST_ROOT"] = td
         try:
-            assert Path(lock_scan._expand_path("%LOCK_TEST_ROOT%")) == Path(td)
+            assert Path(lock_scan._expand_path("$LOCK_TEST_ROOT")) == Path(td)
+            if os.name == "nt":
+                assert Path(lock_scan._expand_path("%LOCK_TEST_ROOT%")) == Path(td)
         finally:
             os.environ.pop("LOCK_TEST_ROOT", None)
 
