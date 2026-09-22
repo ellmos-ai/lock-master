@@ -39,8 +39,8 @@ File format (one setting per line, stdlib parser, no extra dependency):
     purpose           (optional)  Free-text description.
     scope             (optional)  Informational only; AUTHORITATIVE is the filename.
     fence             (optional)  Grant number (epoch microseconds) written by
-                                  lock_create.py. Only ever goes up for a given
-                                  area. The holder records it at acquisition and
+                                  lock_create.py for cooperative detection. The
+                                  holder records it at acquisition and
                                   re-checks it before every write, so a holder
                                   that stalled past its TTL finds out that the
                                   lease moved on instead of writing blind --
@@ -423,7 +423,10 @@ def lock_created_and_expiry(lock_path: Path,
     caller then judges a state that never existed."""
     data = parse_lock_file(lock_path) if data is None else data
     created = _parse_created(data.get("created"))
-    expires = parse_duration(data.get("expires_after"))
+    try:
+        expires = parse_duration(data.get("expires_after"))
+    except (OverflowError, ValueError):
+        expires = timedelta(0)
     if created is not None:
         return created, expires, "header"
     mtime = datetime.fromtimestamp(lock_path.stat().st_mtime)
@@ -455,7 +458,8 @@ def is_expired(lock_path: Path, now: datetime | None = None,
     weaker of its readings.
 
     All other locks expire after the relative 'expires_after' duration
-    (default 24h) counted from 'created'."""
+    (default 24h) counted from 'created'. Numerical overflow in 'expires_after'
+    is fail-closed (immediately expired), never a silent 24h default."""
     now = now or datetime.now()
     if is_ambiguous_lock(lock_path.name):
         return False
@@ -477,8 +481,23 @@ def is_expired(lock_path: Path, now: datetime | None = None,
         return (fields.get("release_mode") or "all").strip().lower() == "any"
     if is_protected_lock(lock_path.name):
         return False
-    created, expires, _ = lock_created_and_expiry(lock_path, data)
-    return now > created + expires
+
+    raw_exp = (data.get("expires_after") if data is not None else parse_lock_file(lock_path).get("expires_after"))
+    if raw_exp:
+        m = _DURATION_RE.match(raw_exp)
+        if m:
+            try:
+                amount = int(m.group(1))
+                unit = _DURATION_UNITS[m.group(2).lower()]
+                _ = timedelta(**{unit: amount})
+            except (OverflowError, ValueError):
+                return True  # Overflow -> fail-closed (expired)
+
+    try:
+        created, expires, _ = lock_created_and_expiry(lock_path, data)
+        return now > created + expires
+    except (OverflowError, ValueError):
+        return True
 
 
 def lock_host(lock_path: Path) -> str | None:
@@ -497,22 +516,19 @@ def lock_host(lock_path: Path) -> str | None:
 # distributed locking"): holder A stalls past its TTL, prune or holder B takes
 # the lock, A wakes up and keeps writing. A never learns it was displaced.
 #
-# The fix is a number handed out with every grant that only ever goes up. The
-# holder remembers it, and every write checks it against the lock on disk. A
-# lower number means: the lease moved on without you.
+# The mitigation is a grant number handed out with every acquisition for
+# cooperative detection. The holder remembers it, and checks it against the
+# lock on disk before writing. A different number means: the lease moved on.
 #
 # WHY WALL-CLOCK MICROSECONDS AND NOT A COUNTER FILE.
 # A counter needs an atomic increment shared by all writers. Over a cloud
 # folder with 30 s to 5 min sync latency there is none: two hosts both read 5
 # and both write 6. A rename-created sequence file has the same hole -- the
 # rename is atomic on each host separately, which is exactly not what a
-# counter needs. Wall-clock time has no such hole, because a grant can only
-# ever happen after the grant it replaces:
-#
-#     fence(B) > fence(A)  whenever B acquires after A's grant
-#
-# and B can only acquire after A's TTL has run out, so the two are at least
-# one TTL apart. That is far above any plausible clock skew between hosts.
+# counter needs. Wall-clock microseconds avoid a shared sequence file, but
+# monotonicity between hosts depends on clock agreement: `new_fence(previous=...)`
+# steps past a known displaced grant on takeover, but clock skew or steps
+# backwards can still invert ordering if a host acquires without previous context.
 #
 # This borrows no new assumption: `expires_after` is ALREADY compared against
 # each host's local clock, and contested.py ALREADY orders claims by `created`
@@ -654,7 +670,11 @@ def fence_status(lock_path: Path, my_fence: int | None,
             f"fence went backwards: {current} < own fence {my_fence} -- "
             "clock jump or a restored copy; refusing either way"
         )
-    if is_expired(lock_path, now, data=data):
+    try:
+        expired = is_expired(lock_path, now, data=data)
+    except (OverflowError, ValueError):
+        expired = True
+    if expired:
         return FENCE_LOST, (
             "own grant expired (TTL passed) -- the file is still here but the "
             "lease is not; renew before continuing"

@@ -41,9 +41,20 @@ PUSH = re.compile(r"\bgit\b[^\r\n|;&]*\bpush\b", re.IGNORECASE)
 PATHS = re.compile(r"(?:\bcd\s+|\bgit\s+-C\s+)(?:\"([^\"]+)\"|'([^']+)'|(\S+))")
 LOCK_GLOBS = ("LOCK.user*.txt", "LOCK.until*.txt")
 UNTIL_RE = re.compile(r"^LOCK\.until(\.|$)", re.IGNORECASE)
-NOT_BEFORE_RE = re.compile(r"^\s*not_before\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-RELEASE_CONDITION_RE = re.compile(r"^\s*release_condition\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-RELEASE_MODE_RE = re.compile(r"^\s*release_mode\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _parse_lock_text(text: str) -> dict[str, str]:
+    """Exakt wie lock_utils._parse_lock_text: letzte Zeile gewinnt."""
+    data: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        data[key.strip().lower()] = value.strip()
+    return data
 
 
 def payload_from_stdin() -> dict:
@@ -93,10 +104,11 @@ def until_lock_expired(lock: Path) -> bool:
         text = lock.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    m = NOT_BEFORE_RE.search(text)
-    if not m:
+    data = _parse_lock_text(text)
+    raw = data.get("not_before")
+    if not raw:
         return False
-    raw = m.group(1).strip()
+    raw = raw.strip()
     moment_reached = None
     for candidate in (raw, raw.replace(" ", "T", 1)):
         try:
@@ -109,21 +121,16 @@ def until_lock_expired(lock: Path) -> bool:
         break
     if not moment_reached:
         return False
-    cm = RELEASE_CONDITION_RE.search(text)
-    if not cm or not cm.group(1).strip():
+    cm = data.get("release_condition")
+    if not cm or not cm.strip():
         return True
-    mm = RELEASE_MODE_RE.search(text)
-    mode = mm.group(1).strip().lower() if mm else "all"
+    mode = (data.get("release_mode") or "all").strip().lower()
     return mode == "any"
 
 
-# ASCII-Ziffern, begrenzte Laenge. str.isdigit() war hier falsch: es akzeptiert
-# auch Unicode-Ziffern wie "²", an denen int() dann mit ValueError scheitert.
+# ASCII-Ziffern, 1 bis 19 Stellen (passend zu lock_utils._FENCE_RE).
 FENCE_VALUE_RE = re.compile(r"\A[0-9]{1,19}\Z")
-FENCE_RE = re.compile(r"^[ \t]*fence[ \t]*:[ \t]*([0-9]{1,19})[ \t]*$", re.IGNORECASE | re.MULTILINE)
-CREATED_RE = re.compile(r"^[ \t]*created[ \t]*:[ \t]*(.+?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
-EXPIRES_AFTER_RE = re.compile(r"^[ \t]*expires_after[ \t]*:[ \t]*(.+?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
-DURATION_RE = re.compile(r"\A([0-9]{1,6})[ \t]*([smhd])\Z", re.IGNORECASE)
+DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd])\s*$", re.IGNORECASE)
 _UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 # Bibliotheks-Default, wenn expires_after fehlt oder unlesbar ist. Der Hook
 # kannte ihn nicht und liess deshalb einen 30 h alten Lock als gueltig
@@ -131,31 +138,35 @@ _UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 DEFAULT_EXPIRES_HOURS = 24
 
 
-def _last(pattern: re.Pattern, text: str) -> str | None:
-    """Letzter Treffer -- der Dict-Parser der Bibliothek gewinnt ebenso."""
-    found = pattern.findall(text)
-    return found[-1].strip() if found else None
-
-
-def _lock_expired(text: str, lock: Path) -> bool:
+def _lock_expired(data: dict[str, str], lock: Path) -> bool:
     """Ablauf wie lock_utils.is_expired fuer gewoehnliche Locks.
 
     Bewusst inklusive der Legacy-Faelle, die der Hook vorher nicht kannte und
     deshalb als "gilt noch" durchwinkte (Codex-Review PR#8, Punkt 3):
       expires_after fehlt oder ist kaputt -> Default 24 h, nicht "unbegrenzt"
       created fehlt oder ist kaputt       -> Datei-mtime, nicht "unbegrenzt"
+    Numerische Grenzüberschreitung/Overflow bei expires_after:
+      -> fail-closed (True = abgelaufen/Anspruch verloren), NIE stiller 24h-Default!
     Ist der Ablauf nicht bestimmbar, gilt der Anspruch als verloren -- ein
     Zweifel darf hier keinen Besitznachweis erzeugen.
     """
-    raw_expires = _last(EXPIRES_AFTER_RE, text)
+    raw_expires = data.get("expires_after")
     delta = timedelta(hours=DEFAULT_EXPIRES_HOURS)
     if raw_expires:
         m = DURATION_RE.match(raw_expires)
         if m:
-            delta = timedelta(**{_UNITS[m.group(2).lower()]: int(m.group(1))})
+            try:
+                amount = int(m.group(1))
+                unit = _UNITS[m.group(2).lower()]
+                delta = timedelta(**{unit: amount})
+            except (OverflowError, ValueError):
+                return True  # Overflow -> fail-closed (Anspruch verloren)
+        # Wenn raw_expires vorhanden aber unlesbar ist (z.B. "broken"),
+        # greift wie in lock_utils der 24h-Default. Bei einem alten Lock
+        # (created > 24h) fuehrt das unten zu True.
 
     created = None
-    raw_created = _last(CREATED_RE, text)
+    raw_created = data.get("created")
     if raw_created:
         candidate = raw_created.replace("T", " ")
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
@@ -169,7 +180,10 @@ def _lock_expired(text: str, lock: Path) -> bool:
             created = datetime.fromtimestamp(lock.stat().st_mtime)
         except OSError:
             return True  # Zustand nicht feststellbar -> kein Besitznachweis
-    return datetime.now() > created + delta
+    try:
+        return datetime.now() > created + delta
+    except (OverflowError, ValueError):
+        return True  # Overflow bei Datumsaddition -> fail-closed
 
 
 def fence_lost_reason(lock_raw: str | None, my_fence: str, lock: Path) -> str | None:
@@ -188,15 +202,18 @@ def fence_lost_reason(lock_raw: str | None, my_fence: str, lock: Path) -> str | 
         return f"LOCK_FENCE={my_fence[:40]!r} ist keine gueltige Vergabenummer"
     if lock_raw is None:
         return "die Lock-Datei aus LOCK_FENCE_FILE existiert nicht oder ist unlesbar"
-    current = _last(FENCE_RE, lock_raw)
-    if current is None:
+    data = _parse_lock_text(lock_raw)
+    current_raw = data.get("fence")
+    if current_raw is None or not FENCE_VALUE_RE.match(current_raw):
         return "die Lock-Datei traegt keine Vergabenummer (von einem aelteren Schreiber neu angelegt)"
-    if int(current) != int(my_fence):
-        richtung = "weitergegeben" if int(current) > int(my_fence) else "zurueckgesetzt"
+    current = int(current_raw)
+    my = int(my_fence)
+    if current != my:
+        richtung = "weitergegeben" if current > my else "zurueckgesetzt"
         return f"die Sperre wurde {richtung}: fence {current} statt {my_fence}"
     # Eigener Anspruch, aber abgelaufen: die Datei liegt noch da, das Lease
     # nicht mehr. Genau der Fall aus T-20260920-692115839, bevor prune raeumt.
-    if _lock_expired(lock_raw, lock):
+    if _lock_expired(data, lock):
         return "der eigene Anspruch ist abgelaufen (TTL verstrichen) -- erneuern statt weiterschreiben"
     return None
 
@@ -499,6 +516,47 @@ def _selftest() -> None:
             encoding="utf-8")
         assert run("git push", str(sub), mine) == 2, (
             "doppeltes fence -> letzter Wert gilt (2000), Anspruch 1000 ist verloren"
+        )
+
+        # (f) Parser-Paritaet bei ungueltigen / leeren letzten Feldern
+        for body, warum in (
+            (f"owner: A\ncreated: {fresh}\nexpires_after: 24h\nfence: 1000\nfence: broken\n",
+             "letztes fence ist ungueltig -> Anspruch verloren (lost)"),
+            (f"owner: A\ncreated: {fresh}\nexpires_after: 24h\nfence: 1000\nfence:\n",
+             "letztes fence ist leer -> Anspruch verloren (lost)"),
+            (f"owner: A\ncreated: {fresh}\nexpires_after: 24h\nfence: 1000\nfence: {'1' * 20}\n",
+             "letztes fence ist 20-stellig -> Anspruch verloren (lost)"),
+            (f"owner: A\ncreated: {stale}\nexpires_after: 48h\nexpires_after:\n",
+             "letztes expires_after ist leer -> 24h-Default, 30h alt = abgelaufen"),
+        ):
+            fenced.write_text(body, encoding="utf-8")
+            assert run("git push", str(sub), mine) == 2, warum
+
+        # (g) TTL-Grenzfaelle: fuehrende Nullen und numerischer Ueberlauf
+        # (1) 0000001s: 10s alt muss blockieren (Exit 2)
+        ten_s_ago = (datetime.now() - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%S")
+        fenced.write_text(
+            f"owner: A\ncreated: {ten_s_ago}\nexpires_after: 0000001s\nfence: 1000\n",
+            encoding="utf-8",
+        )
+        assert run("git push", str(sub), mine) == 2, (
+            "expires_after: 0000001s (7 Ziffern) nach 10s abgelaufen -> blockieren"
+        )
+        fenced.write_text(
+            f"owner: A\ncreated: {fresh}\nexpires_after: 0000060s\nfence: 1000\n",
+            encoding="utf-8",
+        )
+        assert run("git push", str(sub), mine) == 0, (
+            "expires_after: 0000060s frisch -> durchgehen"
+        )
+
+        # (2) Ueberlauf-TTL: darf NIE still auf 24h fallen (fail-closed)
+        fenced.write_text(
+            f"owner: A\ncreated: {fresh}\nexpires_after: 999999999999999999999d\nfence: 1000\n",
+            encoding="utf-8",
+        )
+        assert run("git push", str(sub), mine) == 2, (
+            "uebergrosse TTL darf nicht auf 24h fallen -> fail-closed (Exit 2)"
         )
         fenced.unlink()
     print("selftest OK")

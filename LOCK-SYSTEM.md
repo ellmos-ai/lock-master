@@ -119,7 +119,7 @@ are ignored.
 | `mode`             | optional | `hard` (no changes, default) \| `soft` (reads/hints ok). |
 | `purpose`          | optional | Free text: why locked / what is running. |
 | `scope`            | optional | Informational only; the filename is authoritative. |
-| `fence`            | optional | **Grant number** (epoch microseconds), written by `lock_create.py`. Only ever goes up for a given area. The holder records it at acquisition and re-checks it before every write — see "Fencing Tokens". Absent = a lock from before fencing, handled exactly as before. |
+| `fence`            | optional | **Grant number** (epoch microseconds), written by `lock_create.py` for cooperative detection. The holder records it at acquisition and re-checks it before every write — see "Fencing Tokens". Absent = a lock from before fencing, handled exactly as before. |
 
 If `created` is missing or unparseable, the file's mtime is used as fallback
 for expiry calculation.
@@ -410,9 +410,9 @@ The failure is silent: both report success, and over a cloud folder it can also
 turn into a conflict copy. The deadline cannot catch it, because A reads nothing
 after waking up.
 
-**The grant number closes it.** Every acquisition gets a number in the `fence:`
-field that only ever goes up for a given area. The holder records it and checks it
-**before every write or push** against the file at the target. A higher number
+**Cooperative detection via grant number.** Every acquisition gets a number in the `fence:`
+field (epoch microseconds, stepped upward on takeover). The holder records it and checks it
+**before every write or push** against the file at the target. A different number
 means the lease moved on: refuse the write instead of quietly continuing.
 
 ```
@@ -442,10 +442,10 @@ while the file is still lying there — the window between expiry and `prune`.
 shared by all writers. Over a cloud folder with 30 s to 5 min sync latency there is
 none: two hosts both read 5 and both write 6. A rename-created sequence file has the
 same hole — the rename is atomic on each host separately, which is exactly not what a
-shared counter needs. Wall-clock time has no such hole, because a grant can only ever
-happen **after** the grant it replaces: B can acquire only once A's TTL has run out,
-so the two are at least one TTL apart — far above any plausible clock skew between
-hosts.
+shared counter needs. Wall-clock microseconds avoid needing a shared atomic sequence file
+across synced folders. Monotonicity between hosts, however, depends on clock agreement:
+while `new_fence(previous=...)` steps past the displaced grant on takeover, clock skew
+or backwards steps can still affect ordering if a host acquires without previous context.
 
 This borrows no new assumption: `expires_after` is **already** compared against each
 host's local clock, and the contest procedure **already** orders claims by `created`
