@@ -26,7 +26,7 @@
 #   purpose           (optional) Freitext: warum gesperrt / was laeuft gerade.
 #   scope             (optional) nur informativ; autoritativ ist der Dateiname.
 #   fence             (optional) Vergabenummer (Epoch-Mikrosekunden), von lock_create.py
-#                                gesetzt. Steigt je Bereich nur. Der Halter merkt sie sich
+#                                gesetzt (kooperative Erkennung). Der Halter merkt sie sich
 #                                und prueft sie vor jedem Schreiben (lock_utils.fence_status /
 #                                lock_scan.py --verify-fence). Ohne das Feld gilt der
 #                                bisherige Zustand. Abschnitt "Fencing-Tokens" in der Spec.

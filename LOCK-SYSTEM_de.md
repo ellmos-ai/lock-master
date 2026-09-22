@@ -342,7 +342,7 @@ Vorlage: `_scripts/LOCK_TEMPLATE.txt`. Zeilen mit `#` = Kommentar, Leerzeilen ig
 | `mode` | optional | `hard` (keine Aenderung, Default) \| `soft` (Lesen/Hinweis ok). |
 | `purpose` | optional | Freitext: warum gesperrt / was laeuft gerade. |
 | `scope` | optional | nur informativ; autoritativ ist der Dateiname. |
-| `fence` | optional | **Vergabenummer** (Epoch-Mikrosekunden), von `lock_create.py` geschrieben. Steigt je Bereich nur. Der Halter merkt sie sich beim Erwerb und prueft sie vor jedem Schreiben — siehe Abschnitt „Fencing-Tokens“. Fehlt das Feld, ist es ein Lock aus der Zeit davor und wird behandelt wie bisher. |
+| `fence` | optional | **Vergabenummer** (Epoch-Mikrosekunden), von `lock_create.py` fuer kooperative Erkennung geschrieben. Der Halter merkt sie sich beim Erwerb und prueft sie vor jedem Schreiben — siehe Abschnitt „Fencing-Tokens“. Fehlt das Feld, ist es ein Lock aus der Zeit davor und wird behandelt wie bisher. |
 
 Fehlt `created` (oder unparsebar), gilt die Datei-mtime als Fallback fuer den Verfall.
 
@@ -364,10 +364,10 @@ Der Fehler ist still: beide melden Erfolg, und ueber OneDrive kann daraus zusaet
 eine Konfliktkopie werden (Abweichung A7). Die Frist kann das nicht fangen, weil A
 nach dem Aufwachen gar nichts mehr liest.
 
-**Die Nummer schliesst die Luecke.** Jede Vergabe erhaelt eine Zahl im Feld
-`fence:`, die je Bereich nur steigen kann. Der Halter merkt sie sich und prueft sie
-**vor jedem Schreib- oder Push-Vorgang** gegen die Datei am Zielort. Eine hoehere
-Nummer heisst: das Lease ist weitergegangen — Schreibvorgang ablehnen, nicht
+**Kooperative Erkennung per Vergabenummer.** Jede Vergabe erhaelt eine Zahl im Feld
+`fence:` (Epoch-Mikrosekunden, bei Uebernahme aufsteigend forciert). Der Halter merkt sie sich
+und prueft sie **vor jedem Schreib- oder Push-Vorgang** gegen die Datei am Zielort. Eine
+abweichende Nummer heisst: das Lease ist weitergegangen — Schreibvorgang ablehnen, nicht
 heimlich fortsetzen.
 
 ```
@@ -401,10 +401,11 @@ daliegt — das Fenster zwischen Fristablauf und `prune`.
 alle Schreiber teilen. Ueber einen Cloud-Ordner mit 30 s bis 5 min Sync-Latenz gibt es
 das nicht: zwei Hosts lesen beide 5 und schreiben beide 6. Eine per Rename erzeugte
 Sequenzdatei hat dieselbe Luecke — das Rename ist auf jedem Host fuer sich atomar, und
-genau das hilft einem gemeinsamen Zaehler nicht. Die Uhrzeit hat diese Luecke nicht,
-weil eine Vergabe immer **nach** der Vergabe liegt, die sie abloest: B kann erst
-erwerben, wenn A's TTL abgelaufen ist, also liegen beide mindestens eine TTL
-auseinander — weit ueber jedem plausiblen Uhrenversatz zwischen Hosts.
+genau das hilft einem gemeinsamen Zaehler nicht. Wanduhr-Mikrosekunden vermeiden die
+Notwendigkeit eines geteilten atomaren Zaehlers ueber synchronisierte Ordner. Die Monotonie
+zwischen Hosts haengt dabei von der Uhrensynchronisation ab: Waehrend `new_fence(previous=...)`
+bei Uebernahme die Vorgaengernummer uebersteigt, koennen Uhrenversatz oder Rueckspruenge die
+Reihenfolge beeinflussen, wenn ein Host ohne Kenntnis des Vorgaengers neu erwirbt.
 
 Das leiht sich keine neue Annahme: `expires_after` wird **ohnehin schon** gegen die
 lokale Uhr jedes Hosts gerechnet, und das Contest-Verfahren ordnet Anspruechen

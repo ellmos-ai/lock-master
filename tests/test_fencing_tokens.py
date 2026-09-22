@@ -7,14 +7,15 @@ expires, prune clears it or holder B takes it, and A wakes up and keeps writing
 into the same area. Both agents report success. Expiry alone cannot catch this,
 because A never re-reads anything.
 
-The grant number closes it: A records the number it acquired with, and every
-write re-checks it. A number that moved on means the lease did too.
+Cooperative detection via grant number: A records the number it acquired with,
+and checks it before writing. A number that moved on means the lease did too.
 
 Ticket T-20260920-692115839.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -362,3 +363,128 @@ def test_pause_between_check_and_write_is_not_prevented(tmp_path):
     assert status == lock_utils.FENCE_LOST, reason
     assert str(fence_b) in reason
     assert lock_utils.fence_status(lock, fence_b)[0] == lock_utils.FENCE_HELD
+
+
+# --- Codex Review Runde 2: Regressionsproben ------------------------------
+
+def _run_push_guard(repo: Path, env: dict[str, str], command: str = "git push origin main") -> int:
+    child_env = dict(os.environ)
+    child_env.pop("LOCK_FENCE", None)
+    child_env.pop("LOCK_FENCE_FILE", None)
+    child_env.update(env)
+    p = subprocess.run(
+        [sys.executable, "-X", "utf8", str(REPO_ROOT / "reference" / "lock_push_guard.py")],
+        input=json.dumps({"tool_input": {"command": command}, "cwd": str(repo)}),
+        capture_output=True, text=True, encoding="utf-8", env=child_env, timeout=30,
+    )
+    return p.returncode
+
+
+def test_ttl_numeric_parity_and_leading_zeros(tmp_path):
+    """0000001s vs 1s: beide bedeuten 1 Sekunde; fuehrende Nullen werden unterstuetzt.
+
+    Codex-Review PR#8 Runde 2: Der Hook-Regex beschraenkte Ziffern auf {1,6},
+    wodurch 0000001s still auf 24h fiel. Nach 10s muss die Frist abgelaufen sein.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    lock = repo / "LOCK.work.txt"
+
+    ten_s_ago = (datetime.now() - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%S")
+    fresh = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    # 1. 0000001s nach 10 Sekunden: abgelaufen in Bibliothek und Hook
+    lock.write_text(f"owner: A\ncreated: {ten_s_ago}\nexpires_after: 0000001s\nfence: 1000\n", encoding="utf-8")
+    assert lock_utils.is_expired(lock)
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 2
+
+    # 2. 1s nach 10 Sekunden: identisches Verhalten
+    lock.write_text(f"owner: A\ncreated: {ten_s_ago}\nexpires_after: 1s\nfence: 1000\n", encoding="utf-8")
+    assert lock_utils.is_expired(lock)
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 2
+
+    # 3. 0000060s frisch: noch aktiv in Bibliothek und Hook
+    lock.write_text(f"owner: A\ncreated: {fresh}\nexpires_after: 0000060s\nfence: 1000\n", encoding="utf-8")
+    assert not lock_utils.is_expired(lock)
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_HELD
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 0
+
+
+def test_ttl_overflow_fail_closed_no_exception(tmp_path):
+    """Astronomische TTL (999999999999999999999d) darf nie still auf 24h fallen.
+
+    Codex-Review PR#8 Runde 2: Hook erlaubte die uebergrosse TTL (Exit 0), waehrend
+    die Bibliothek mit OverflowError abstuerzte. Beide muessen fail-closed urteilen:
+    Bibliothek meldet 'lost' (ohne Exception nach aussen), Hook blockiert mit Exit 2.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    lock = repo / "LOCK.work.txt"
+    fresh = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    lock.write_text(
+        f"owner: A\ncreated: {fresh}\nexpires_after: 999999999999999999999d\nfence: 1000\n",
+        encoding="utf-8",
+    )
+    # Bibliothek: fail-closed, kein unhandled OverflowError
+    assert lock_utils.is_expired(lock)
+    status, reason = lock_utils.fence_status(lock, 1000)
+    assert status == lock_utils.FENCE_LOST
+    # Hook: fail-closed (Exit 2)
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 2
+
+
+def test_duplicate_fields_parity_with_invalid_or_empty_last_entry(tmp_path):
+    """Ungueltige oder leere letzte Felder muessen in Bibliothek und Hook gleich urteilen.
+
+    Codex-Review PR#8 Runde 2: FENCE_RE filterte ungueltige Werte vor _last(),
+    sodass 'fence: 1000\\nfence: broken' im Hook den gueltigen ersten Treffer nahm.
+    Der Dict-Parser der Bibliothek ueberschreibt; der letzte Wert gewinnt immer.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    lock = repo / "LOCK.work.txt"
+    fresh = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    stale = (datetime.now() - timedelta(hours=30)).strftime("%Y-%m-%dT%H:%M:%S")
+
+    # (a) fence: broken als letzter Wert -> Vergabenummer ungueltig/verloren
+    lock.write_text(
+        f"owner: A\ncreated: {fresh}\nexpires_after: 24h\nfence: 1000\nfence: broken\n",
+        encoding="utf-8",
+    )
+    assert lock_utils.lock_fence(lock) is None
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 2
+
+    # (b) fence: leer als letzter Wert -> Vergabenummer fehlt/verloren
+    lock.write_text(
+        f"owner: A\ncreated: {fresh}\nexpires_after: 24h\nfence: 1000\nfence:\n",
+        encoding="utf-8",
+    )
+    assert lock_utils.lock_fence(lock) is None
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 2
+
+    # (c) fence: 20 Ziffern als letzter Wert -> ueberschreitet Laengengrenze
+    lock.write_text(
+        f"owner: A\ncreated: {fresh}\nexpires_after: 24h\nfence: 1000\nfence: {'1' * 20}\n",
+        encoding="utf-8",
+    )
+    assert lock_utils.lock_fence(lock) is None
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 2
+
+    # (d) 30h alter Lock mit leerem letzten expires_after: -> faellt auf 24h-Default, verfallen
+    lock.write_text(
+        f"owner: A\ncreated: {stale}\nexpires_after: 48h\nexpires_after:\nfence: 1000\n",
+        encoding="utf-8",
+    )
+    assert lock_utils.is_expired(lock)
+    assert lock_utils.fence_status(lock, 1000)[0] == lock_utils.FENCE_LOST
+    assert _run_push_guard(repo, {"LOCK_FENCE": "1000", "LOCK_FENCE_FILE": str(lock)}) == 2
+
