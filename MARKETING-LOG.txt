@@ -110,3 +110,16 @@ German (DE):
 - Statutory Liability Disclaimer: Formalized German statutory liability disclaimer (§ 521 BGB Gefälligkeitsrecht) in Section 18 of both READMEs.
 - PEP 639 Standard: Added license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"] to pyproject.toml.
 - Contract Verification: Automated contract tests in tests/test_metadata.py verifying 18-point dual anchors, personas, comparative matrix, Level 1 SBOM, RunAsInvoker, § 521 BGB disclaimer, and NOTICE attribution.
+
+================================================================================
+8. PFAD A HYGIENE, CI LIFECYCLE WORKFLOWS & DRIFT RECONCILIATION AUDIT (2026-09-26)
+================================================================================
+- Fencing Tokens & Cooperative Lease Defense: Reconciled repo implementation with deployed production tooling; lock_create.py writes monotonic epoch microsecond fence tokens, lock_utils exposes lock_fence() and fence_status() to protect stalled agents against race conditions.
+- Check-Dir Nonexistent Path Guard: Hardened lock_scan.py --check-dir to fail closed on missing/typo'd paths instead of false-positive "free" (exit 0) evaluations (T-20260922-626871087).
+- Cross-Platform Test Isolation: Fixed %VAR% environment variable test in test_legacy_home_fallback.py with OS guards (if os.name == 'nt') to guarantee clean multi-OS CI matrix runs.
+- CI Lifecycle Automation & Hardening: Provisioned .github/workflows/welcome.yml with actions/first-interaction@v3, timeout-minutes: 5, least-privilege permissions, and concurrency cancel-in-progress: true; fortified .github/workflows/stale.yml with concurrency cancel-in-progress: true.
+- Multi-Host Cloud-Sync & Gitignore Hardening: Extended .gitignore with full multi-host tokens (*-ASUS*, *-LAPTOP*, *-Mac Studio*, *-MacBook*, *-IDEAPAD*, *_WORKSTATION*), test caches (.pytest_temp/, .turbo/, .hypothesis/, .nyc_output/, .tox/), OS artifacts (Desktop.ini), and canonical locks (LOCK.user.*, LOCK.until.*, LOCK.condition.*, .automation-lock).
+- PEP 621 Notice URL & Pytest Basetemp: Added Notice URL in pyproject.toml; standardized --basetemp=.pytest_temp and norecursedirs in pyproject.toml and pytest.ini.
+- Level 1 SBOM & Notice Attribution Re-Audit: Re-audited THIRD_PARTY_LICENSES.md Stand 2026-09-26 confirming zero runtime dependencies, RunAsInvoker unprivileged execution, and formal link to NOTICE.
+- Zero-Drift Deployment Parity: Fully reconciled with C:\Users\lukas\OneDrive\_scripts (bin/check_deployment.py: 11/11 files in parity, exit 0).
+- Verification Baseline: 246 passing tests (100% green), clean Ruff linting, clean bytecode compilation, and wheel smoke verification.

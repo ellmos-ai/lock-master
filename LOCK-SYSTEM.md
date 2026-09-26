@@ -126,6 +126,36 @@ for expiry calculation.
 
 ---
 
+## Fencing Tokens: Detecting Stalled Leases Cooperatively
+
+A lease deadline alone does not solve the classic distributed locking hazard (Martin Kleppmann, "How to do distributed locking"):
+
+1. Agent A acquires the lock and begins execution.
+2. Agent A stalls longer than the TTL — GC pause, memory swap, system suspend, hanging cloud-sync call, or broken SSH session.
+3. The lease expires. `prune_stale_locks.py` cleans it up, or Agent B acquires the scope.
+4. Agent A awakens. **Agent A does not know it lost the lock**, and writes into the same workspace as Agent B.
+
+This failure mode is silent: both agents report success, and cloud synchronization can produce corrupted conflict copies.
+
+**Cooperative detection via fence tokens:** Each grant receives a monotonic epoch microsecond integer in the `fence:` field. The holder notes this number and validates it **before every destructive write or push operation**. A differing fence number signals that the lease has moved on — the agent must abort instead of writing blindly.
+
+```bash
+python lock_create.py <project> --scope docs --owner agent-A
+# output: created LOCK.docs.txt with fence: 1789902599751740
+```
+
+Verification in Python:
+```python
+status, reason = lock_utils.fence_status(lock_path, my_fence)  # "held" | "lost" | "unknown"
+```
+
+Verification via CLI (exit 0 = held, 1 = lost):
+```bash
+python lock_scan.py --verify-fence <LOCK-file> --fence <number>
+```
+
+---
+
 ---
 
 ## Lock Types: Exclusive vs. Team

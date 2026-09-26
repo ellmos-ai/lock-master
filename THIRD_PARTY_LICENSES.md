@@ -1,8 +1,9 @@
 # Third-Party Licenses & Transparency Notice
 
-> **Project:** `ellmos-ai/lock-master`  
-> **Audited:** 2026-09-20  
-> **Repository License:** [MIT License](LICENSE)  
+> **Project:** `ellmos-ai/lock-master`<br>
+> **Audited:** 2026-09-26<br>
+> **Repository License:** [MIT License](LICENSE)<br>
+> **Attribution Notice:** [NOTICE](NOTICE)<br>
 > **Architecture & Privacy:** 100% Local-First, Zero-Egress, Unprivileged User-Mode (`RunAsInvoker`), Fail-Closed
 
 ---
@@ -11,7 +12,7 @@
 
 `lock-master` is engineered under strict architectural and governance invariants: **100% Local-First, Zero-Egress by default, unprivileged user-mode execution (`RunAsInvoker`), and fail-closed lock semantics**. All file-based mutex operations, scoped locks (`LOCK.<scope>.txt`), multi-agent team locks (`LOCK.team.<host>.txt`), rule evaluations (`LOCK.permissions.json`), and background watcher routines operate entirely within local process and filesystem boundaries.
 
-All direct, runtime, and development dependencies utilized across `lock-master` are distributed under strictly **permissive and free open-source licenses** (MIT, Apache-2.0, PSFL, BSD-3-Clause). There are **zero AGPL or restrictive copyleft constraints**, ensuring maximum portability for multi-machine setups, personal transfer yards, enterprise infrastructure, and automated multi-agent deployments.
+All direct, runtime, and development dependencies utilized across `lock-master` are distributed under strictly **permissive and free open-source licenses** (MIT, Apache-2.0, PSFL, BSD-3-Clause). There are **zero AGPL or restrictive copyleft constraints**, ensuring maximum portability for multi-machine setups, personal transfer yards, enterprise infrastructure, and automated multi-agent deployments. Full attribution and copyright notices are documented in [NOTICE](NOTICE).
 
 Furthermore, `lock-master` guarantees:
 1. **100% Local-First & Zero Egress (INV-LOCAL-01):** Operates entirely on local filesystems and local storage mounts (OneDrive, Dropbox, Syncthing, NAS, or local paths). Zero network telemetry, zero phone-home calls, and zero hidden analytical tracking.
@@ -22,7 +23,7 @@ Furthermore, `lock-master` guarantees:
 6. **Deterministic TTL & Safe Stale Pruning (INV-TTL-06):** Every lock defines an explicit `expires_after` duration (default 24h); stale cleanup (`prune_stale_locks.py`) provides safe `--dry-run` inspection before atomic unlink.
 7. **Declarative Permission Engine (INV-PERM-07):** Evaluates access actions against `LOCK.permissions.json` using strict priority ordering (`deny` > `ask` > `allow` > default) and regex path matching.
 8. **Read-Only Inspection & Atomic Cache (INV-AUDIT-08):** `lock_scan.py` inspects workspace hierarchies in pure read-only mode; cache exports (`LOCK-CACHE.md`) are written atomically without side effects on active locks.
-9. **100% Permissive Audited Dependency Stack (INV-LIC-09):** Zero external runtime dependencies (pure Python standard library); development and testing tools are strictly MIT/PSFL/BSD-3-Clause audited.
+9. **100% Permissive Audited Dependency Stack (INV-LIC-09):** Zero external runtime dependencies (pure Python standard library); development and testing tools are strictly MIT/PSFL/BSD-3-Clause audited. Attribution in [NOTICE](NOTICE).
 10. **Dual Security Response & Triage SLA (INV-SLA-10):** Commitments to 48-hour response, 5-business-day triage, and 30-day remediation via canonical security channels (`security@open-bricks.org`, `security@ellmos.ai`).
 
 ---

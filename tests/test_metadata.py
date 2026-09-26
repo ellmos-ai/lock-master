@@ -66,7 +66,11 @@ def test_llms_txt_integrity():
     llms_path = ROOT / "llms.txt"
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
-    assert "Last-checked: 2026-09-20" in content or "Last-checked: 2026-09-16" in content
+    assert (
+        "Last-checked: 2026-09-26" in content
+        or "Last-checked: 2026-09-20" in content
+        or "Last-checked: 2026-09-16" in content
+    )
     assert "Version: 1.6.3" in content or "1.6.3" in content
     assert "isolated wheel install/import/CLI smoke" in content
     assert "ellmos-ai" in content
@@ -81,7 +85,9 @@ def test_readme_badges_and_ecosystem_parity():
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
         assert (
-            "tests-239%20passed" in content
+            "tests-246%20passed" in content
+            or "tests-240%20passed" in content
+            or "tests-239%20passed" in content
             or "tests-233%20passed" in content
             or "tests-228%20passed" in content
             or "tests-212%20passed" in content
@@ -135,6 +141,7 @@ def test_pyproject_tooling_integrity():
     assert "Third-Party Licenses" in urls
     assert "Marketing Log" in urls
     assert "LLM Ready" in urls
+    assert urls.get("Notice") == "https://github.com/ellmos-ai/lock-master/blob/main/NOTICE"
     assert urls.get("Parent Organization") == "https://github.com/ellmos-ai"
     assert urls.get("Umbrella Ecosystem") == "https://github.com/open-bricks"
 
@@ -151,6 +158,7 @@ def test_pyproject_pytest_configuration():
     assert pytest_cfg.get("testpaths") == ["tests"]
     assert pytest_cfg.get("pythonpath") == ["."]
     assert "-ra" in pytest_cfg.get("addopts", "")
+    assert "--basetemp=.pytest_temp" in pytest_cfg.get("addopts", "")
 
 
 def test_bilingual_readme_navigation_parity():
@@ -543,7 +551,7 @@ def test_level1_sbom_and_cross_reference_matrix():
     assert "RunAsInvoker" in sbom_doc
     assert "INV-LOCAL-01" in sbom_doc
     assert "INV-SLA-10" in sbom_doc
-    assert "2026-09-20" in sbom_doc
+    assert "2026-09-26" in sbom_doc or "2026-09-20" in sbom_doc
 
 
 def test_dual_mermaid_diagrams_and_semicolons_free():
@@ -566,4 +574,84 @@ def test_dual_mermaid_diagrams_and_semicolons_free():
                     assert not stripped.endswith(";"), f"Trailing semicolon found in {readme_name} mermaid line: {stripped}"
 
 
+def test_ci_welcome_workflow_present():
+    """Verify that welcome.yml exists with first-interaction@v3, timeout, and concurrency."""
+    welcome_path = ROOT / ".github" / "workflows" / "welcome.yml"
+    assert welcome_path.is_file(), "welcome.yml must exist"
+    content = welcome_path.read_text(encoding="utf-8")
+    assert "actions/first-interaction@v3" in content
+    assert "timeout-minutes: 5" in content
+    assert "concurrency:" in content
+    assert "cancel-in-progress: true" in content
+    assert "repo_token:" in content
+    assert "issues: write" in content
+    assert "pull-requests: write" in content
 
+
+def test_ci_stale_workflow_concurrency():
+    """Verify that stale.yml has concurrency cancel-in-progress configured."""
+    stale_path = ROOT / ".github" / "workflows" / "stale.yml"
+    assert stale_path.is_file(), "stale.yml must exist"
+    content = stale_path.read_text(encoding="utf-8")
+    assert "concurrency:" in content
+    assert "cancel-in-progress: true" in content
+
+
+def test_fencing_token_api():
+    """Verify that lock_utils provides fencing token API functions (T-20260920-692115839)."""
+    import lock_utils
+
+    assert hasattr(lock_utils, "lock_fence")
+    assert hasattr(lock_utils, "fence_status")
+    assert hasattr(lock_utils, "new_fence")
+    fence = lock_utils.new_fence()
+    assert isinstance(fence, int) and fence > 0
+
+
+def test_check_dir_nonexistent_path_fails():
+    """Verify that _check_dir fails closed on nonexistent path (T-20260922-626871087)."""
+    import lock_scan
+
+    code = lock_scan._check_dir(Path("nonexistent_directory_for_testing_12345"), as_json=False, strict=False)
+    assert code == 2, f"_check_dir on nonexistent path must return 2, got {code}"
+
+
+def test_extended_gitignore_multi_host_guards():
+    """Verify that .gitignore includes extended multi-host tokens, test caches, Desktop.ini, and canonical locks."""
+    gi_path = ROOT / ".gitignore"
+    assert gi_path.is_file()
+    content = gi_path.read_text(encoding="utf-8")
+    for pat in [
+        "*-ASUS*",
+        "*-LAPTOP*",
+        "*-Mac Studio*",
+        "*-MacBook*",
+        "*-IDEAPAD*",
+        "*_WORKSTATION*",
+        "*_WORKSTATION-LG*",
+        "*-WORKSTATION.*",
+        "*-WORKSTATION-LG.*",
+        ".pytest_temp/",
+        ".hypothesis/",
+        ".turbo/",
+        ".nyc_output/",
+        ".tox/",
+        "Desktop.ini",
+        "LOCK.user.*",
+        "LOCK.until.*",
+        "LOCK.condition.*",
+        ".automation-lock",
+        "!package-lock.json",
+    ]:
+        assert pat in content, f"Expected {pat} in .gitignore"
+
+
+def test_changelog_and_marketing_log_pfad_a_20260926():
+    """Verify that CHANGELOG.md [Unreleased] and MARKETING-LOG.txt contain the 2026-09-26 Pfad A audit."""
+    cl_content = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [Unreleased]" in cl_content
+    assert "2026-09-26" in cl_content
+    assert "Fencing Tokens Integration" in cl_content
+
+    mkt_content = (ROOT / "MARKETING-LOG.txt").read_text(encoding="utf-8")
+    assert "PFAD A HYGIENE, CI LIFECYCLE WORKFLOWS & DRIFT RECONCILIATION AUDIT (2026-09-26)" in mkt_content

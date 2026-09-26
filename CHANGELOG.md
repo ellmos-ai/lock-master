@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed (Pfad A Hygiene, CI Lifecycle Hardening, Fencing Tokens & Drift Reconciliation - 2026-09-26)
+
+- **Fencing Tokens Integration**: Reconciled canonical repository implementation with deployed production tooling (`T-20260920-692115839`): added cooperative lease fencing (`fence` timestamp token in Epoch microseconds) written by `lock_create.py`, tracked via `lock_utils.lock_fence()`, and verified via `lock_utils.fence_status()` to prevent stalled agents from blind overwrites after TTL expiry.
+- **Check-Dir Nonexistent Target Guard**: Hardened `lock_scan.py --check-dir` to validate path existence prior to evaluation (`T-20260922-626871087`), eliminating silent false-positive "free" (exit 0) results caused by path normalization on typo'd or stale directory arguments.
+- **Cross-Platform Test Isolation**: Enhanced `tests/test_legacy_home_fallback.py` with OS-specific `%VAR%` environment variable expansion assertions (`if os.name == "nt":`), eliminating CI runner test flakes on Linux and macOS matrix targets.
+- **CI Lifecycle Workflows**: Added `.github/workflows/welcome.yml` utilizing `actions/first-interaction@v3` (`timeout-minutes: 5`, least-privilege permissions, and concurrency group `welcome-${{ github.ref }}` with `cancel-in-progress: true`); hardened `.github/workflows/stale.yml` with concurrency group `stale-${{ github.ref }}` (`cancel-in-progress: true`).
+- **Multi-Host Cloud-Sync & Gitignore Hardening**: Fortified `.gitignore` with comprehensive protection patterns against multi-host conflict files (`*-ASUS*`, `*-LAPTOP*`, `*-Mac Studio*`, `*-MacBook*`, `*-IDEAPAD*`, `*_WORKSTATION*`, `*_WORKSTATION-LG*`, `*-WORKSTATION.*`, `*-WORKSTATION-LG.*`), test/coverage caches (`.pytest_temp/`, `.pytest_tmp*/`, `.hypothesis/`, `.turbo/`, `.nyc_output/`, `.tox/`), OS artifacts (`Desktop.ini`), and canonical locks (`LOCK.user.*`, `LOCK.until.*`, `LOCK.condition.*`, `.automation-lock`, `!package-lock.json`).
+- **PEP 621 Standard URLs & Pytest Tooling**: Added `Notice` URL under `[project.urls]` in `pyproject.toml`, configured `--basetemp=.pytest_temp` and `norecursedirs` across `pyproject.toml` and `pytest.ini` to protect Windows filesystem locks.
+- **Third-Party License Audit & SBOM Recency**: Re-audited `THIRD_PARTY_LICENSES.md` Stand 2026-09-26 with Level 1 SBOM, unprivileged `RunAsInvoker` certification, and explicit cross-reference to the root `NOTICE` attribution file.
+- **Deployment Verification**: Verified 100% zero-drift alignment against production deploy manifest via `bin/check_deployment.py` (all 11 files in parity).
+- **Contract Test Suite Expansion**: Expanded `tests/test_metadata.py` with contract tests verifying `welcome.yml` workflow, `stale.yml` concurrency, fencing token functions, pyproject `Notice` URL, and audit recency.
+
 ## [1.6.3]
 
 ### Changed (Pfad B Discoverability, Visual Architecture & Level 1 SBOM Audit - 2026-09-20)

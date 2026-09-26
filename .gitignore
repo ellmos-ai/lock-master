@@ -85,12 +85,33 @@ wheelhouse/
 * (copy)*
 * (Copy)*
 *conflicted copy*
+*-ASUS*
+*-ASUS-GEI*
+*-LAPTOP*
+*-Mac Studio*
+*-MacBook*
+*-IDEAPAD*
 *-WORKSTATION*
 *-WORKSTATION-LG*
-*-ASUS-GEI*
+*_WORKSTATION*
+*_WORKSTATION-LG*
+*-WORKSTATION.*
+*-WORKSTATION-LG.*
 *.orig
 *.rej
 uv.lock
+!package-lock.json
+LOCK.user.*
+LOCK.until.*
+LOCK.condition.*
+.automation-lock
+.pytest_temp/
+.pytest_tmp*/
+.hypothesis/
+.turbo/
+.nyc_output/
+.tox/
+Desktop.ini
 
 # Temporary & backup files
 *.tmp

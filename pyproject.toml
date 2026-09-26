@@ -61,6 +61,7 @@ Security = "https://github.com/ellmos-ai/lock-master/blob/main/SECURITY.md"
 "Third-Party Licenses" = "https://github.com/ellmos-ai/lock-master/blob/main/THIRD_PARTY_LICENSES.md"
 "Marketing Log" = "https://github.com/ellmos-ai/lock-master/blob/main/MARKETING-LOG.txt"
 "LLM Ready" = "https://github.com/ellmos-ai/lock-master/blob/main/llms.txt"
+Notice = "https://github.com/ellmos-ai/lock-master/blob/main/NOTICE"
 "Parent Organization" = "https://github.com/ellmos-ai"
 "Umbrella Ecosystem" = "https://github.com/open-bricks"
 
@@ -76,7 +77,8 @@ lock-master-team = "team_lock:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra -v"
+addopts = "-ra -v --basetemp=.pytest_temp"
+norecursedirs = [".git", ".pytest_cache", ".ruff_cache", "build", "dist", ".pytest_temp"]
 
 [tool.ruff]
 line-length = 120
