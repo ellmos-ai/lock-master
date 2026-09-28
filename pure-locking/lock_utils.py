@@ -193,19 +193,52 @@ def is_team_lock(name: str) -> bool:
     return m.group(1).lower().startswith("team.")
 
 
-def is_user_lock(name: str) -> bool:
+def is_user_lock(target: str | Path, data: dict[str, str] | None = None) -> bool:
     """Return True for LOCK.user(.<scope>).txt — a user-owned full lock.
+
+    Recognized by:
+      - Filename: LOCK.user(.<scope>).txt
+      - Content / Fields (fail-closed, T-20260926-592074763):
+        * A header or line matching LOCK.user (e.g. LOCK.user.claude-code@ASUS-GEI)
+        * 'type' / 'lock_type' field is 'user'
+        * 'removable_by' field is 'user'
+        * 'owner' field begins with 'LOCK.user' (e.g. 'owner: LOCK.user.claude-code')
 
     User locks are removed ONLY by the user (manually or via the watcher GUI);
     agents and the stale-cleanup (prune) never touch them, even when nominally
     expired."""
+    name = target.name if isinstance(target, Path) else Path(target).name
     m = LOCK_RE.match(name)
-    if not m or not m.group(1):
-        return False
-    return m.group(1).split(".")[0].lower() == "user"
+    if m and m.group(1) and m.group(1).split(".")[0].lower() == "user":
+        return True
+
+    if data is None:
+        lock_file = None
+        if isinstance(target, Path):
+            lock_file = target
+        elif isinstance(target, str) and (os.path.sep in target or "/" in target or Path(target).is_file()):
+            p = Path(target)
+            if p.is_file():
+                lock_file = p
+        if lock_file is not None and lock_file.is_file():
+            data = parse_lock_file(lock_file)
+
+    if data is not None:
+        if (data.get("created_by") or "").strip().lower() == "bulk":
+            return False
+        ltype = (data.get("type") or data.get("lock_type") or data.get("lock-type") or "").strip().lower()
+        if ltype == "user":
+            return True
+        if (data.get("removable_by") or "").strip().lower() == "user":
+            return True
+        owner = (data.get("owner") or "").strip().lower()
+        if owner.startswith("lock.user"):
+            return True
+
+    return False
 
 
-def is_condition_lock(name: str) -> bool:
+def is_condition_lock(target: str | Path, data: dict[str, str] | None = None) -> bool:
     """Return True for LOCK.condition(.<scope>).txt — a condition-based lock.
 
     Condition locks (since v1.4.0) do NOT expire by time; they remain active
@@ -216,10 +249,15 @@ def is_condition_lock(name: str) -> bool:
     removing the lock). Typical use: operation-scoped locks via the
     'operations:' field (e.g. 'operations: publish-release'), leaving all
     other work on the project unrestricted."""
+    name = target.name if isinstance(target, Path) else Path(target).name
     m = LOCK_RE.match(name)
-    if not m or not m.group(1):
-        return False
-    return m.group(1).split(".")[0].lower() == "condition"
+    if m and m.group(1) and m.group(1).split(".")[0].lower() == "condition":
+        return True
+    if data is not None:
+        ltype = (data.get("type") or data.get("lock_type") or "").strip().lower()
+        if ltype == "condition":
+            return True
+    return False
 
 
 def is_ambiguous_lock(name: str) -> bool:
@@ -241,7 +279,7 @@ def is_ambiguous_lock(name: str) -> bool:
     return bool(parts and parts.get("ambiguous"))
 
 
-def is_until_lock(name: str) -> bool:
+def is_until_lock(target: str | Path, data: dict[str, str] | None = None) -> bool:
     """Return True for LOCK.until(.<scope>).txt — a deadline lock.
 
     An until lock holds until an ABSOLUTE point in time that the file states
@@ -261,10 +299,15 @@ def is_until_lock(name: str) -> bool:
         for the human decision and the evidence obligation recorded in
         'release_condition'.
     """
+    name = target.name if isinstance(target, Path) else Path(target).name
     m = LOCK_RE.match(name)
-    if not m or not m.group(1):
-        return False
-    return m.group(1).split(".")[0].lower() == "until"
+    if m and m.group(1) and m.group(1).split(".")[0].lower() == "until":
+        return True
+    if data is not None:
+        ltype = (data.get("type") or data.get("lock_type") or "").strip().lower()
+        if ltype == "until":
+            return True
+    return False
 
 
 def lock_not_before(lock_path: Path,
@@ -295,7 +338,7 @@ def lock_not_before(lock_path: Path,
     return parsed
 
 
-def is_protected_lock(name: str) -> bool:
+def is_protected_lock(target: str | Path, data: dict[str, str] | None = None) -> bool:
     """True if the lock is protected from automatic removal.
 
     Protected are user locks (removed only by the user), condition locks
@@ -309,8 +352,9 @@ def is_protected_lock(name: str) -> bool:
     moment stated in its 'not_before' field — but its file still survives,
     because the human decision and the evidence obligation in
     'release_condition' outlive the deadline. See is_expired."""
-    return (is_user_lock(name) or is_condition_lock(name)
-            or is_until_lock(name) or is_ambiguous_lock(name))
+    name = target.name if isinstance(target, Path) else Path(target).name
+    return (is_user_lock(target, data=data) or is_condition_lock(target, data=data)
+            or is_until_lock(target, data=data) or is_ambiguous_lock(name))
 
 
 def locked_operations(lock_path: Path) -> list[str]:
@@ -329,7 +373,7 @@ def is_prunable(lock_path: Path, now: datetime | None = None) -> bool:
     name = lock_path.name
     if name in LEGACY_LOCK_NAMES:
         return False
-    if is_protected_lock(name):
+    if is_protected_lock(lock_path):
         return False
     return is_expired(lock_path, now)
 
@@ -338,17 +382,30 @@ def is_lock_file(name: str) -> bool:
     return LOCK_RE.match(name) is not None
 
 
-def parse_lock_file(lock_path: Path) -> dict[str, str]:
-    """Parse a LOCK file into a key:value dict (keys lowercased).
+def normalize_lock_fields(data: dict[str, str]) -> dict[str, str]:
+    """Map alternative field names onto canonical names.
 
-    An unreadable file yields {} -- indistinguishable from an empty one. Any
-    caller that must not treat a read failure as "no fields" reads the text
-    itself and hands it to _parse_lock_text (see fence_status)."""
-    try:
-        text = lock_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return {}
-    return _parse_lock_text(text)
+    Only safe 1:1 mappings. Started/Expires fields are NOT mapped because
+    third-party formats may use timezone suffixes and absolute timestamps
+    that _parse_created/parse_duration cannot handle. Returns a copy;
+    original keys are preserved."""
+    result = dict(data)
+    field_map = {
+        "task": "purpose",
+        "reason": "purpose",
+        "grund": "purpose",
+        "begruendung": "purpose",
+        "begründung": "purpose",
+        "gesetzt": "created",
+        "datum": "created",
+        "date": "created",
+        "lock_type": "type",
+        "lock-type": "type",
+    }
+    for old_key, new_key in field_map.items():
+        if old_key in result and new_key not in result:
+            result[new_key] = result[old_key]
+    return result
 
 
 def _parse_lock_text(text: str) -> dict[str, str]:
@@ -362,27 +419,31 @@ def _parse_lock_text(text: str) -> dict[str, str]:
         if not stripped or stripped.startswith("#"):
             continue
         if ":" not in stripped:
+            # Check for header/directive line without colon, e.g. "LOCK.user.claude-code@ASUS-GEI" or "LOCK.user"
+            m_user = re.match(r"^LOCK\.user(?:\.([A-Za-z0-9_@.-]+))?$", stripped, re.IGNORECASE)
+            if m_user:
+                data.setdefault("type", "user")
+                if m_user.group(1):
+                    data.setdefault("owner", m_user.group(1))
+            elif stripped.lower().startswith("lock.user"):
+                data.setdefault("type", "user")
             continue
         key, value = stripped.split(":", 1)
         data[key.strip().lower()] = value.strip()
-    return data
+    return normalize_lock_fields(data)
 
 
-def normalize_lock_fields(data: dict[str, str]) -> dict[str, str]:
-    """Map alternative field names onto canonical names.
+def parse_lock_file(lock_path: Path) -> dict[str, str]:
+    """Parse a LOCK file into a key:value dict (keys lowercased).
 
-    Only safe 1:1 mappings. Started/Expires fields are NOT mapped because
-    third-party formats may use timezone suffixes and absolute timestamps
-    that _parse_created/parse_duration cannot handle. Returns a copy;
-    original keys are preserved."""
-    result = dict(data)
-    field_map = {
-        "task": "purpose",
-    }
-    for old_key, new_key in field_map.items():
-        if old_key in result and new_key not in result:
-            result[new_key] = result[old_key]
-    return result
+    An unreadable file yields {} -- indistinguishable from an empty one. Any
+    caller that must not treat a read failure as "no fields" reads the text
+    itself and hands it to _parse_lock_text (see fence_status)."""
+    try:
+        text = lock_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    return _parse_lock_text(text)
 
 
 def parse_duration(value: str | None) -> timedelta:
@@ -463,7 +524,7 @@ def is_expired(lock_path: Path, now: datetime | None = None,
     now = now or datetime.now()
     if is_ambiguous_lock(lock_path.name):
         return False
-    if is_until_lock(lock_path.name):
+    if is_until_lock(lock_path, data=data):
         moment = lock_not_before(lock_path, data)
         if moment is None:
             return False
@@ -479,7 +540,7 @@ def is_expired(lock_path: Path, now: datetime | None = None,
         if not fields.get("release_condition"):
             return True
         return (fields.get("release_mode") or "all").strip().lower() == "any"
-    if is_protected_lock(lock_path.name):
+    if is_protected_lock(lock_path, data=data):
         return False
 
     raw_exp = (data.get("expires_after") if data is not None else parse_lock_file(lock_path).get("expires_after"))
@@ -791,7 +852,7 @@ def parse_team_lock_sections(raw_content: str) -> dict | None:
 
 def compute_expires_at(lock_path: Path) -> str | None:
     """Absolute expiry time as an ISO string, or None if not determinable."""
-    if is_protected_lock(lock_path.name):
+    if is_protected_lock(lock_path):
         return None
     try:
         created, expires, _ = lock_created_and_expiry(lock_path)

@@ -57,7 +57,7 @@ def _has_active_lock(root: Path) -> bool:
     # User locks count as permanently locking — even when nominally expired
     # (protection invariant: never additionally bulk-lock a user-lock folder).
     for name, _scope, _legacy in lock_utils.find_lock_files(root):
-        if lock_utils.is_protected_lock(name):
+        if lock_utils.is_protected_lock(root / name):
             return True
     return False
 
@@ -131,7 +131,7 @@ def bulk_unlock(roots=None, manifest_path: Path | None = None, commit: bool = Fa
     unlocked, kept = [], []
     for path in candidates:
         # Doppelter Schutz: nur LOCK.txt mit created_by: bulk, nie geschuetzte Locks.
-        if not path.exists() or lock_utils.is_protected_lock(path.name) or not _is_bulk_lock(path):
+        if not path.exists() or lock_utils.is_protected_lock(path) or not _is_bulk_lock(path):
             kept.append(str(path))
             continue
         if not commit:
