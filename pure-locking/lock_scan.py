@@ -177,12 +177,12 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
                 remaining = ("AMBIGUOUS NAME - lock types cannot be combined in "
                              "the filename; holds indefinitely (fail-closed). "
                              "Use the fields: not_before + release_condition.")
-            elif lock_utils.is_user_lock(name):
+            elif lock_utils.is_user_lock(lock_path, data=data):
                 remaining = "user-held (no time expiry)"
-            elif lock_utils.is_condition_lock(name):
+            elif lock_utils.is_condition_lock(lock_path, data=data):
                 cond = data.get("release_condition", "?")
                 remaining = f"until condition met: {cond}"
-            elif lock_utils.is_until_lock(name):
+            elif lock_utils.is_until_lock(lock_path, data=data):
                 moment = lock_utils.lock_not_before(lock_path)
                 if moment is None:
                     remaining = ("MISSING not_before -> holds indefinitely "

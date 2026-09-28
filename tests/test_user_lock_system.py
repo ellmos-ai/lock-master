@@ -40,6 +40,56 @@ class TestUserLocks(unittest.TestCase):
             nl.write_text(f"owner: x\ncreated: {_old(2)}\nexpires_after: 24h\n", encoding="utf-8")
             self.assertTrue(lock_utils.is_prunable(nl))
 
+    def test_content_aware_user_lock_assistant_core_case(self):
+        """T-20260926-592074763: LOCK.assets.txt with LOCK.user header must be recognized as user lock."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "LOCK.assets.txt"
+            p.write_text(
+                "LOCK.user.claude-code@ASUS-GEI\n"
+                "Grund: Banner-Entwurf (zwei Motiv-Varianten, agy-generiert) fuer README/README_de, Review vor Commit\n"
+                "Gesetzt: 2026-09-20\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(lock_utils.is_user_lock(p))
+            self.assertTrue(lock_utils.is_protected_lock(p))
+            self.assertFalse(lock_utils.is_expired(p))
+            self.assertFalse(lock_utils.is_prunable(p))
+            active = lock_utils.active_locks(Path(tmp))
+            self.assertEqual(len(active), 1)
+            self.assertEqual(active[0], ("LOCK.assets.txt", "assets", False))
+
+    def test_content_aware_user_lock_accounts_core_case(self):
+        """T-20260926-592074763: LOCK.txt with LOCK.user line must be recognized as user lock."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "LOCK.txt"
+            p.write_text(
+                "LOCK.user.claude-code\n"
+                "created: 2026-09-20T10:00\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(lock_utils.is_user_lock(p))
+            self.assertTrue(lock_utils.is_protected_lock(p))
+            self.assertFalse(lock_utils.is_expired(p))
+            self.assertFalse(lock_utils.is_prunable(p))
+            active = lock_utils.active_locks(Path(tmp))
+            self.assertEqual(len(active), 1)
+            self.assertEqual(active[0], ("LOCK.txt", "project", False))
+
+    def test_content_aware_user_lock_fields_and_bulk_exclusion(self):
+        """Verify field-based user lock recognition and bulk lock exclusion."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p1 = Path(tmp) / "LOCK.txt"
+            p1.write_text("owner: claude-code\ntype: user\ncreated: 2026-09-20T10:00\n", encoding="utf-8")
+            self.assertTrue(lock_utils.is_user_lock(p1))
+
+            p2 = Path(tmp) / "LOCK.txt"
+            p2.write_text("owner: claude-code\nremovable_by: user\ncreated: 2026-09-20T10:00\n", encoding="utf-8")
+            self.assertTrue(lock_utils.is_user_lock(p2))
+
+            p3 = Path(tmp) / "LOCK.txt"
+            p3.write_text("owner: user\ncreated_by: bulk\ncreated: 2026-09-20T10:00\n", encoding="utf-8")
+            self.assertFalse(lock_utils.is_user_lock(p3))
+
 
 class TestPermissions(unittest.TestCase):
     PERM = {"default": "allow", "applies_to_agents": ["*"],

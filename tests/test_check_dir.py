@@ -216,3 +216,16 @@ class TestCheckDir:
         write_hook(git_repo, "pre-push", EMBARGO_HOOK_BODY)
         _check_dir(git_repo, as_json=False, strict=False)
         assert "[EMBARGO SIGNATURE]" in capsys.readouterr().out
+
+    def test_content_aware_user_lock_reported_locked(self, tmp_path, capsys):
+        """T-20260926-592074763: LOCK.assets.txt with LOCK.user header must be reported as locked (exit 1)."""
+        (tmp_path / "LOCK.assets.txt").write_text(
+            "LOCK.user.claude-code@ASUS-GEI\n"
+            "Grund: Banner-Entwurf (zwei Motiv-Varianten, agy-generiert) fuer README/README_de, Review vor Commit\n"
+            "Gesetzt: 2026-09-20\n",
+            encoding="utf-8",
+        )
+        assert _check_dir(tmp_path, as_json=False, strict=False) == 1
+        out = capsys.readouterr().out
+        assert "1 active lock(s) affect" in out
+        assert "LOCK.assets.txt" in out

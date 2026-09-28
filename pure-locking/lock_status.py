@@ -39,9 +39,9 @@ def check_project_status(project_dir: Path, now: datetime | None = None) -> list
         data = lock_utils.parse_lock_file(lock_path)
         if is_legacy:
             remaining = "legacy"
-        elif lock_utils.is_user_lock(name):
+        elif lock_utils.is_user_lock(lock_path, data=data):
             remaining = "user-held (no time expiry)"
-        elif lock_utils.is_condition_lock(name):
+        elif lock_utils.is_condition_lock(lock_path, data=data):
             cond = data.get("release_condition", "?")
             remaining = f"until condition met: {cond}"
         else:
