@@ -3,14 +3,14 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Tests](https://img.shields.io/badge/tests-246%20passed%20%7C%20100%25%20green-brightgreen.svg)](#tests-ausführen)
+[![Tests](https://img.shields.io/badge/tests-274%20passed%20%7C%20100%25%20green-brightgreen.svg)](#tests-ausführen)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Plattform: Windows | Linux | macOS](https://img.shields.io/badge/Plattform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Privatsphäre: Zero-Egress](https://img.shields.io/badge/Privatsph%C3%A4re-100%25%20Offline%20%7C%20Zero--Egress-success.svg)](SECURITY.md)
 [![Sicherheit: Local-First](https://img.shields.io/badge/Sicherheit-Local--First%20%7C%20Zero--Dependency-blue.svg)](SECURITY.md)
 [![Sicherheits-SLA](https://img.shields.io/badge/Sicherheits--SLA-48h%20%2F%205d-blue.svg)](SECURITY.md)
-[![Level 1 SBOM](https://img.shields.io/badge/Level%201%20SBOM-Auditiert-brightgreen.svg)](THIRD_PARTY_LICENSES.md)
+[![Level 1 SBOM](https://img.shields.io/badge/Level%201%20SBOM-Auditiert%20%7C%20Text--Begleitdatei-brightgreen.svg)](THIRD_PARTY_LICENSES.txt)
 [![RunAsInvoker](https://img.shields.io/badge/RunAsInvoker-Zertifiziert-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Auditiert](https://img.shields.io/badge/Third--Party-Auditiert%20%7C%20100%25%20Permissiv-success.svg)](THIRD_PARTY_LICENSES.md)
@@ -18,6 +18,7 @@
 [![Version 1.6.3](https://img.shields.io/badge/Version-1.6.3-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
+[![Geprüft](https://img.shields.io/badge/Gepr%C3%BCft-2026--09--29-brightgreen.svg)](https://github.com/ellmos-ai/lock-master)
 [![ellmos-ai](https://img.shields.io/badge/Ökosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Dachorganisation-open--bricks-orange.svg)](https://github.com/open-bricks)
 
@@ -26,7 +27,7 @@
 **Portables, abhängigkeitsfreies Multi-Agenten-Datei-Sperrsystem — Exklusive und Team-Locks (`LOCK*.txt`) mit Scopes, Verfall, Stale-Bereinigung, Cloud-Sync-Unterstützung und schnellem Übersichtscache.**
 
 > [!NOTE]
-> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **26.09.2026**.
+> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **29.09.2026**.
 
 ### 🧭 Schnellnavigation
 
@@ -51,7 +52,7 @@
 
 ---
 
-## <a id="management-zusammenfassung--kernidentitaet"></a><a id="auffindbarkeit-und-abgrenzung"></a><a id="was-ist-lock-master"></a>1. Management-Zusammenfassung & Kernidentität
+## <a id="sec-01"></a><a id="management-zusammenfassung--kernidentitaet"></a><a id="auffindbarkeit-und-abgrenzung"></a><a id="was-ist-lock-master"></a>1. Management-Zusammenfassung & Kernidentität
 
 `lock-master` bietet ein leichtgewichtiges, abhängigkeitsfreies Sperr- und Koordinationsprotokoll, maßgeschneidert für autonome KI-Coding-Agenten (Claude Code, OpenAI Codex, Antigravity/Gemini), automatisierte Hintergrund-Schleifen und Entwickler, die auf gemeinsamen Dateisystem-Arbeitsbäumen operieren.
 
@@ -66,7 +67,7 @@ Anstelle von schwergewichtigen Server-Diensten oder Datenbank-Systemen arbeitet 
 
 ---
 
-## <a id="visuelle-architektur-topologie"></a><a id="features--architektur"></a>2. Visuelle Architektur-Topologie & Entkoppelte Schichten
+## <a id="sec-02"></a><a id="visuelle-architektur-topologie"></a><a id="features--architektur"></a>2. Visuelle Architektur-Topologie & Entkoppelte Schichten
 
 Das folgende Architekturdiagramm veranschaulicht die vier entkoppelten Betriebsschichten von `lock-master`, von den CLI-/API-Einstiegspunkten bis zum persistenten Dateisystem-Status und den Inspektions-Tools:
 
@@ -100,9 +101,51 @@ flowchart TD
     end
 ```
 
+### Übersicht der Architektur-Topologie
+
+```text
++--------------------------------------------------------------------------------------------------+
+|                                  LOCK-MASTER ARCHITEKTUR-TOPOLOGIE                               |
++--------------------------------------------------------------------------------------------------+
+| [SICHT 1: CLI-EINTRITTSPUNKTE & AGENTEN-ADAPTER]                                                 |
+|   * CLI-Werkzeuge       : lock_scan.py, lock_create.py, prune_stale_locks.py, bulk_lock.py       |
+|   * Team- & Schwarm-CLI : team_lock.py (Präsenz, Claims, FIFO-Warteschlangen, Nachrichten)       |
+|   * Agenten-Frameworks  : Claude Code, OpenAI Codex, Antigravity/Gemini, autonome Schleifen      |
+|   * Zero-Dependencies   : 100% Python-Standardbibliothek (3.10+), keine Drittanbieterpakete      |
++--------------------------------------------------------------------------------------------------+
+|                                                |                                                 |
+|                                                v                                                 |
++--------------------------------------------------------------------------------------------------+
+| [SICHT 2: KERN-MUTEX & FENCING-LEASE-ENGINE]                                                     |
+|   * Mutex-Erkennung     : Bereichsbezogener active_locks()-Scan über Wurzel- & Teilpfade         |
+|   * Fencing-Leases      : Mikrosekunden-Epoch-Tokens verhindern Schreibkonflikte nach TTL-Ablauf |
+|   * Atomares Setzen     : O_CREAT | O_EXCL / atomare Umbenennung verhindert Race-Conditions      |
+|   * Deterministische TTL: ISO 8601 Zeitstempel + relative expires_after Gültigkeit (Standard 24h) |
+|   * Deklarative Regeln  : LOCK.permissions.json (deny > ask > allow > Standardauswertung)       |
++--------------------------------------------------------------------------------------------------+
+|                                                |                                                 |
+|                                                v                                                 |
++--------------------------------------------------------------------------------------------------+
+| [SICHT 3: HOST-LOKALE MULTI-AGENTEN-TEAMS & CACHE-PERSISTENZ]                                    |
+|   * Team-Koordination   : LOCK.team.<host>.txt koordiniert Agenten-Präsenz & Teil-Claims         |
+|   * FIFO-Warteschlangen : Konfliktfreie geordnete Reihung für Datei- & Werkzeug-Claims          |
+|   * Cache-Erzeugung     : LOCK-CACHE.md atomar erzeugt via lock_scan.py --write-cache            |
+|   * Optionaler Watcher  : Lokale SQLite-Datenbank (%USERPROFILE%/.lock_watcher) an Port 8095     |
++--------------------------------------------------------------------------------------------------+
+|                                                |                                                 |
+|                                                v                                                 |
++--------------------------------------------------------------------------------------------------+
+| [SICHT 4: AIR-GAP, RUNASINVOKER & SICHERHEITSPERIMETER]                                          |
+|   * Sicherheitsmodell   : RunAsInvoker unprivilegierte Ausführung (keine UAC/sudo-Eskalation)    |
+|   * Netzwerk-Isolation  : 100% Zero-Egress, 0% Telemetrie, vollständig lokales Dateisystem       |
+|   * Cloud-Sync-Schutz   : Atomare Umbenennungen immun gegen OneDrive/Dropbox-Latenzartefakte     |
+|   * SLA-Garantie        : Verbindliche 48h Erstantwort, 5 Werktage Triage, 30 Tage Behebungs-SLA  |
++--------------------------------------------------------------------------------------------------+
+```
+
 ---
 
-## <a id="end-to-end-multi-agenten-sperr-lebenszyklus"></a><a id="team-lock--sub-claim-lebenszyklus"></a>3. End-to-End Multi-Agenten-Sperr- & Lebenszyklus
+## <a id="sec-03"></a><a id="end-to-end-multi-agenten-sperr-lebenszyklus"></a><a id="team-lock--sub-claim-lebenszyklus"></a>3. End-to-End Multi-Agenten-Sperr- & Lebenszyklus
 
 Das folgende Sequenzdiagramm zeigt, wie zwei autonome KI-Agenten in einem gemeinsamen Workspace interagieren — inklusive exklusiver Reservierung, Konflikterkennung, bereichsweiser Parallelisierung, Team-Sub-Claims und der Bereinigung verwaister Sperren:
 
@@ -154,7 +197,7 @@ sequenceDiagram
 
 ---
 
-## <a id="marketing--zielgruppen"></a><a id="zielgruppen--auffindbarkeit"></a>4. Zielgruppen & High-Intent SEO-Suchanfragen
+## <a id="sec-04"></a><a id="marketing--zielgruppen"></a><a id="zielgruppen--auffindbarkeit"></a>4. Zielgruppen & High-Intent SEO-Suchanfragen
 
 `lock-master` wurde entwickelt, um kritische Nebenläufigkeits-, Koordinations- und Sicherheitsengpässe über vier primäre Anwenderprofile hinweg zu lösen:
 
@@ -189,7 +232,7 @@ sequenceDiagram
 
 ---
 
-## <a id="vergleichsmatrix-gegenueber-alternativen"></a>5. Vergleichsmatrix gegenüber Alternativen
+## <a id="sec-05"></a><a id="vergleichsmatrix-gegenueber-alternativen"></a>5. Vergleichsmatrix gegenüber Alternativen
 
 Die folgende Matrix vergleicht `lock-master` mit traditionellen Dateisperren, verteilten Systemen und Datenbanksperren anhand unserer 10 Governance- und Laufzeit-Invarianten (`INV-LOCAL-01` bis `INV-SLA-10`):
 
@@ -208,7 +251,7 @@ Die folgende Matrix vergleicht `lock-master` mit traditionellen Dateisperren, ve
 
 ---
 
-## <a id="governance--laufzeit-invarianten"></a>6. Governance- & Laufzeit-Invarianten-Matrix
+## <a id="sec-06"></a><a id="governance--laufzeit-invarianten"></a>6. Governance- & Laufzeit-Invarianten-Matrix
 
 `lock-master` garantiert 10 fundamentale Laufzeit- und Governance-Invarianten über alle Module, CLI-Befehle und Koordinationsschichten hinweg:
 
@@ -227,7 +270,7 @@ Die folgende Matrix vergleicht `lock-master` mit traditionellen Dateisperren, ve
 
 ---
 
-## <a id="kernfaehigkeiten--sperrtypen"></a><a id="kernfaehigkeiten"></a>7. Kernfähigkeiten & Sperrtypen
+## <a id="sec-07"></a><a id="kernfaehigkeiten--sperrtypen"></a><a id="kernfaehigkeiten"></a>7. Kernfähigkeiten & Sperrtypen
 
 ### Sperrtypen
 
@@ -265,7 +308,7 @@ operations: git-push, deploy
 
 ---
 
-## <a id="einstieg"></a>8. Einstieg & Schnellreferenz
+## <a id="sec-08"></a><a id="einstieg"></a>8. Einstieg & Schnellreferenz
 
 | Typischer Bedarf | Empfohlene Aktion | Befehl / Verwendung |
 |:---|:---|:---|
@@ -279,7 +322,7 @@ operations: git-push, deploy
 
 ---
 
-## <a id="schnellstart"></a>9. Schnellstart & Typische CLI-Workflows
+## <a id="sec-09"></a><a id="schnellstart"></a>9. Schnellstart & Typische CLI-Workflows
 
 ### 1. Skripte kopieren oder bereitstellen
 
@@ -334,7 +377,7 @@ python prune_stale_locks.py
 
 ---
 
-## <a id="konfiguration"></a>10. Konfigurationsreferenz (`lock_roots.json`)
+## <a id="sec-10"></a><a id="konfiguration"></a>10. Konfigurationsreferenz (`lock_roots.json`)
 
 Für das Scannen mehrerer Projektbäume kopiere `pure-locking/lock_roots.example.json` nach `lock_roots.json`:
 
@@ -366,7 +409,7 @@ Für das Scannen mehrerer Projektbäume kopiere `pure-locking/lock_roots.example
 
 ---
 
-## <a id="optionales-watcher-web-ui"></a>11. Optionale Watcher-UI & REST-API
+## <a id="sec-11"></a><a id="optionales-watcher-web-ui"></a>11. Optionale Watcher-UI & REST-API
 
 Für die visuelle Flottenüberwachung bietet `pure-locking/watcher/` ein optionales Localhost-Dashboard und eine REST-API auf `127.0.0.1:8095`:
 
@@ -382,7 +425,7 @@ python pure-locking/watcher/web_server.py --port 8095
 
 ---
 
-## <a id="python-api"></a>12. Python-API & Erweiterungspunkte
+## <a id="sec-12"></a><a id="python-api"></a>12. Python-API & Erweiterungspunkte
 
 Direkte programmgesteuerte Integration über `lock_utils`:
 
@@ -411,7 +454,7 @@ if lock_utils.is_expired(project_dir / "LOCK.txt", now=datetime.now()):
 
 ---
 
-## <a id="dateistruktur--shims"></a>13. Dateistruktur, Module & Shims
+## <a id="sec-13"></a><a id="dateistruktur--shims"></a>13. Dateistruktur, Module & Shims
 
 `lock-master` ist modular in drei entkoppelte Submodule aufgeteilt, die über Shims im Root nahtlos kompatibel bleiben:
 
@@ -445,6 +488,7 @@ lock-master/                        # Modularer Stack als EIN Repository
 ├── LOCK-SYSTEM.md                  # Kanonische Spezifikation & Lifecycle
 ├── NOTICE                          # Offizielle Attribution (Lukas Geiger, ellmos-ai, open-bricks)
 ├── THIRD_PARTY_LICENSES.md         # Level 1 SBOM, Lizenz-Audit & Invarianten-Matrix
+├── THIRD_PARTY_LICENSES.txt        # Level 1 SBOM Begleitdatei im Klartext & Lizenztexte
 ├── MARKETING-LOG.txt               # Zielgruppen, SEO-Queries & Differenzierung
 ├── SECURITY.md                     # Sicherheitsrichtlinie, SLAs & Schwachstellenmeldung
 ├── llms.txt                        # KI-Agenten Entdeckungsindex & Kontext
@@ -454,7 +498,7 @@ lock-master/                        # Modularer Stack als EIN Repository
 
 ---
 
-## <a id="tests-ausführen"></a>14. Tests, Verifikation & Quality-Gates
+## <a id="sec-14"></a><a id="tests-ausführen"></a>14. Tests, Verifikation & Quality-Gates
 
 Die standardisierte Pytest-Testsuite lokal ausführen:
 
@@ -475,7 +519,7 @@ Unsere Continuous-Integration-Matrix garantiert:
 
 ---
 
-## <a id="sicherheitsrichtlinie"></a>15. Sicherheitsrichtlinie & Schwachstellen-SLAs
+## <a id="sec-15"></a><a id="sicherheitsrichtlinie"></a>15. Sicherheitsrichtlinie & Schwachstellen-SLAs
 
 Sicherheitsrelevante Meldungen werden nach strikten Zero-Egress- und Local-First-Prinzipien behandelt. Siehe [SECURITY.md](SECURITY.md) für Meldeverfahren, PGP-Schlüssel und unsere verbindlichen SLAs:
 - **Erste Rückmeldung**: Innerhalb von **48 Stunden** (`security@open-bricks.org`, `security@ellmos.ai`).
@@ -484,15 +528,15 @@ Sicherheitsrelevante Meldungen werden nach strikten Zero-Egress- und Local-First
 
 ---
 
-## <a id="drittanbieter-lizenzen--transparenz"></a><a id="drittanbieter-lizenzen--level-1-sbom"></a>16. Drittanbieter-Lizenzen & Level 1 SBOM
+## <a id="sec-16"></a><a id="drittanbieter-lizenzen--transparenz"></a><a id="drittanbieter-lizenzen--level-1-sbom"></a>16. Drittanbieter-Lizenzen & Level 1 SBOM
 
 `lock-master` garantiert **null externe Laufzeit-Abhängigkeiten** (`dependencies = []` in `pyproject.toml`) und setzt ausschließlich auf freie, permissive Open-Source-Lizenzen (MIT, Apache-2.0, PSFL, BSD-3-Clause). Das Projekt enthält **keinerlei GPL- oder Copyleft-Komponenten**.
 
-Das vollständige Level 1 Software Bill of Materials (SBOM), das Lizenz-Audit und die Invarianten-Referenzmatrix (`INV-LOCAL-01` bis `INV-SLA-10`) sind in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) dokumentiert.
+Das vollständige Level 1 Software Bill of Materials (SBOM), das Lizenz-Audit, die Invarianten-Referenzmatrix (`INV-LOCAL-01` bis `INV-SLA-10`) sowie die eigenständige Text-Begleitdatei sind in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) und [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) dokumentiert.
 
 ---
 
-## <a id="ökosystem--geschwisterwerkzeuge"></a>17. Ökosystem, Geschwisterwerkzeuge & Bündel
+## <a id="sec-17"></a><a id="ökosystem--geschwisterwerkzeuge"></a>17. Ökosystem, Geschwisterwerkzeuge & Bündel
 
 `lock-master` ist ein zentraler Baustein des [ellmos-ai](https://github.com/ellmos-ai) Multi-Agenten-Ökosystems und des übergeordneten [open-bricks](https://github.com/open-bricks) Software-Verbunds:
 
@@ -524,7 +568,7 @@ Das vollständige Level 1 Software Bill of Materials (SBOM), das Lizenz-Audit un
 
 ---
 
-## <a id="lizenz"></a><a id="gesetzliche-hinweise-haftungsbeschraenkung--lizenz"></a>18. Gesetzliche Hinweise, Haftungsbeschränkung & Lizenz (§ 521 BGB)
+## <a id="sec-18"></a><a id="lizenz"></a><a id="gesetzliche-hinweise-haftungsbeschraenkung--lizenz"></a>18. Gesetzliche Hinweise, Haftungsbeschränkung & Lizenz (§ 521 BGB)
 
 ### Gesetzliche Hinweise & Haftungsbeschränkung (§ 521 BGB)
 Die Bereitstellung dieser Software erfolgt unentgeltlich im Sinne einer Gefälligkeit bzw. Schenkung gemäß **§ 521 BGB** (Gefälligkeitsrecht / unentgeltliche Schenkung). Die Haftung des Autors und der Mitwirkenden ist daher auf Vorsatz und grobe Fahrlässigkeit beschränkt.

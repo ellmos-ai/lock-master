@@ -67,7 +67,8 @@ def test_llms_txt_integrity():
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
     assert (
-        "Last-checked: 2026-09-26" in content
+        "Last-checked: 2026-09-29" in content
+        or "Last-checked: 2026-09-26" in content
         or "Last-checked: 2026-09-20" in content
         or "Last-checked: 2026-09-16" in content
     )
@@ -85,7 +86,10 @@ def test_readme_badges_and_ecosystem_parity():
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
         assert (
-            "tests-246%20passed" in content
+            "tests-274%20passed" in content
+            or "tests-270%20passed" in content
+            or "tests-264%20passed" in content
+            or "tests-246%20passed" in content
             or "tests-240%20passed" in content
             or "tests-239%20passed" in content
             or "tests-233%20passed" in content
@@ -122,7 +126,12 @@ def test_pyproject_tooling_integrity():
     assert "zero-egress" in project.get("keywords", [])
     assert "ellmos-ai" in project.get("keywords", [])
     assert "open-bricks" in project.get("keywords", [])
-    assert project.get("license-files") == ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
+    assert project.get("license-files") == [
+        "LICENSE",
+        "NOTICE",
+        "THIRD_PARTY_LICENSES.md",
+        "THIRD_PARTY_LICENSES.txt",
+    ]
 
     classifiers = project.get("classifiers", [])
     assert "Programming Language :: Python :: 3.10" in classifiers
@@ -358,7 +367,12 @@ def test_pep639_license_files_and_zero_runtime_dependencies():
         pyproject = tomllib.load(handle)
     project = pyproject.get("project", {})
 
-    assert project.get("license-files") == ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
+    assert project.get("license-files") == [
+        "LICENSE",
+        "NOTICE",
+        "THIRD_PARTY_LICENSES.md",
+        "THIRD_PARTY_LICENSES.txt",
+    ]
     assert project.get("dependencies") == []
     dev_deps = project.get("optional-dependencies", {}).get("dev", [])
     assert any("pytest" in d for d in dev_deps)
@@ -551,7 +565,7 @@ def test_level1_sbom_and_cross_reference_matrix():
     assert "RunAsInvoker" in sbom_doc
     assert "INV-LOCAL-01" in sbom_doc
     assert "INV-SLA-10" in sbom_doc
-    assert "2026-09-26" in sbom_doc or "2026-09-20" in sbom_doc
+    assert "2026-09-29" in sbom_doc or "2026-09-26" in sbom_doc or "2026-09-20" in sbom_doc
 
 
 def test_dual_mermaid_diagrams_and_semicolons_free():
@@ -655,3 +669,105 @@ def test_changelog_and_marketing_log_pfad_a_20260926():
 
     mkt_content = (ROOT / "MARKETING-LOG.txt").read_text(encoding="utf-8")
     assert "PFAD A HYGIENE, CI LIFECYCLE WORKFLOWS & DRIFT RECONCILIATION AUDIT (2026-09-26)" in mkt_content
+
+
+def test_dual_reciprocal_anchors_sec01_to_sec18():
+    """Verify that both README.md and README_de.md contain reciprocal anchors sec-01 through sec-18 on all 18 sections."""
+    import re
+
+    for filename in ("README.md", "README_de.md"):
+        content = (ROOT / filename).read_text(encoding="utf-8")
+        for i in range(1, 19):
+            tag = f'id="sec-{i:02d}"'
+            assert tag in content, f"Expected anchor {tag} in {filename}"
+
+        sec_pattern = re.compile(r"^##\s+<a\s+id=\"sec-(\d\d)\"", re.MULTILINE)
+        found_secs = [int(m) for m in sec_pattern.findall(content)]
+        assert found_secs == list(range(1, 19)), f"Sections mismatch in {filename}: {found_secs}"
+
+
+def test_ascii_four_view_architectural_topology():
+    """Verify presence of ASCII Four-View Architectural Topology in both READMEs."""
+    en_content = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "LOCK-MASTER ARCHITECTURAL TOPOLOGY" in en_content
+    assert "[VIEW 1: CLI ENTRY POINTS & AGENT ADAPTERS]" in en_content
+    assert "[VIEW 2: CORE MUTEX & FENCING LEASE ENGINE]" in en_content
+    assert "[VIEW 3: INTRA-HOST MULTI-AGENT TEAMS & CACHE PERSISTENCE]" in en_content
+    assert "[VIEW 4: AIR-GAP, RUNASINVOKER & SECURITY BOUNDARY]" in en_content
+
+    de_content = (ROOT / "README_de.md").read_text(encoding="utf-8")
+    assert "LOCK-MASTER ARCHITEKTUR-TOPOLOGIE" in de_content
+    assert "[SICHT 1: CLI-EINTRITTSPUNKTE & AGENTEN-ADAPTER]" in de_content
+    assert "[SICHT 2: KERN-MUTEX & FENCING-LEASE-ENGINE]" in de_content
+    assert "[SICHT 3: HOST-LOKALE MULTI-AGENTEN-TEAMS & CACHE-PERSISTENZ]" in de_content
+    assert "[SICHT 4: AIR-GAP, RUNASINVOKER & SICHERHEITSPERIMETER]" in de_content
+
+
+def test_third_party_licenses_txt_level1_sbom_companion():
+    """Verify that THIRD_PARTY_LICENSES.txt exists, contains Level 1 SBOM, 10 invariants, and full license texts."""
+    txt_path = ROOT / "THIRD_PARTY_LICENSES.txt"
+    assert txt_path.is_file(), "THIRD_PARTY_LICENSES.txt companion must exist"
+    content = txt_path.read_text(encoding="utf-8")
+
+    assert "Level 1 SBOM" in content
+    assert "2026-09-29" in content
+    assert "RunAsInvoker" in content
+    assert "zero external runtime dependencies" in content
+
+    for inv in [
+        "INV-LOCAL-01",
+        "INV-SEC-02",
+        "INV-FAIL-03",
+        "INV-SCOPE-04",
+        "INV-TEAM-05",
+        "INV-TTL-06",
+        "INV-PERM-07",
+        "INV-AUDIT-08",
+        "INV-LIC-09",
+        "INV-SLA-10",
+    ]:
+        assert inv in content, f"Expected {inv} in THIRD_PARTY_LICENSES.txt"
+
+    assert "Python Software Foundation License Version 2" in content
+    assert "MIT License (MIT)" in content
+    assert "Redistribution and use in source and binary forms" in content
+    assert "Apache License" in content
+
+
+def test_pyproject_topics_saturation_and_urls():
+    """Verify that pyproject.toml saturates 20/20 topics and defines extended SBOM / license URLs."""
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        pyproject = tomllib.load(handle)
+
+    project = pyproject.get("project", {})
+    keywords = project.get("keywords", [])
+    assert len(keywords) >= 20, f"Expected >= 20 keywords for saturation, got {len(keywords)}"
+    assert "automation" in keywords
+    assert "zero-egress" in keywords
+    assert "lock-files" in keywords
+
+    urls = project.get("urls", {})
+    assert "Third-Party Licenses (Text)" in urls
+    assert "Level 1 SBOM" in urls
+    assert "Plain-Text License" in urls
+
+
+def test_notice_and_licenses_reciprocal_references():
+    """Verify cross-referencing between NOTICE, THIRD_PARTY_LICENSES.md, and THIRD_PARTY_LICENSES.txt."""
+    notice_content = (ROOT / "NOTICE").read_text(encoding="utf-8")
+    assert "THIRD_PARTY_LICENSES.txt" in notice_content
+    assert "THIRD_PARTY_LICENSES.md" in notice_content
+
+    md_content = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
+    assert "THIRD_PARTY_LICENSES.txt" in md_content
+    assert "2026-09-29" in md_content
+
+
+def test_changelog_pfad_b_20260929():
+    """Verify that CHANGELOG.md contains the 2026-09-29 Pfad B discoverability entry under [Unreleased]."""
+    content = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [Unreleased]" in content
+    assert "2026-09-29" in content
+    assert "Level 1 SBOM Standalone Text Companion" in content
+    assert "ASCII Four-View Architectural Topology" in content
+    assert "18-Point Reciprocal Dual HTML Anchors" in content

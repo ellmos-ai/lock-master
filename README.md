@@ -3,14 +3,14 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Tests](https://img.shields.io/badge/tests-246%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
+[![Tests](https://img.shields.io/badge/tests-274%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Privacy: Zero-Egress](https://img.shields.io/badge/privacy-100%25%20Offline%20%7C%20Zero--Egress-success.svg)](SECURITY.md)
 [![Security: Local-First](https://img.shields.io/badge/security-Local--First%20%7C%20Zero--Dependency-blue.svg)](SECURITY.md)
 [![Security SLA](https://img.shields.io/badge/Security%20SLA-48h%20%2F%205d-blue.svg)](SECURITY.md)
-[![Level 1 SBOM](https://img.shields.io/badge/Level%201%20SBOM-Audited-brightgreen.svg)](THIRD_PARTY_LICENSES.md)
+[![Level 1 SBOM](https://img.shields.io/badge/Level%201%20SBOM-Audited%20%7C%20Plain%20Text-brightgreen.svg)](THIRD_PARTY_LICENSES.txt)
 [![RunAsInvoker](https://img.shields.io/badge/RunAsInvoker-Certified-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Audited](https://img.shields.io/badge/Third--Party-Audited%20%7C%20100%25%20Permissive-success.svg)](THIRD_PARTY_LICENSES.md)
@@ -18,6 +18,7 @@
 [![Version 1.6.3](https://img.shields.io/badge/version-1.6.3-informational.svg)](VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LLM Indexing](https://img.shields.io/badge/llms.txt-indexed-purple.svg)](llms.txt)
+[![Verified](https://img.shields.io/badge/Verified-2026--09--29-brightgreen.svg)](https://github.com/ellmos-ai/lock-master)
 [![ellmos-ai](https://img.shields.io/badge/Ecosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-orange.svg)](https://github.com/open-bricks)
 
@@ -26,7 +27,7 @@
 **Portable, zero-dependency multi-agent file-lock system — Exclusive and Team Locks (`LOCK*.txt`) with scopes, expiry, stale-cleanup, cloud-sync support, and a fast overview cache.**
 
 > [!NOTE]
-> **AI / LLM Indexing**: AI agents and automated tools can inspect [llms.txt](llms.txt) for a machine-readable summary, search terms, and disambiguation details. Last checked: **2026-09-26**.
+> **AI / LLM Indexing**: AI agents and automated tools can inspect [llms.txt](llms.txt) for a machine-readable summary, search terms, and disambiguation details. Last checked: **2026-09-29**.
 
 ### 🧭 Quick Navigation
 
@@ -51,7 +52,7 @@
 
 ---
 
-## <a id="executive-summary--core-identity"></a><a id="discovery-context"></a><a id="what-is-lock-master"></a>1. Executive Summary & Core Identity
+## <a id="sec-01"></a><a id="executive-summary--core-identity"></a><a id="discovery-context"></a><a id="what-is-lock-master"></a>1. Executive Summary & Core Identity
 
 `lock-master` provides a lightweight, zero-dependency mutual exclusion and coordination protocol engineered for autonomous AI coding agents (Claude Code, OpenAI Codex, Antigravity/Gemini), background worker loops, and human maintainers operating across shared filesystem checkouts.
 
@@ -66,7 +67,7 @@ Instead of introducing heavyweight daemon dependencies or remote lock services, 
 
 ---
 
-## <a id="visual-architecture-topology"></a><a id="features"></a><a id="features--architektur"></a>2. Visual Architecture Topology & Decoupled Layers
+## <a id="sec-02"></a><a id="visual-architecture-topology"></a><a id="features"></a><a id="features--architektur"></a>2. Visual Architecture Topology & Decoupled Layers
 
 The following diagram illustrates the four decoupled operational tiers of `lock-master`, from CLI/API entry points down to persistent filesystem state and inspection tooling:
 
@@ -100,9 +101,51 @@ flowchart TD
     end
 ```
 
+### Architectural Topology Overview
+
+```text
++--------------------------------------------------------------------------------------------------+
+|                                  LOCK-MASTER ARCHITECTURAL TOPOLOGY                              |
++--------------------------------------------------------------------------------------------------+
+| [VIEW 1: CLI ENTRY POINTS & AGENT ADAPTERS]                                                      |
+|   * CLI Utilities       : lock_scan.py, lock_create.py, prune_stale_locks.py, bulk_lock.py       |
+|   * Swarm & Team CLI    : team_lock.py (presence, claims, waiters, broadcast messages)          |
+|   * Agent Frameworks    : Claude Code, OpenAI Codex, Antigravity/Gemini, Custom Daemon Loops     |
+|   * Zero Dependencies   : 100% Python Standard Library (3.10+), Zero Third-Party Packages        |
++--------------------------------------------------------------------------------------------------+
+|                                                |                                                 |
+|                                                v                                                 |
++--------------------------------------------------------------------------------------------------+
+| [VIEW 2: CORE MUTEX & FENCING LEASE ENGINE]                                                      |
+|   * Mutex Discovery     : Scoped active_locks() scan across root & sub-paths                     |
+|   * Fencing Leases      : Microsecond Epoch fencing tokens prevent post-TTL stale writes         |
+|   * Atomic Stamping     : O_CREAT | O_EXCL / atomic rename prevents race conditions              |
+|   * Deterministic TTL   : ISO 8601 timestamps + expires_after relative durations (default 24h)   |
+|   * Declarative Rules   : LOCK.permissions.json (deny > ask > allow > default evaluation)       |
++--------------------------------------------------------------------------------------------------+
+|                                                |                                                 |
+|                                                v                                                 |
++--------------------------------------------------------------------------------------------------+
+| [VIEW 3: INTRA-HOST MULTI-AGENT TEAMS & CACHE PERSISTENCE]                                       |
+|   * Team Coordination   : LOCK.team.<host>.txt coordinates multi-agent presence & sub-claims     |
+|   * FIFO Waiter Queues  : Conflict-free ordered queueing for shared tool & file claims           |
+|   * Cache Generation    : LOCK-CACHE.md generated atomically via lock_scan.py --write-cache     |
+|   * Optional Watcher    : Localhost SQLite storage (%USERPROFILE%/.lock_watcher) on port 8095    |
++--------------------------------------------------------------------------------------------------+
+|                                                |                                                 |
+|                                                v                                                 |
++--------------------------------------------------------------------------------------------------+
+| [VIEW 4: AIR-GAP, RUNASINVOKER & SECURITY BOUNDARY]                                              |
+|   * Security Model      : RunAsInvoker unprivileged execution (Zero UAC/sudo elevation required) |
+|   * Network Isolation   : 100% Zero-Egress, Zero-Telemetry, strictly air-gapped local filesystem |
+|   * Cloud-Sync Defense  : Rename-based atomic writes immune to OneDrive/Dropbox latency artifacts|
+|   * SLA Commitment      : Binding 48h initial security response, 5-day triage, 30-day remediation|
++--------------------------------------------------------------------------------------------------+
+```
+
 ---
 
-## <a id="end-to-end-multi-agent-locking-lifecycle"></a><a id="team-lock-and-sub-claims-lifecycle"></a>3. End-to-End Multi-Agent Locking & Lifecycle
+## <a id="sec-03"></a><a id="end-to-end-multi-agent-locking-lifecycle"></a><a id="team-lock-and-sub-claims-lifecycle"></a>3. End-to-End Multi-Agent Locking & Lifecycle
 
 The sequence diagram below shows how two autonomous AI agents coordinate within a shared workspace, handling exclusive locking, contested lock discovery, scoped parallelism, team sub-claims, and safe stale lock recovery:
 
@@ -154,7 +197,7 @@ sequenceDiagram
 
 ---
 
-## <a id="marketing--target-personas"></a><a id="target-personas"></a>4. Target Personas & High-Intent SEO Queries
+## <a id="sec-04"></a><a id="marketing--target-personas"></a><a id="target-personas"></a>4. Target Personas & High-Intent SEO Queries
 
 `lock-master` is engineered to solve critical concurrency, coordination, and safety bottlenecks across four primary technical user journeys:
 
@@ -189,7 +232,7 @@ sequenceDiagram
 
 ---
 
-## <a id="comparative-matrix-vs-alternatives"></a>5. Comparative Matrix vs. Alternatives
+## <a id="sec-05"></a><a id="comparative-matrix-vs-alternatives"></a>5. Comparative Matrix vs. Alternatives
 
 The following matrix compares `lock-master` against traditional file locking, distributed coordination systems, and database locks across our 10 Governance and Technical Invariants (`INV-LOCAL-01` to `INV-SLA-10`):
 
@@ -208,7 +251,7 @@ The following matrix compares `lock-master` against traditional file locking, di
 
 ---
 
-## <a id="governance--runtime-invariants"></a>6. Governance & Runtime Invariants Matrix
+## <a id="sec-06"></a><a id="governance--runtime-invariants"></a>6. Governance & Runtime Invariants Matrix
 
 `lock-master` guarantees 10 fundamental runtime and governance invariants across all modules, CLI invocations, and multi-agent coordination layers:
 
@@ -227,7 +270,7 @@ The following matrix compares `lock-master` against traditional file locking, di
 
 ---
 
-## <a id="core-capabilities--lock-types"></a><a id="core-capabilities"></a>7. Core Capabilities & Lock Types
+## <a id="sec-07"></a><a id="core-capabilities--lock-types"></a><a id="core-capabilities"></a>7. Core Capabilities & Lock Types
 
 ### Lock File Types
 
@@ -265,7 +308,7 @@ operations: git-push, deploy
 
 ---
 
-## <a id="start-here"></a>8. Start Here & Quick Reference
+## <a id="sec-08"></a><a id="start-here"></a>8. Start Here & Quick Reference
 
 | Common Need | Recommended Action | Command / Usage |
 |:---|:---|:---|
@@ -279,7 +322,7 @@ operations: git-push, deploy
 
 ---
 
-## <a id="quick-start"></a>9. Quick Start & Common CLI Workflows
+## <a id="sec-09"></a><a id="quick-start"></a>9. Quick Start & Common CLI Workflows
 
 ### 1. Copy or Install Scripts
 
@@ -334,7 +377,7 @@ python prune_stale_locks.py
 
 ---
 
-## <a id="configuration"></a>10. Configuration Reference (`lock_roots.json`)
+## <a id="sec-10"></a><a id="configuration"></a>10. Configuration Reference (`lock_roots.json`)
 
 To scan multiple project hierarchies, copy `pure-locking/lock_roots.example.json` to `lock_roots.json`:
 
@@ -366,7 +409,7 @@ To scan multiple project hierarchies, copy `pure-locking/lock_roots.example.json
 
 ---
 
-## <a id="optional-watcher-ui"></a>11. Optional Watcher UI & REST API
+## <a id="sec-11"></a><a id="optional-watcher-ui"></a>11. Optional Watcher UI & REST API
 
 For visual fleet monitoring, `pure-locking/watcher/` provides an optional localhost dashboard and REST API binding strictly to `127.0.0.1:8095`:
 
@@ -382,7 +425,7 @@ Navigate to `http://127.0.0.1:8095` to inspect active locks, component room maps
 
 ---
 
-## <a id="python-api"></a>12. Python API & Extension Points
+## <a id="sec-12"></a><a id="python-api"></a>12. Python API & Extension Points
 
 Direct programmatic integration via `lock_utils`:
 
@@ -411,7 +454,7 @@ if lock_utils.is_expired(project_dir / "LOCK.txt", now=datetime.now()):
 
 ---
 
-## <a id="file-layout--shims"></a>13. File Layout, Modules & Shims
+## <a id="sec-13"></a><a id="file-layout--shims"></a>13. File Layout, Modules & Shims
 
 `lock-master` is structured as a stack of three decoupled sub-modules, unified with flat compatibility shims at the repository root:
 
@@ -445,6 +488,7 @@ lock-master/                        # Shipped as ONE modular repository
 ├── LOCK-SYSTEM.md                  # Canonical lock specification & lifecycle
 ├── NOTICE                          # Legal attribution notice (Lukas Geiger, ellmos-ai, open-bricks)
 ├── THIRD_PARTY_LICENSES.md         # Level 1 SBOM, license audit & invariant matrix
+├── THIRD_PARTY_LICENSES.txt        # Plain-text companion Level 1 SBOM inventory & full license texts
 ├── MARKETING-LOG.txt               # Personas, SEO queries & competitive analysis
 ├── SECURITY.md                     # Security policy, dual SLAs & vulnerability disclosure
 ├── llms.txt                        # AI agent discovery context & metadata
@@ -454,7 +498,7 @@ lock-master/                        # Shipped as ONE modular repository
 
 ---
 
-## <a id="running-tests"></a>14. Testing, Verification & Quality Gates
+## <a id="sec-14"></a><a id="running-tests"></a>14. Testing, Verification & Quality Gates
 
 Run the comprehensive pytest test suite locally:
 
@@ -475,7 +519,7 @@ Our continuous integration matrix validates:
 
 ---
 
-## <a id="security-policy"></a>15. Security Policy & Vulnerability SLAs
+## <a id="sec-15"></a><a id="security-policy"></a>15. Security Policy & Vulnerability SLAs
 
 Security disclosures are handled under strict zero-egress, local-first protocols. See [SECURITY.md](SECURITY.md) for vulnerability disclosure guidelines, PGP keys, and our dual SLA commitments:
 - **Initial Response SLA**: Within **48 hours** (`security@open-bricks.org`, `security@ellmos.ai`).
@@ -484,15 +528,15 @@ Security disclosures are handled under strict zero-egress, local-first protocols
 
 ---
 
-## <a id="third-party-licenses--transparency"></a><a id="third-party-licenses--level-1-sbom"></a>16. Third-Party Licenses & Level 1 SBOM
+## <a id="sec-16"></a><a id="third-party-licenses--transparency"></a><a id="third-party-licenses--level-1-sbom"></a>16. Third-Party Licenses & Level 1 SBOM
 
 `lock-master` enforces a strict **Zero-Runtime-Dependency Guarantee** (`dependencies = []` in `pyproject.toml`) and is built exclusively with permissive open-source licenses (MIT, Apache-2.0, PSFL, BSD-3-Clause). It contains **zero GPL or restrictive copyleft code**.
 
-For the complete Level 1 Software Bill of Materials (SBOM), audited dependency matrix, and Invariant Cross-Reference Matrix (`INV-LOCAL-01` to `INV-SLA-10`), see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+For the complete Level 1 Software Bill of Materials (SBOM), audited dependency matrix, and Invariant Cross-Reference Matrix (`INV-LOCAL-01` to `INV-SLA-10`), see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and the standalone plain-text companion [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).
 
 ---
 
-## <a id="ecosystem--sibling-tools"></a>17. Ecosystem, Sibling Tools & Bundles
+## <a id="sec-17"></a><a id="ecosystem--sibling-tools"></a>17. Ecosystem, Sibling Tools & Bundles
 
 `lock-master` is a foundational synchronization and locking pillar within the [ellmos-ai](https://github.com/ellmos-ai) ecosystem and the umbrella [open-bricks](https://github.com/open-bricks) open-source collective:
 
@@ -524,7 +568,7 @@ For the complete Level 1 Software Bill of Materials (SBOM), audited dependency m
 
 ---
 
-## <a id="license"></a><a id="statutory-notice-liability-limitation--license"></a>18. Statutory Notice, Liability Limitation & License (§ 521 BGB)
+## <a id="sec-18"></a><a id="license"></a><a id="statutory-notice-liability-limitation--license"></a>18. Statutory Notice, Liability Limitation & License (§ 521 BGB)
 
 ### Statutory Notice & Limitation of Liability (§ 521 BGB)
 The provision of this software is made free of charge as a statutory courtesy (*Gefälligkeit* / *unentgeltliche Schenkung* pursuant to **§ 521 BGB** of the German Civil Code). Under German statutory law, liability of the author and contributors is strictly limited to intent and gross negligence (*Vorsatz und grobe Fahrlässigkeit*).

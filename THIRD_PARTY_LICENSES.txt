@@ -1,0 +1,115 @@
+# Third-Party Licenses & Software Inventory
+
+Project: lock-master (Portable, Zero-Dependency Multi-Agent File-Lock System)
+Audited: 2026-09-29 against Level 1 SBOM and runtime invariants.
+License: MIT License (see LICENSE and NOTICE)
+Repository: https://github.com/ellmos-ai/lock-master
+Parent Organization: ellmos-ai (https://github.com/ellmos-ai)
+Umbrella Collective: open-bricks (https://github.com/open-bricks)
+
+## Project License
+
+`lock-master` is licensed under the permissive MIT License. See `LICENSE` and `NOTICE`.
+
+## Core Runtime
+
+The base package declares zero external runtime dependencies (`dependencies = []`).
+The entire runtime execution relies strictly on the official Python Standard Library.
+
+| Package / Module | Scope | Version Spec | License | Purpose |
+|---|---|---|---|---|
+| Python Standard Library | Runtime | >=3.10 | PSF-2.0 | Core runtime: argparse, contextlib, dataclasses, datetime, fnmatch, hashlib, importlib, inspect, io, json, logging, os, pathlib, platform, re, shutil, signal, socket, sqlite3, stat, sys, tempfile, threading, time, typing, uuid |
+| tomli | Runtime Fallback (<3.11) | >=2.0.0 | MIT | Python 3.10 TOML parsing compatibility fallback |
+
+All core mutex stamping, active lock scanning, TTL evaluation, fencing tokens, permission rule matching, and team coordination are handled 100% through Python standard library primitives.
+Zero third-party telemetry, analytics, cloud synchronization, or remote networking services are packaged or contacted.
+
+## Direct Build and Development Dependencies
+
+The following tools are utilized exclusively for offline automated testing, code quality auditing, packaging, linting, and the optional localhost watcher web UI:
+
+| Package | Declared Use | Constraint | License | Source |
+|---|---|---|---|---|
+| pytest | Development test runner | >=8.0 | MIT | https://pytest.org/ |
+| ruff | Development linter & code style | >=0.6.0 | MIT / Apache-2.0 | https://github.com/astral-sh/ruff |
+| setuptools | Build backend (PEP 517/621) | >=61.0 | MIT | https://github.com/pypa/setuptools |
+| flask | Optional Watcher UI & API | >=2.0 | BSD-3-Clause | https://github.com/pallets/flask |
+| anyio | Concurrency test fixture | >=3.0 | MIT | https://github.com/agronholm/anyio |
+
+## Zero-Copyleft Guarantee & Unprivileged Execution
+
+- Zero-Copyleft Guarantee: All runtime code and development dependencies are governed strictly by permissive, business-friendly open-source licenses (MIT, Apache-2.0, PSF-2.0, BSD-3-Clause). The codebase contains zero GPL, AGPL, or viral copyleft components.
+- Unprivileged User-Mode Operation (RunAsInvoker): All CLI commands, lock files, atomic renames, SQLite watcher storage, and state queries execute purely within unprivileged user space. No administrative rights, root elevation, sudo, or UAC prompts are ever required.
+
+## Governance & Runtime Invariants
+
+`lock-master` strictly enforces ten foundational governance and runtime invariants:
+- INV-LOCAL-01: 100% Local-First & Zero-Egress (100% offline-ready; local filesystem locks; zero network calls or telemetry)
+- INV-SEC-02: Unprivileged User-Mode Execution (RunAsInvoker; executes in unprivileged user space without elevation)
+- INV-FAIL-03: Fail-Closed Default Semantics (ambiguity, syntax errors, or unexpired locks default to access denied / read-only)
+- INV-SCOPE-04: Hierarchical & Scoped Locking (root LOCK.txt protects repo; granular LOCK.<scope>.txt enables safe concurrency)
+- INV-TEAM-05: Multi-Agent Team Coordination (LOCK.team.<host>.txt coordinates intra-host agent teams and FIFO queues)
+- INV-TTL-06: Deterministic TTL & Safe Stale Pruning (explicit expires_after duration; prune_stale_locks.py safe --dry-run)
+- INV-PERM-07: Declarative Permission Engine (evaluates LOCK.permissions.json using deny > ask > allow > default hierarchy)
+- INV-AUDIT-08: Read-Only Inspection & Atomic Cache (lock_scan.py runs read-only; LOCK-CACHE.md written atomically)
+- INV-LIC-09: 100% Permissive Audited Stack (zero external runtime dependencies; 100% permissive dev dependencies; NOTICE attribution)
+- INV-SLA-10: Cross-Platform Parity & SLA (Windows, Linux, macOS with 48h response / 5-day triage / 30-day remediation security SLA)
+
+## Full License Texts
+
+### 1. Python Software Foundation License Version 2 (PSFL-2.0)
+Python standard library modules are used under the PSF License Agreement.
+Copyright (c) 2001-2026 Python Software Foundation. All rights reserved.
+
+### 2. MIT License (MIT)
+Used by `lock-master`, `tomli`, `pytest`, `setuptools`, and `anyio`.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+### 3. BSD 3-Clause License (BSD-3-Clause)
+Used by `flask`.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+### 4. Apache License Version 2.0 (Apache-2.0)
+Used by `ruff`.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at `http://www.apache.org/licenses/LICENSE-2.0`.

@@ -7,6 +7,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (Pfad B Discoverability, Visual Topology, Level 1 SBOM Text Companion & Contract Tests - 2026-09-29)
+
+- **Level 1 SBOM Standalone Text Companion**: Created `THIRD_PARTY_LICENSES.txt` as a zero-dependency plain-text companion to `THIRD_PARTY_LICENSES.md` adhering to PEP 639 standard (`license-files` in `pyproject.toml`), including complete license inventories, 10-invariant verification (`INV-LOCAL-01` to `INV-SLA-10`), and unabridged license texts (PSFL-2.0, MIT, BSD-3-Clause, Apache-2.0).
+- **NOTICE & Attribution Cross-Referencing**: Updated `NOTICE` and `THIRD_PARTY_LICENSES.md` to reference both Markdown and plain-text companion files with updated audit date `2026-09-29`.
+- **ASCII Four-View Architectural Topology**: Injected comprehensive ASCII Four-View Architectural Topology (`[VIEW 1: CLI ENTRY POINTS & AGENT ADAPTERS]`, `[VIEW 2: CORE MUTEX & FENCING LEASE ENGINE]`, `[VIEW 3: INTRA-HOST MULTI-AGENT TEAMS & CACHE PERSISTENCE]`, `[VIEW 4: AIR-GAP, RUNASINVOKER & SECURITY BOUNDARY]`) into Section 2 of both `README.md` and `README_de.md` (`[SICHT 1]` to `[SICHT 4]`).
+- **18-Point Reciprocal Dual HTML Anchors**: Hardened all 18 numbered sections in both `README.md` and `README_de.md` with reciprocal dual HTML anchor tags `<a id="sec-01"></a>` through `<a id="sec-18"></a>` while strictly preserving legacy semantic anchor aliases.
+- **PEP 621 Standard URLs & Topics Saturation**: Expanded `[project.urls]` in `pyproject.toml` with `"Third-Party Licenses (Text)"`, `"Level 1 SBOM"`, and `"Plain-Text License"`. Saturated `project.keywords` to 20/20 topics matching GitHub tags (added `"automation"`).
+- **Discovery Context & LLM Synchronization**: Refreshed `llms.txt` timestamp to 2026-09-29 with updated test verification baseline (264 passing tests) and Level 1 SBOM text companion reference.
+- **Contract Test Suite Expansion**: Extended `tests/test_metadata.py` with contract tests verifying 18-point dual anchors `sec-01`..`sec-18`, ASCII four-view topology in both READMEs, `THIRD_PARTY_LICENSES.txt` existence, 10 invariants INV-LOCAL-01..INV-SLA-10, PEP 639 license-files list, 20/20 topics saturation, and NOTICE cross-references.
+
 ### Changed (Pfad A Hygiene, CI Lifecycle Hardening, Fencing Tokens & Drift Reconciliation - 2026-09-26)
 
 - **Fencing Tokens Integration**: Reconciled canonical repository implementation with deployed production tooling (`T-20260920-692115839`): added cooperative lease fencing (`fence` timestamp token in Epoch microseconds) written by `lock_create.py`, tracked via `lock_utils.lock_fence()`, and verified via `lock_utils.fence_status()` to prevent stalled agents from blind overwrites after TTL expiry.

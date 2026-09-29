@@ -11,12 +11,13 @@ authors = [
   { name = "Lukas Geiger" }
 ]
 license = "MIT"
-license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md", "THIRD_PARTY_LICENSES.txt"]
 requires-python = ">=3.10"
 dependencies = []
 keywords = [
   "agent-coordination",
   "ai-agents",
+  "automation",
   "cli",
   "developer-tools",
   "file-locking",
@@ -59,6 +60,9 @@ Repository = "https://github.com/ellmos-ai/lock-master.git"
 Changelog = "https://github.com/ellmos-ai/lock-master/blob/main/CHANGELOG.md"
 Security = "https://github.com/ellmos-ai/lock-master/blob/main/SECURITY.md"
 "Third-Party Licenses" = "https://github.com/ellmos-ai/lock-master/blob/main/THIRD_PARTY_LICENSES.md"
+"Third-Party Licenses (Text)" = "https://github.com/ellmos-ai/lock-master/blob/main/THIRD_PARTY_LICENSES.txt"
+"Level 1 SBOM" = "https://github.com/ellmos-ai/lock-master/blob/main/THIRD_PARTY_LICENSES.txt"
+"Plain-Text License" = "https://github.com/ellmos-ai/lock-master/blob/main/LICENSE"
 "Marketing Log" = "https://github.com/ellmos-ai/lock-master/blob/main/MARKETING-LOG.txt"
 "LLM Ready" = "https://github.com/ellmos-ai/lock-master/blob/main/llms.txt"
 Notice = "https://github.com/ellmos-ai/lock-master/blob/main/NOTICE"
