@@ -882,6 +882,7 @@ def git_common_dir(path: Path) -> Path | None:
         result = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--git-common-dir"],
             capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -994,6 +995,7 @@ def git_hook_guards(path: Path) -> list[dict]:
         result = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
             capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError):
         return []
