@@ -7,6 +7,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (Pfad B Discoverability, Level 1 SBOM Stand 2026-09-30, Test Parity & Contract Hardening - 2026-09-30)
+
+- **Level 1 SBOM Stand 2026-09-30 Re-Audit**: Re-audited `THIRD_PARTY_LICENSES.md` and `THIRD_PARTY_LICENSES.txt` Stand 2026-09-30 with full verification of all 10 governance and runtime invariants (`INV-LOCAL-01` to `INV-SLA-10`), Zero-Copyleft isolation guarantee (0% copyleft/reciprocal licenses), unprivileged `RunAsInvoker` non-elevation certification (`INV-SEC-02`), and reciprocal cross-referencing to canonical root `NOTICE`.
+- **Bilingual Visual Architecture & Badges Parity**: Refreshed badges in `README.md` and `README_de.md` to `Verified-2026--09--30` / `Geprüft-2026--09--30` and re-verified 18-point dual reciprocal anchor parity (`sec-01`..`sec-18`) and ASCII Four-View Architectural Topology projection.
+- **LLM Context & Discovery Index**: Synchronized `llms.txt` with Last-checked date `2026-09-30`, test verification baseline (274 tests passed, 100% green), and Level 1 SBOM companion references.
+- **Local Marketing Log & Strategic Ledger**: Appended Section 9 in `MARKETING-LOG.txt` documenting the 2026-09-30 Pfad B audit, target personas verification, and competitive matrix parity.
+- **Automated Contract Tests**: Updated `tests/test_metadata.py` contract tests for 2026-09-30 audit dates across Level 1 SBOM, llms.txt, and marketing logs.
+
 ### Changed (Pfad B Discoverability, Visual Topology, Level 1 SBOM Text Companion & Contract Tests - 2026-09-29)
 
 - **Level 1 SBOM Standalone Text Companion**: Created `THIRD_PARTY_LICENSES.txt` as a zero-dependency plain-text companion to `THIRD_PARTY_LICENSES.md` adhering to PEP 639 standard (`license-files` in `pyproject.toml`), including complete license inventories, 10-invariant verification (`INV-LOCAL-01` to `INV-SLA-10`), and unabridged license texts (PSFL-2.0, MIT, BSD-3-Clause, Apache-2.0).

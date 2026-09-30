@@ -67,7 +67,8 @@ def test_llms_txt_integrity():
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
     assert (
-        "Last-checked: 2026-09-29" in content
+        "Last-checked: 2026-09-30" in content
+        or "Last-checked: 2026-09-29" in content
         or "Last-checked: 2026-09-26" in content
         or "Last-checked: 2026-09-20" in content
         or "Last-checked: 2026-09-16" in content
@@ -86,7 +87,8 @@ def test_readme_badges_and_ecosystem_parity():
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
         assert (
-            "tests-274%20passed" in content
+            "tests-276%20passed" in content
+            or "tests-274%20passed" in content
             or "tests-270%20passed" in content
             or "tests-264%20passed" in content
             or "tests-246%20passed" in content
@@ -565,7 +567,7 @@ def test_level1_sbom_and_cross_reference_matrix():
     assert "RunAsInvoker" in sbom_doc
     assert "INV-LOCAL-01" in sbom_doc
     assert "INV-SLA-10" in sbom_doc
-    assert "2026-09-29" in sbom_doc or "2026-09-26" in sbom_doc or "2026-09-20" in sbom_doc
+    assert "2026-09-30" in sbom_doc or "2026-09-29" in sbom_doc or "2026-09-26" in sbom_doc or "2026-09-20" in sbom_doc
 
 
 def test_dual_mermaid_diagrams_and_semicolons_free():
@@ -710,7 +712,7 @@ def test_third_party_licenses_txt_level1_sbom_companion():
     content = txt_path.read_text(encoding="utf-8")
 
     assert "Level 1 SBOM" in content
-    assert "2026-09-29" in content
+    assert "2026-09-30" in content or "2026-09-29" in content
     assert "RunAsInvoker" in content
     assert "zero external runtime dependencies" in content
 
@@ -760,7 +762,7 @@ def test_notice_and_licenses_reciprocal_references():
 
     md_content = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
     assert "THIRD_PARTY_LICENSES.txt" in md_content
-    assert "2026-09-29" in md_content
+    assert "2026-09-30" in md_content or "2026-09-29" in md_content
 
 
 def test_changelog_pfad_b_20260929():
@@ -771,3 +773,19 @@ def test_changelog_pfad_b_20260929():
     assert "Level 1 SBOM Standalone Text Companion" in content
     assert "ASCII Four-View Architectural Topology" in content
     assert "18-Point Reciprocal Dual HTML Anchors" in content
+
+
+def test_changelog_pfad_b_20260930():
+    """Verify that CHANGELOG.md contains the 2026-09-30 Pfad B discoverability entry under [Unreleased]."""
+    content = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [Unreleased]" in content
+    assert "2026-09-30" in content
+    assert "Level 1 SBOM Stand 2026-09-30 Re-Audit" in content
+    assert "Bilingual Visual Architecture & Badges Parity" in content
+
+
+def test_marketing_log_pfad_b_20260930():
+    """Verify that MARKETING-LOG.txt contains the 2026-09-30 Pfad B section 9 entry."""
+    content = (ROOT / "MARKETING-LOG.txt").read_text(encoding="utf-8")
+    assert "9. PFAD B DISCOVERABILITY, VISUAL TOPOLOGY & LEVEL 1 SBOM COMPANION RE-AUDIT (2026-09-30)" in content
+    assert "274 passing tests via pytest" in content

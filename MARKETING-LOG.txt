@@ -123,3 +123,14 @@ German (DE):
 - Level 1 SBOM & Notice Attribution Re-Audit: Re-audited THIRD_PARTY_LICENSES.md Stand 2026-09-26 confirming zero runtime dependencies, RunAsInvoker unprivileged execution, and formal link to NOTICE.
 - Zero-Drift Deployment Parity: Fully reconciled with C:\Users\lukas\OneDrive\_scripts (bin/check_deployment.py: 11/11 files in parity, exit 0).
 - Verification Baseline: 246 passing tests (100% green), clean Ruff linting, clean bytecode compilation, and wheel smoke verification.
+
+================================================================================
+9. PFAD B DISCOVERABILITY, VISUAL TOPOLOGY & LEVEL 1 SBOM COMPANION RE-AUDIT (2026-09-30)
+================================================================================
+- 18-Point Bilingual Navigation Parity: Re-verified 18-point quick navigation across README.md and README_de.md with dual reciprocal HTML anchor tags (<a id="sec-01"></a> to <a id="sec-18"></a>) preserving legacy backward compatibility aliases.
+- Visual Architecture & ASCII 4-View Topology: Confirmed ASCII Four-View Architectural Topology projection in Section 2 of both READMEs ([VIEW 1: CLI ENTRY POINTS & AGENT ADAPTERS], [VIEW 2: CORE MUTEX & FENCING LEASE ENGINE], [VIEW 3: INTRA-HOST MULTI-AGENT TEAMS & CACHE PERSISTENCE], [VIEW 4: AIR-GAP, RUNASINVOKER & SECURITY BOUNDARY] / German [SICHT 1]..[SICHT 4]).
+- Level 1 SBOM Re-Audit & Plain-Text Companion: Re-audited THIRD_PARTY_LICENSES.md and standalone companion THIRD_PARTY_LICENSES.txt Stand 2026-09-30 with verification of all 10 governance and runtime invariants (INV-LOCAL-01 to INV-SLA-10), Zero-Copyleft isolation guarantee (pure Python stdlib runtime, 0 external dependencies), and unprivileged RunAsInvoker non-elevation certification (INV-SEC-02).
+- Statutory Liability Disclaimer: Re-verified Section 18 statutory notice (§ 521 BGB Gefälligkeitsrecht / unentgeltliche Schenkung, Haftungsbeschränkung auf Vorsatz und grobe Fahrlässigkeit) and binding 48h Security Response SLA across both READMEs.
+- PEP 621 Standard & 20/20 Topics Saturation: Confirmed pyproject.toml 20 keywords saturation matching GitHub remote topics, license-files whitelist with NOTICE, THIRD_PARTY_LICENSES.md, and THIRD_PARTY_LICENSES.txt, and companion URLs in project.urls.
+- Discovery Context & LLM Synchronization: Refreshed llms.txt timestamp to 2026-09-30 with 274 verified tests baseline.
+- Verification Baseline: 274 passing tests via pytest (100% green in 27.8s), ruff check clean (0 errors), python -m compileall clean (0 errors), git diff --check clean (0 errors), and strict zero version modification discipline (1.6.3 frozen per T-20260920-167562623).

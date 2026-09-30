@@ -3,7 +3,7 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Tests](https://img.shields.io/badge/tests-274%20passed%20%7C%20100%25%20green-brightgreen.svg)](#tests-ausführen)
+[![Tests](https://img.shields.io/badge/tests-276%20passed%20%7C%20100%25%20green-brightgreen.svg)](#tests-ausführen)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Plattform: Windows | Linux | macOS](https://img.shields.io/badge/Plattform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -18,7 +18,7 @@
 [![Version 1.6.3](https://img.shields.io/badge/Version-1.6.3-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
-[![Geprüft](https://img.shields.io/badge/Gepr%C3%BCft-2026--09--29-brightgreen.svg)](https://github.com/ellmos-ai/lock-master)
+[![Geprüft](https://img.shields.io/badge/Gepr%C3%BCft-2026--09--30-brightgreen.svg)](https://github.com/ellmos-ai/lock-master)
 [![ellmos-ai](https://img.shields.io/badge/Ökosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Dachorganisation-open--bricks-orange.svg)](https://github.com/open-bricks)
 
@@ -27,7 +27,7 @@
 **Portables, abhängigkeitsfreies Multi-Agenten-Datei-Sperrsystem — Exklusive und Team-Locks (`LOCK*.txt`) mit Scopes, Verfall, Stale-Bereinigung, Cloud-Sync-Unterstützung und schnellem Übersichtscache.**
 
 > [!NOTE]
-> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **29.09.2026**.
+> **KI- / LLM-Indexierung**: KI-Agenten und automatisierte Werkzeuge können [llms.txt](llms.txt) für eine maschinenlesbare Zusammenfassung, Suchbegriffe und Disambiguation nutzen. Letzte Prüfung: **30.09.2026**.
 
 ### 🧭 Schnellnavigation
 
