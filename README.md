@@ -3,7 +3,7 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Tests](https://img.shields.io/badge/tests-276%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
+[![Tests](https://img.shields.io/badge/tests-282%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -17,8 +17,9 @@
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-active-blue.svg)](MARKETING-LOG.txt)
 [![Version 1.6.3](https://img.shields.io/badge/version-1.6.3-informational.svg)](VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Contributing: Welcome](https://img.shields.io/badge/Contributing-Welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexing](https://img.shields.io/badge/llms.txt-indexed-purple.svg)](llms.txt)
-[![Verified](https://img.shields.io/badge/Verified-2026--09--30-brightgreen.svg)](https://github.com/ellmos-ai/lock-master)
+[![Verified](https://img.shields.io/badge/Verified-2026--10--03-brightgreen.svg)](https://github.com/ellmos-ai/lock-master)
 [![ellmos-ai](https://img.shields.io/badge/Ecosystem-ellmos--ai-blue.svg)](https://github.com/ellmos-ai)
 [![open-bricks](https://img.shields.io/badge/Umbrella-open--bricks-orange.svg)](https://github.com/open-bricks)
 
@@ -27,7 +28,7 @@
 **Portable, zero-dependency multi-agent file-lock system — Exclusive and Team Locks (`LOCK*.txt`) with scopes, expiry, stale-cleanup, cloud-sync support, and a fast overview cache.**
 
 > [!NOTE]
-> **AI / LLM Indexing**: AI agents and automated tools can inspect [llms.txt](llms.txt) for a machine-readable summary, search terms, and disambiguation details. Last checked: **2026-09-30**.
+> **AI / LLM Indexing**: AI agents and automated tools can inspect [llms.txt](llms.txt) for a machine-readable summary, search terms, and disambiguation details. Last checked: **2026-10-03**.
 
 ### 🧭 Quick Navigation
 

@@ -1,7 +1,7 @@
 # Third-Party Licenses & Software Inventory
 
 Project: lock-master (Portable, Zero-Dependency Multi-Agent File-Lock System)
-Audited: 2026-09-30 against Level 1 SBOM and runtime invariants.
+Audited: 2026-10-03 against Level 1 SBOM and runtime invariants.
 License: MIT License (see LICENSE and NOTICE)
 Repository: https://github.com/ellmos-ai/lock-master
 Parent Organization: ellmos-ai (https://github.com/ellmos-ai)

@@ -2,7 +2,7 @@
 
 > Portable, config-driven multi-agent file-lock system for project coordination.
 
-## Last-checked: 2026-09-30
+## Last-checked: 2026-10-03
 
 ## What it does
 
@@ -14,12 +14,12 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 ## Status & Test Verification
 
 - **Version**: 1.6.3
-- **Verification**: 276 passed tests (pytest 100% green), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
+- **Verification**: 282 passed tests (pytest 100% green), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)
 - **Governance Invariants**: INV-LOCAL-01 through INV-SLA-10 codified and verified
 - **Navigation**: 18-point bilingual quick navigation with dual reciprocal HTML anchors
-- **Transparency**: Level 1 SBOM companion (THIRD_PARTY_LICENSES.txt), NOTICE file, and unprivileged RunAsInvoker guarantee
+- **Transparency**: Level 1 SBOM companion (THIRD_PARTY_LICENSES.txt), NOTICE file, bilingual CONTRIBUTING.md, and unprivileged RunAsInvoker guarantee
 
 ## Audience
 

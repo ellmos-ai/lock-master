@@ -63,6 +63,7 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+ehthumbs.db
 *.swp
 *.swo
 *~
@@ -91,6 +92,7 @@ wheelhouse/
 *-Mac Studio*
 *-MacBook*
 *-IDEAPAD*
+*-IDEAPAD-GEI*
 *-WORKSTATION*
 *-WORKSTATION-LG*
 *_WORKSTATION*
@@ -104,6 +106,9 @@ uv.lock
 LOCK.user.*
 LOCK.until.*
 LOCK.condition.*
+LOCK.dev.*
+LOCK.antigravity.*
+LOCK.bugsearch.*
 .automation-lock
 .pytest_temp/
 .pytest_tmp*/
@@ -112,6 +117,7 @@ LOCK.condition.*
 .nyc_output/
 .tox/
 Desktop.ini
+TASKPLAN_*.md
 
 # Temporary & backup files
 *.tmp

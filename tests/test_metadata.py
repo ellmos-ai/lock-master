@@ -67,7 +67,8 @@ def test_llms_txt_integrity():
     assert llms_path.is_file()
     content = llms_path.read_text(encoding="utf-8")
     assert (
-        "Last-checked: 2026-09-30" in content
+        "Last-checked: 2026-10-03" in content
+        or "Last-checked: 2026-09-30" in content
         or "Last-checked: 2026-09-29" in content
         or "Last-checked: 2026-09-26" in content
         or "Last-checked: 2026-09-20" in content
@@ -87,7 +88,8 @@ def test_readme_badges_and_ecosystem_parity():
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
         assert (
-            "tests-276%20passed" in content
+            "tests-282%20passed" in content
+            or "tests-276%20passed" in content
             or "tests-274%20passed" in content
             or "tests-270%20passed" in content
             or "tests-264%20passed" in content
@@ -567,7 +569,13 @@ def test_level1_sbom_and_cross_reference_matrix():
     assert "RunAsInvoker" in sbom_doc
     assert "INV-LOCAL-01" in sbom_doc
     assert "INV-SLA-10" in sbom_doc
-    assert "2026-09-30" in sbom_doc or "2026-09-29" in sbom_doc or "2026-09-26" in sbom_doc or "2026-09-20" in sbom_doc
+    assert (
+        "2026-10-03" in sbom_doc
+        or "2026-09-30" in sbom_doc
+        or "2026-09-29" in sbom_doc
+        or "2026-09-26" in sbom_doc
+        or "2026-09-20" in sbom_doc
+    )
 
 
 def test_dual_mermaid_diagrams_and_semicolons_free():
@@ -712,7 +720,7 @@ def test_third_party_licenses_txt_level1_sbom_companion():
     content = txt_path.read_text(encoding="utf-8")
 
     assert "Level 1 SBOM" in content
-    assert "2026-09-30" in content or "2026-09-29" in content
+    assert "2026-10-03" in content or "2026-09-30" in content or "2026-09-29" in content
     assert "RunAsInvoker" in content
     assert "zero external runtime dependencies" in content
 
@@ -762,7 +770,7 @@ def test_notice_and_licenses_reciprocal_references():
 
     md_content = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
     assert "THIRD_PARTY_LICENSES.txt" in md_content
-    assert "2026-09-30" in md_content or "2026-09-29" in md_content
+    assert "2026-10-03" in md_content or "2026-09-30" in md_content or "2026-09-29" in md_content
 
 
 def test_changelog_pfad_b_20260929():
@@ -789,3 +797,114 @@ def test_marketing_log_pfad_b_20260930():
     content = (ROOT / "MARKETING-LOG.txt").read_text(encoding="utf-8")
     assert "9. PFAD B DISCOVERABILITY, VISUAL TOPOLOGY & LEVEL 1 SBOM COMPANION RE-AUDIT (2026-09-30)" in content
     assert "274 passing tests via pytest" in content
+
+
+def test_contributing_guidelines_bilingual_and_invariants():
+    """Verify that CONTRIBUTING.md exists, is bilingual, and codifies all 10 invariants and Plan D workflow."""
+    contributing_path = ROOT / "CONTRIBUTING.md"
+    assert contributing_path.is_file(), "CONTRIBUTING.md must exist in repository root"
+    content = contributing_path.read_text(encoding="utf-8")
+
+    assert "# Contributing to lock-master / Mitwirken an lock-master" in content
+    assert "## English" in content
+    assert "## Deutsch" in content
+    assert "RunAsInvoker" in content
+    assert r"C:\_Local_DEV\repos\lock-master" in content
+    assert "pytest -ra -v" in content
+    assert "ruff check ." in content
+    assert "python -m compileall -q ." in content
+    assert "git diff --check" in content
+    assert "SECURITY.md" in content
+    assert "LICENSE" in content
+
+    for inv in [
+        "INV-LOCAL-01",
+        "INV-SEC-02",
+        "INV-FAIL-03",
+        "INV-SCOPE-04",
+        "INV-TEAM-05",
+        "INV-TTL-06",
+        "INV-PERM-07",
+        "INV-AUDIT-08",
+        "INV-LIC-09",
+        "INV-SLA-10",
+    ]:
+        assert inv in content, f"Expected {inv} in CONTRIBUTING.md"
+
+
+def test_ci_lifecycle_auto_assign_and_label_sync_workflows():
+    """Verify auto-assign.yml, label-sync.yml, and .github/labels.yml have standard governance properties."""
+    auto_assign = ROOT / ".github" / "workflows" / "auto-assign.yml"
+    assert auto_assign.is_file(), "auto-assign.yml must exist"
+    aa_content = auto_assign.read_text(encoding="utf-8")
+    assert "actions/github-script@v7" in aa_content
+    assert "timeout-minutes: 5" in aa_content
+    assert "cancel-in-progress: true" in aa_content
+
+    label_sync = ROOT / ".github" / "workflows" / "label-sync.yml"
+    assert label_sync.is_file(), "label-sync.yml must exist"
+    ls_content = label_sync.read_text(encoding="utf-8")
+    assert "EndBug/label-sync@v2" in ls_content
+    assert "timeout-minutes: 5" in ls_content
+    assert "cancel-in-progress: true" in ls_content
+    assert ".github/labels.yml" in ls_content
+
+    labels_cfg = ROOT / ".github" / "labels.yml"
+    assert labels_cfg.is_file(), ".github/labels.yml must exist"
+    labels_content = labels_cfg.read_text(encoding="utf-8")
+    for standard_label in [
+        "bug",
+        "enhancement",
+        "good first issue",
+        "help wanted",
+        "documentation",
+        "duplicate",
+        "wontfix",
+        "priority: high",
+        "priority: low",
+        "needs-triage",
+        "stale",
+    ]:
+        assert f"name: {standard_label}" in labels_content or f"name: '{standard_label}'" in labels_content
+
+
+def test_gitignore_multi_host_and_lock_hardening():
+    """Verify that .gitignore includes hardened multi-host tokens, lock defenses, and task/OS patterns."""
+    content = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    for pattern in [
+        "LOCK.dev.*",
+        "LOCK.antigravity.*",
+        "LOCK.bugsearch.*",
+        "*-IDEAPAD-GEI*",
+        "ehthumbs.db",
+        "TASKPLAN_*.md",
+    ]:
+        assert pattern in content, f"Expected {pattern} in .gitignore"
+
+
+def test_pyproject_contributing_url_and_norecursedirs():
+    """Verify that pyproject.toml registers Contributing URL and includes hardened pytest norecursedirs."""
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        pyproject = tomllib.load(handle)
+
+    urls = pyproject.get("project", {}) .get("urls", {})
+    assert urls.get("Contributing") == "https://github.com/ellmos-ai/lock-master/blob/main/CONTRIBUTING.md"
+
+    norecurse = pyproject.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("norecursedirs", [])
+    for d in [".hypothesis", ".turbo", ".nyc_output", ".tox"]:
+        assert d in norecurse, f"Expected {d} in pytest norecursedirs"
+
+
+def test_changelog_pfad_a_20261003():
+    """Verify that CHANGELOG.md contains the 2026-10-03 Pfad A repository hygiene entry under [Unreleased]."""
+    content = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [Unreleased]" in content
+    assert "2026-10-03" in content
+    assert "Pfad A Repository Hygiene, CI Lifecycle Workflows, Bilingual CONTRIBUTING & Contract Tests" in content
+
+
+def test_marketing_log_pfad_a_20261003():
+    """Verify that MARKETING-LOG.txt contains the 2026-10-03 Pfad A section 10 entry."""
+    content = (ROOT / "MARKETING-LOG.txt").read_text(encoding="utf-8")
+    assert "10. PFAD A HYGIENE, CI LIFECYCLE WORKFLOWS, BILINGUAL CONTRIBUTING & CONTRACT TESTS (2026-10-03)" in content
+    assert "282 passing tests via pytest" in content

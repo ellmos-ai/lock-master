@@ -55,6 +55,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/ellmos-ai/lock-master#readme"
 Documentation = "https://github.com/ellmos-ai/lock-master/blob/main/LOCK-SYSTEM.md"
+Contributing = "https://github.com/ellmos-ai/lock-master/blob/main/CONTRIBUTING.md"
 Repository = "https://github.com/ellmos-ai/lock-master.git"
 "Bug Tracker" = "https://github.com/ellmos-ai/lock-master/issues"
 Changelog = "https://github.com/ellmos-ai/lock-master/blob/main/CHANGELOG.md"
@@ -82,7 +83,7 @@ lock-master-team = "team_lock:main"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra -v --basetemp=.pytest_temp"
-norecursedirs = [".git", ".pytest_cache", ".ruff_cache", "build", "dist", ".pytest_temp"]
+norecursedirs = [".git", ".pytest_cache", ".ruff_cache", "build", "dist", ".pytest_temp", ".hypothesis", ".turbo", ".nyc_output", ".tox"]
 
 [tool.ruff]
 line-length = 120

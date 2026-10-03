@@ -7,6 +7,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (Pfad A Repository Hygiene, CI Lifecycle Workflows, Bilingual CONTRIBUTING & Contract Tests - 2026-10-03)
+
+- **Bilingual CONTRIBUTING Guidelines**: Created `CONTRIBUTING.md` with complete English and German developer onboarding specifications, codifying all 10 governance and runtime invariants (`INV-LOCAL-01` to `INV-SLA-10`), unprivileged `RunAsInvoker` non-elevation mode, Plan D canonical local clone workflow (`C:\_Local_DEV\repos\lock-master`), and pre-commit verification gates.
+- **CI Lifecycle Workflows & Governance Labels**: Provisioned `.github/workflows/auto-assign.yml` (using `actions/github-script@v7`, `timeout-minutes: 5`, cancel-in-progress concurrency, and least-privilege `pull-requests: write` permissions) and `.github/workflows/label-sync.yml` (using `EndBug/label-sync@v2`, `timeout-minutes: 5`, cancel-in-progress concurrency, and `issues: write` permissions); established canonical `.github/labels.yml` with 11 standard governance labels per GOVERNANCE.md §4.2.
+- **Multi-Host Cloud-Sync & Gitignore Hardening**: Fortified `.gitignore` with comprehensive protection patterns against agent lock tokens (`LOCK.dev.*`, `LOCK.antigravity.*`, `LOCK.bugsearch.*`), multi-host conflict files (`*-IDEAPAD-GEI*`), and OS/task artifacts (`ehthumbs.db`, `TASKPLAN_*.md`).
+- **PEP 621 Standard URLs & Pytest Tooling**: Registered canonical `Contributing` URL under `[project.urls]` in `pyproject.toml`; synchronized `norecursedirs` across `pyproject.toml` and `pytest.ini` with `.hypothesis`, `.turbo`, `.nyc_output`, and `.tox`.
+- **Level 1 SBOM Stand 2026-10-03 Re-Audit**: Re-audited `THIRD_PARTY_LICENSES.md` and `THIRD_PARTY_LICENSES.txt` Stand 2026-10-03 with full verification of all 10 invariants (`INV-LOCAL-01` to `INV-SLA-10`), zero external runtime dependencies (`dependencies = []`), 100% zero-copyleft permissive stack, unprivileged `RunAsInvoker` guarantee, and 48h Security SLA.
+- **Documentation & Badge Synchronization**: Refreshed test badges in `README.md` and `README_de.md` to 282 passed (100% green), added Contributing welcome badge, synchronized Verified date to `2026-10-03`, and updated `llms.txt` discovery index with 282-test baseline.
+- **Automated Contract Tests**: Expanded `tests/test_metadata.py` with 6 new contract tests validating `CONTRIBUTING.md` invariants, `auto-assign.yml`, `label-sync.yml`, `.github/labels.yml`, `.gitignore` lock defenses, pyproject `Contributing` URL, and 2026-10-03 audit recency (Gesamtsuite auf 282 Tests ausgebaut, 100% grün).
+
 ### Changed (Pfad B Discoverability, Level 1 SBOM Stand 2026-09-30, Test Parity & Contract Hardening - 2026-09-30)
 
 - **Level 1 SBOM Stand 2026-09-30 Re-Audit**: Re-audited `THIRD_PARTY_LICENSES.md` and `THIRD_PARTY_LICENSES.txt` Stand 2026-09-30 with full verification of all 10 governance and runtime invariants (`INV-LOCAL-01` to `INV-SLA-10`), Zero-Copyleft isolation guarantee (0% copyleft/reciprocal licenses), unprivileged `RunAsInvoker` non-elevation certification (`INV-SEC-02`), and reciprocal cross-referencing to canonical root `NOTICE`.
