@@ -287,8 +287,8 @@ def write_if_changed(path: Path, text: str, refresh_seconds: int = CACHE_REFRESH
     try:
         if path.exists():
             old = path.read_text(encoding="utf-8")
-            same = [l for l in old.splitlines() if not _volatile(l)] == [
-                l for l in text.splitlines() if not _volatile(l)
+            same = [ln for ln in old.splitlines() if not _volatile(ln)] == [
+                ln for ln in text.splitlines() if not _volatile(ln)
             ]
             age = datetime.now().timestamp() - path.stat().st_mtime
             if same and age < refresh_seconds:
