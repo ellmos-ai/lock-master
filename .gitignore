@@ -3,6 +3,8 @@ lock_roots.json
 
 # Auto-generated cache files -- derived artefacts, not source of truth
 LOCK-CACHE.md
+LOCK-CACHE.*.md
+LOCK-CACHE-*.md
 
 # Persistent Team-Lock OS guards contain no state; keep LOCK.team.*.txt visible
 LOCK.team.*.txt.guard

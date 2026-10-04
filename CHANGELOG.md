@@ -7,6 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (LOCK-CACHE: one file per host, write only on change - 2026-10-04)
+
+- **Cache collisions in synced folders**: `lock_scan --write-cache` and the watcher's detail cache wrote one fixed file name (`LOCK-CACHE.md`) into a cloud-synced folder from every host every few minutes. Each collision made the sync service create a conflict copy (`LOCK-CACHE-<HOST>-<n>.md`, ~1700 per folder measured). Cache paths now accept the placeholders `{host}` and `%COMPUTERNAME%` (resolved on every platform, not only where `os.path.expandvars` knows the variable); the watcher detail cache and the default system cache are named `LOCK-CACHE.<HOST>.md`. New helpers `host_name()` / `host_cache_name()`.
+- **Write only on change**: `write_if_changed()` skips the write when only the timestamp line differs; an unchanged file is still refreshed every 30 minutes so readers' freshness checks keep working.
+- Tests: `tests/test_cache_per_host.py`.
+
 ### Changed (Pfad A Repository Hygiene, CI Lifecycle Workflows, Bilingual CONTRIBUTING & Contract Tests - 2026-10-03)
 
 - **Bilingual CONTRIBUTING Guidelines**: Created `CONTRIBUTING.md` with complete English and German developer onboarding specifications, codifying all 10 governance and runtime invariants (`INV-LOCAL-01` to `INV-SLA-10`), unprivileged `RunAsInvoker` non-elevation mode, Plan D canonical local clone workflow (`C:\_Local_DEV\repos\lock-master`), and pre-commit verification gates.

@@ -28,7 +28,7 @@ Zusätzlich kennt das System jetzt kooperative Team-/Community-Locks. Diese sper
 Den schnellsten Überblick über aktive Sperren — ohne jeden Projektordner einzeln zu öffnen — liefern (in dieser Rangfolge):
 
 1. **Agent mit MCP (am schnellsten, live):** ellmos-filecommander Dateisuche nach `LOCK*.txt` (`fc_search_files`, directory = gewünschter Root). Findet alle Lock-Dateien index-gestützt in Sekunden (ganzes OneDrive in einem Aufruf getestet). Für sehr große Bäume nicht-blockierend via `fc_start_search`/`fc_get_search_results` (langsamer).
-2. **Schnelles Nachschauen ohne Suche:** die auto-generierte `LOCK-CACHE.md` lesen — systemweit `_scripts/LOCK-CACHE.md`, nur Software `.SOFTWARE/LOCK-CACHE.md`. Wird per `lock_scan.py --write-cache` befüllt.
+2. **Schnelles Nachschauen ohne Suche:** die auto-generierte Cache-Datei **des eigenen Hosts** lesen — systemweit `_scripts/LOCK-CACHE.<HOST>.md`, nur Software `.SOFTWARE/LOCK-CACHE.<HOST>.md` (pro Host eine Datei, sonst entstehen im Sync-Ordner Konfliktkopien). Wird per `lock_scan.py --write-cache` befüllt.
 3. **Skriptgesteuert:** `PYTHONIOENCODING=utf-8 python "<OneDrive>/_scripts/lock_scan.py"` (read-only Liste) bzw. `--write-cache` zum Aktualisieren der Caches. Ein voller rekursiver Scan über alle Roots ist über OneDrive langsam — daher der Cache.
 
 Authoritativ bleiben immer die `LOCK*.txt`-Dateien selbst; der Cache ist nur ein abgeleiteter Schnell-Index.
@@ -57,7 +57,7 @@ Die `LOCK*.txt`-Dateien bleiben auch mit Watcher die allein autoritative Wahrhei
 - Lokale SQLite-DB: `%USERPROFILE%\.lock_watcher\watcher.db`
 - Daemon-Heartbeat: `%USERPROFILE%\.lock_watcher\daemon_status.json`
 - Raum-/Profil-/Bibliotheksdaten: `%USERPROFILE%\.lock_watcher\...`
-- Auto-generierte Cache-Dateien: weiter gemäß `lock_roots.json`, z. B. `_scripts/LOCK-CACHE.md`
+- Auto-generierte Cache-Dateien: weiter gemäß `lock_roots.json`, z. B. `_scripts/LOCK-CACHE.<HOST>.md`
 
 Die DB liegt bewusst außerhalb von OneDrive, weil SQLite-WAL-Dateien in synchronisierten Ordnern Korruptions- und Konfliktrisiken erzeugen.
 
@@ -738,7 +738,7 @@ Entfernt `LOCK*.txt` mit `now > created + expires_after`. Legacy `TEST.txt`/`TES
 ```
 PYTHONIOENCODING=utf-8 python C:\Users\User\OneDrive\_scripts\lock_scan.py --write-cache
 ```
-Schreibt zwei auto-generierte Caches: systemweit `_scripts/LOCK-CACHE.md` (alle Roots) und nur Software `.SOFTWARE/LOCK-CACHE.md` (Präfix-Filter auf `.SOFTWARE`). Beide sind abgeleitete Artefakte (nicht manuell editieren, in `.gitignore`); authoritativ bleiben die `LOCK*.txt` selbst.
+Schreibt zwei auto-generierte Caches pro Host: systemweit `_scripts/LOCK-CACHE.<HOST>.md` (alle Roots) und nur Software `.SOFTWARE/LOCK-CACHE.<HOST>.md` (Präfix-Filter auf `.SOFTWARE`). Cache-Pfade in `lock_roots.json` nutzen `%COMPUTERNAME%` bzw. `{host}`; geschrieben wird nur bei inhaltlicher Änderung (oder nach 30 min). Beide sind abgeleitete Artefakte (nicht manuell editieren, in `.gitignore`); authoritativ bleiben die `LOCK*.txt` selbst.
 
 **Scan-Begrenzung (Performance):** `lock_roots.json` steuert `default_max_depth` (Default 4), `shallow_depth` (Default 2, für Roots mit `"shallow": true` wie `.WISSEN`) und `skip_dirs` (übersprungene Verzeichnisse inkl. Unterbaum, z. B. `node_modules`, `.venv`, `.git`, `build`, `releases`).
 

@@ -27,7 +27,7 @@ Fastest ways to see active locks (in order of speed):
 
 1. **Search tool (fastest, live):** search for `LOCK*.txt` files in the
    relevant root using your file-search tooling.
-2. **Cache file (no scan needed):** read the auto-generated `LOCK-CACHE.md`
+2. **Cache file (no scan needed):** read the auto-generated per-host cache `LOCK-CACHE.<HOST>.md`
    (written by `lock_scan.py --write-cache`).
 3. **Script:** `python lock_scan.py` (read-only list) or
    `python lock_scan.py --write-cache` (refresh cache).
@@ -732,7 +732,7 @@ python prune_stale_locks.py --dry-run
 python prune_stale_locks.py
 ```
 
-**Refresh LOCK-CACHE.md:**
+**Refresh the per-host LOCK-CACHE.<HOST>.md (paths use `%COMPUTERNAME%` / `{host}` in `lock_roots.json`; written only on change):**
 ```
 python lock_scan.py --write-cache
 ```

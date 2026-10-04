@@ -32,11 +32,11 @@
   "caches": [
     {
       "name": "system-wide",
-      "path": "/path/to/your-scripts-dir/LOCK-CACHE.md"
+      "path": "/path/to/your-scripts-dir/LOCK-CACHE.{host}.md"
     },
     {
       "name": "workspace-only",
-      "path": "/path/to/workspace/LOCK-CACHE.md",
+      "path": "/path/to/workspace/LOCK-CACHE.{host}.md",
       "filter_prefix": "/path/to/workspace"
     }
   ]

@@ -30,6 +30,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -38,8 +40,29 @@ import lock_utils
 
 DEFAULT_ROOTS_FILE = Path(__file__).resolve().parent / "lock_roots.json"
 
+# An unchanged cache is rewritten at least this often, so its "As of:" line
+# stays a usable freshness signal for readers (sync_mirror accepts 180 min).
+CACHE_REFRESH_SECONDS = 30 * 60
+
+
+def host_name() -> str:
+    """Name of this host, safe for use inside a file name.
+
+    Several hosts share one synced folder. A cache file with a fixed name is
+    then overwritten by every host and the sync service answers each collision
+    with a conflict copy (~1700 per folder were measured). One file per host
+    cannot collide."""
+    raw = os.environ.get("COMPUTERNAME") or platform.node() or "unknown-host"
+    return re.sub(r"[^A-Za-z0-9_-]", "_", raw)
+
+
+def host_cache_name(stem: str = "LOCK-CACHE") -> str:
+    """File name of the per-host cache, e.g. `LOCK-CACHE.IDEAPAD-GEI.md`."""
+    return f"{stem}.{host_name()}.md"
+
+
 # System-wide cache is written next to this script (all roots, no filter).
-SYSTEM_CACHE_PATH = Path(__file__).resolve().parent / "LOCK-CACHE.md"
+SYSTEM_CACHE_PATH = Path(__file__).resolve().parent / host_cache_name()
 
 
 # Home directories that older configurations wrote out literally. Kept as a
@@ -61,7 +84,13 @@ def _expand_path(raw: str) -> str:
     and the root is silently skipped -- the scan then reports far fewer locks
     than actually exist, which is worse than failing loudly.
     """
-    expanded = os.path.expanduser(os.path.expandvars(str(raw)))
+    # Host placeholders are resolved first and by hand: `%COMPUTERNAME%` is only
+    # expanded by os.path.expandvars on Windows, and the cache path must never
+    # silently degrade to one shared file on macOS/Linux.
+    host = host_name()
+    text = str(raw).replace("{host}", host)
+    text = re.sub(r"%COMPUTERNAME%", lambda _m: host, text, flags=re.IGNORECASE)
+    expanded = os.path.expanduser(os.path.expandvars(text))
     if os.path.exists(expanded):
         return expanded
 
@@ -245,6 +274,31 @@ def render_cache(locks: list[dict], scanned_at: datetime, title: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _volatile(line: str) -> bool:
+    return line.startswith(("As of:", "Stand:", "Daemon-Heartbeat", "*Generiert:"))
+
+
+def write_if_changed(path: Path, text: str, refresh_seconds: int = CACHE_REFRESH_SECONDS) -> bool:
+    """Write `text` to `path` unless the content (ignoring the timestamp line)
+    is unchanged and the file is younger than `refresh_seconds`.
+
+    Every rewrite is a sync event for the cloud folder; rewriting identical
+    content every few minutes is pure load. Returns True if written."""
+    try:
+        if path.exists():
+            old = path.read_text(encoding="utf-8")
+            same = [l for l in old.splitlines() if not _volatile(l)] == [
+                l for l in text.splitlines() if not _volatile(l)
+            ]
+            age = datetime.now().timestamp() - path.stat().st_mtime
+            if same and age < refresh_seconds:
+                return False
+    except OSError:
+        pass
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
 def write_caches(locks: list[dict], scanned_at: datetime, config: dict) -> list[tuple[Path, int]]:
     """Write cache file(s) as defined by the 'caches' key in lock_roots.json.
     Falls back to a single system-wide cache next to this script if not configured.
@@ -256,9 +310,9 @@ def write_caches(locks: list[dict], scanned_at: datetime, config: dict) -> list[
 
     if not cache_defs:
         # Default: one system-wide cache next to this script.
-        SYSTEM_CACHE_PATH.write_text(
+        write_if_changed(
+            SYSTEM_CACHE_PATH,
             render_cache(locks, scanned_at, "LOCK-CACHE (all roots)"),
-            encoding="utf-8",
         )
         results.append((SYSTEM_CACHE_PATH, len(locks)))
         return results
@@ -280,9 +334,9 @@ def write_caches(locks: list[dict], scanned_at: datetime, config: dict) -> list[
         else:
             filtered = locks
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(
+        write_if_changed(
+            cache_path,
             render_cache(filtered, scanned_at, f"LOCK-CACHE — {title}"),
-            encoding="utf-8",
         )
         results.append((cache_path, len(filtered)))
 
