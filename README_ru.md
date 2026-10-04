@@ -52,7 +52,7 @@ pure-locking/LOCK_TEMPLATE.txt
   "caches": [
     {
       "name": "общесистемный",
-      "path": "/путь/к/scripts/LOCK-CACHE.md"
+      "path": "/путь/к/scripts/LOCK-CACHE.{host}.md"
     }
   ]
 }

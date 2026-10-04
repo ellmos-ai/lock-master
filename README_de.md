@@ -394,7 +394,7 @@ Für das Scannen mehrerer Projektbäume kopiere `pure-locking/lock_roots.example
   "caches": [
     {
       "name": "system-wide",
-      "path": "C:/_Local_DEV/state/LOCK-CACHE.md"
+      "path": "C:/_Local_DEV/state/LOCK-CACHE.{host}.md"
     }
   ]
 }

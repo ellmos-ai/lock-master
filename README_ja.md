@@ -52,7 +52,7 @@ pure-locking/LOCK_TEMPLATE.txt
   "caches": [
     {
       "name": "システム全体",
-      "path": "/path/to/scripts/LOCK-CACHE.md"
+      "path": "/path/to/scripts/LOCK-CACHE.{host}.md"
     }
   ]
 }

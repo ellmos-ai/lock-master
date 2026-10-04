@@ -394,7 +394,7 @@ To scan multiple project hierarchies, copy `pure-locking/lock_roots.example.json
   "caches": [
     {
       "name": "system-wide",
-      "path": "C:/_Local_DEV/state/LOCK-CACHE.md"
+      "path": "C:/_Local_DEV/state/LOCK-CACHE.{host}.md"
     }
   ]
 }

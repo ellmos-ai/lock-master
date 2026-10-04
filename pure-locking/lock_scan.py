@@ -200,6 +200,9 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
             lock_path = d / name
             created, expires, source = lock_utils.lock_created_and_expiry(lock_path)
             data = lock_utils.parse_lock_file(lock_path)
+            # Absolute expiry: stable between scans, unlike `remaining`. The
+            # cache shows this one so it only changes when the lock set does.
+            expires_at = ""
             if is_legacy:
                 remaining = "legacy"
             elif lock_utils.is_ambiguous_lock(name):
@@ -222,8 +225,10 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
                 else:
                     remaining = (f"{_format_remaining(moment - now)} "
                                  f"(until {moment.isoformat(timespec='minutes')})")
+                    expires_at = moment.isoformat(timespec="minutes")
             else:
                 remaining = _format_remaining((created + expires) - now)
+                expires_at = (created + expires).isoformat(timespec="minutes")
             out.append({
                 "path": str(lock_path),
                 "scope": scope,
@@ -237,6 +242,7 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
                 "not_before": data.get("not_before", ""),
                 "fence": data.get("fence", ""),
                 "remaining": remaining,
+                "expires_at": expires_at,
             })
     out.sort(key=lambda r: r["path"])
     return out
@@ -259,15 +265,19 @@ def render_cache(locks: list[dict], scanned_at: datetime, title: str) -> str:
         "",
         f"Active locks: {len(locks)}",
         "",
-        "| Path | scope | owner | created | remaining |",
+        "| Path | scope | owner | created | expires |",
         "|---|---|---|---|---|",
     ]
     for r in locks:
         path = r["path"] + (" (legacy)" if r["legacy"] else "")
         owner = r["owner"] or "?"
+        # Absolute expiry when the lock has one, else the static state text
+        # (user-held, condition, legacy ...). Never a countdown: a countdown
+        # changes every minute and forces a rewrite -> sync traffic.
+        expires = r.get("expires_at") or r["remaining"]
         lines.append(
             f"| {_md_escape(path)} | {_md_escape(r['scope'])} | {_md_escape(owner)} "
-            f"| {_md_escape(r['created'])} | {_md_escape(r['remaining'])} |"
+            f"| {_md_escape(r['created'])} | {_md_escape(expires)} |"
         )
     if not locks:
         lines.append("| _(no active locks)_ |  |  |  |  |")
@@ -358,8 +368,17 @@ def write_twin_index(config: dict) -> tuple[Path, int] | None:
     index_path = Path(os.path.expandvars(str(raw)))
     index = lock_utils.build_twin_index(iter_lock_dirs(config))
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(
-        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Every host writes this file into the same synced folder: skip the write
+    # when only `generated_at` differs, or hosts keep overwriting each other.
+    try:
+        old = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        old = None
+    if not (isinstance(old, dict)
+            and {k: v for k, v in old.items() if k != "generated_at"}
+            == {k: v for k, v in index.items() if k != "generated_at"}):
+        index_path.write_text(
+            json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
     return index_path, len(index["by_repo_name"])
 
 def _check_dir(target: Path, as_json: bool, strict: bool,

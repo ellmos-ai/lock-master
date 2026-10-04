@@ -12,6 +12,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Cache collisions in synced folders**: `lock_scan --write-cache` and the watcher's detail cache wrote one fixed file name (`LOCK-CACHE.md`) into a cloud-synced folder from every host every few minutes. Each collision made the sync service create a conflict copy (`LOCK-CACHE-<HOST>-<n>.md`, ~1700 per folder measured). Cache paths now accept the placeholders `{host}` and `%COMPUTERNAME%` (resolved on every platform, not only where `os.path.expandvars` knows the variable); the watcher detail cache and the default system cache are named `LOCK-CACHE.<HOST>.md`. New helpers `host_name()` / `host_cache_name()`.
 - **Write only on change**: `write_if_changed()` skips the write when only the timestamp line differs; an unchanged file is still refreshed every 30 minutes so readers' freshness checks keep working.
 - Tests: `tests/test_cache_per_host.py`.
+- **Stable cache content**: the cache shows the absolute expiry (`expires`) instead of a minute-by-minute countdown, so it is rewritten only when the lock set changes (or after 30 minutes). `TWIN-INDEX.json` is likewise written only when its content (ignoring `generated_at`) changes.
 
 ### Changed (Pfad A Repository Hygiene, CI Lifecycle Workflows, Bilingual CONTRIBUTING & Contract Tests - 2026-10-03)
 

@@ -27,18 +27,16 @@ sys.path.insert(0, str(config.SCRIPTS_DIR))
 
 
 def _format_remaining(expires_at: str | None) -> str:
-    """Berechnet Restzeit aus absolutem expires_at."""
+    """Gibt den absoluten Ablaufzeitpunkt aus expires_at zurueck (stabil, kein Countdown)."""
     if not expires_at:
         return "?"
     try:
         expiry = datetime.fromisoformat(expires_at)
-        remaining = expiry - datetime.now()
-        total_secs = int(remaining.total_seconds())
-        if total_secs < 0:
+        # Absoluter Ablauf statt Countdown: aendert sich nicht minuetlich und
+        # loest damit keinen Schreibvorgang (Sync-Last) pro Scan aus.
+        if expiry < datetime.now():
             return "abgelaufen"
-        h, rem = divmod(total_secs, 3600)
-        m, _ = divmod(rem, 60)
-        return f"{h}h{m:02d}m"
+        return expiry.isoformat(timespec="minutes")
     except (ValueError, TypeError):
         return "?"
 
@@ -54,6 +52,7 @@ def _db_lock_to_scan_format(lock: dict) -> dict:
         "created_source": lock.get("created_source") or "mtime",
         "expires_after": str(lock.get("expires_after") or ""),
         "remaining": _format_remaining(lock.get("expires_at")),
+        "expires_at": (lock.get("expires_at") or "")[:16],
     }
 
 
@@ -177,7 +176,7 @@ def _write_detail_cache(locks: list[dict], scanned_at: datetime) -> None:
         if exclusive:
             lines.append(f"## Exclusive Locks ({len(exclusive)})")
             lines.append("")
-            lines.append("| Pfad | Scope | Owner | Host | Restzeit |")
+            lines.append("| Pfad | Scope | Owner | Host | Ablauf |")
             lines.append("|---|---|---|---|---|")
             for lock in exclusive:
                 remaining = _format_remaining(lock.get("expires_at"))
@@ -202,7 +201,7 @@ def _write_detail_cache(locks: list[dict], scanned_at: datetime) -> None:
                 lines.append(
                     f"- **Owner:** {lock.get('owner') or '?'} | "
                     f"**Host:** {lock.get('host') or '?'} | "
-                    f"**Restzeit:** {remaining}"
+                    f"**Ablauf:** {remaining}"
                 )
                 _render_team_data(lock.get("team_data"), lines)
                 lines.append("")

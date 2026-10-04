@@ -52,7 +52,7 @@ Copia `pure-locking/lock_roots.example.json`, renómbralo a `lock_roots.json` y 
   "caches": [
     {
       "name": "todo-el-sistema",
-      "path": "/ruta/a/scripts/LOCK-CACHE.md"
+      "path": "/ruta/a/scripts/LOCK-CACHE.{host}.md"
     }
   ]
 }

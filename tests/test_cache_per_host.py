@@ -89,3 +89,48 @@ def test_stale_unchanged_file_is_refreshed(tmp_path: Path):
     os.utime(target, (old, old))
     lock_scan.write_caches([_record()], datetime(2026, 10, 4, 11, 0), cfg)
     assert "11:00" in target.read_text(encoding="utf-8")
+
+
+def test_countdown_change_does_not_rewrite(tmp_path: Path):
+    """`remaining` is a countdown; the cache shows the absolute expiry, so a
+    scan a minute later with the same lock set must not touch the file."""
+    target = tmp_path / "c.md"
+    cfg = {"caches": [{"name": "all", "path": str(target)}]}
+    rec = dict(_record(), expires_at="2026-10-05T10:00", remaining="23h59m")
+    lock_scan.write_caches([rec], datetime(2026, 10, 4, 10, 0), cfg)
+    old = time.time() - 600
+    os.utime(target, (old, old))
+    before = target.stat().st_mtime
+    later = dict(rec, remaining="23h58m")
+    lock_scan.write_caches([later], datetime(2026, 10, 4, 10, 1), cfg)
+    assert target.stat().st_mtime == before
+    text = target.read_text(encoding="utf-8")
+    assert "2026-10-05T10:00" in text and "23h5" not in text
+
+
+def test_expiry_change_rewrites(tmp_path: Path):
+    target = tmp_path / "c.md"
+    cfg = {"caches": [{"name": "all", "path": str(target)}]}
+    rec = dict(_record(), expires_at="2026-10-05T10:00")
+    lock_scan.write_caches([rec], datetime(2026, 10, 4, 10, 0), cfg)
+    lock_scan.write_caches([dict(rec, expires_at="2026-10-06T10:00")], datetime(2026, 10, 4, 10, 1), cfg)
+    assert "2026-10-06T10:00" in target.read_text(encoding="utf-8")
+
+
+def test_twin_index_not_rewritten_when_only_timestamp_differs(tmp_path: Path):
+    repo = tmp_path / "ws" / "proj"
+    repo.mkdir(parents=True)
+    (repo / "REPO.pointer.json").write_text(
+        '{"schema": "ellmos-repo-pointer-v1", "repo_id": "o/proj"}', encoding="utf-8")
+    idx = tmp_path / "TWIN-INDEX.json"
+    cfg = {
+        "roots": [{"path": str(tmp_path / "ws")}],
+        "twin_resolution": {"clone_roots": [str(tmp_path / "clones")], "index_path": str(idx)},
+    }
+    lock_scan.write_twin_index(cfg)
+    first = idx.read_text(encoding="utf-8")
+    old = time.time() - 600
+    os.utime(idx, (old, old))
+    before = idx.stat().st_mtime
+    lock_scan.write_twin_index(cfg)
+    assert idx.stat().st_mtime == before and idx.read_text(encoding="utf-8") == first

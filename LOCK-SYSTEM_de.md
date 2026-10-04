@@ -738,7 +738,7 @@ Entfernt `LOCK*.txt` mit `now > created + expires_after`. Legacy `TEST.txt`/`TES
 ```
 PYTHONIOENCODING=utf-8 python C:\Users\User\OneDrive\_scripts\lock_scan.py --write-cache
 ```
-Schreibt zwei auto-generierte Caches pro Host: systemweit `_scripts/LOCK-CACHE.<HOST>.md` (alle Roots) und nur Software `.SOFTWARE/LOCK-CACHE.<HOST>.md` (Präfix-Filter auf `.SOFTWARE`). Cache-Pfade in `lock_roots.json` nutzen `%COMPUTERNAME%` bzw. `{host}`; geschrieben wird nur bei inhaltlicher Änderung (oder nach 30 min). Beide sind abgeleitete Artefakte (nicht manuell editieren, in `.gitignore`); authoritativ bleiben die `LOCK*.txt` selbst.
+Schreibt zwei auto-generierte Caches pro Host: systemweit `_scripts/LOCK-CACHE.<HOST>.md` (alle Roots) und nur Software `.SOFTWARE/LOCK-CACHE.<HOST>.md` (Präfix-Filter auf `.SOFTWARE`). Cache-Pfade in `lock_roots.json` nutzen `%COMPUTERNAME%` bzw. `{host}`; geschrieben wird nur, wenn sich die Lock-Menge ändert (Ablauf als absoluter Zeitpunkt, kein Countdown), sonst höchstens alle 30 min; `TWIN-INDEX.json` ebenfalls nur bei inhaltlicher Änderung. Beide sind abgeleitete Artefakte (nicht manuell editieren, in `.gitignore`); authoritativ bleiben die `LOCK*.txt` selbst.
 
 **Scan-Begrenzung (Performance):** `lock_roots.json` steuert `default_max_depth` (Default 4), `shallow_depth` (Default 2, für Roots mit `"shallow": true` wie `.WISSEN`) und `skip_dirs` (übersprungene Verzeichnisse inkl. Unterbaum, z. B. `node_modules`, `.venv`, `.git`, `build`, `releases`).
 
