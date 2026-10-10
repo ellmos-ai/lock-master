@@ -99,6 +99,7 @@ Watcher scan model:
   project using different scoped locks.
 - Detection regex: `^LOCK(\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*)?\.txt$`
 - Legacy `TEST.txt` / `TESTS.txt` -- deprecated, do not create new ones
+  These legacy basenames require the exact spelling, including case, on every host. Ordinary `test.txt` / `tests.txt` documents are not locks. Modern `LOCK*.txt` names remain case-insensitive.
   (still recognised as a lock, but not subject to automatic expiry).
 
 ---

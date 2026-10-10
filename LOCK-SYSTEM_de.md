@@ -287,6 +287,7 @@ Until-Lock ZUSÄTZLICH `release_condition`, entscheidet `release_mode`:
 
 - Erkennungsregex: `^LOCK(\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*)?\.txt$`.
 - Legacy `TEST.txt` / `TESTS.txt` = veraltet, nicht mehr anlegen (wird noch als Sperre erkannt, aber nicht automatisch verfallen).
+  Für diese Legacy-Dateinamen gilt auf allen Hosts die genaue Schreibweise einschließlich Großschreibung. Normale Dokumente `test.txt` / `tests.txt` sind keine Sperren. Moderne `LOCK*.txt`-Namen bleiben unabhängig von Groß- und Kleinschreibung gültig.
 
 ---
 
