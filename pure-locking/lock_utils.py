@@ -756,7 +756,10 @@ def find_lock_files(project_dir: Path, include_legacy: bool = True):
     if include_legacy:
         for legacy in LEGACY_LOCK_NAMES:
             for hit in project_dir.glob(legacy):
-                if hit.is_file():
+                # Windows glob also matches ordinary test.txt help documents.
+                # Legacy names are exact, as in lock_name_parts(); LOCK*.txt
+                # detection above deliberately remains case-insensitive.
+                if hit.name == legacy and hit.is_file():
                     results.append((hit.name, "project", True))
     return sorted(set(results))
 

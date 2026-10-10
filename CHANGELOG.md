@@ -7,6 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (exact legacy basenames - 2026-10-10)
+
+- Legacy markers require the exact filenames `TEST.txt` / `TESTS.txt`, consistently with `lock_name_parts()`. Windows glob matching no longer promotes ordinary lowercase `test.txt` documentation into an active lock. Modern `LOCK*.txt` names remain case-insensitive; genuine legacy markers still block without expiry. Regression coverage includes a simulated case-insensitive glob on all CI hosts (BACH task #2044).
+
 ### Fixed (LOCK-CACHE: one file per host, write only on change - 2026-10-04)
 
 - **Cache collisions in synced folders**: `lock_scan --write-cache` and the watcher's detail cache wrote one fixed file name (`LOCK-CACHE.md`) into a cloud-synced folder from every host every few minutes. Each collision made the sync service create a conflict copy (`LOCK-CACHE-<HOST>-<n>.md`, ~1700 per folder measured). Cache paths now accept the placeholders `{host}` and `%COMPUTERNAME%` (resolved on every platform, not only where `os.path.expandvars` knows the variable); the watcher detail cache and the default system cache are named `LOCK-CACHE.<HOST>.md`. New helpers `host_name()` / `host_cache_name()`.
