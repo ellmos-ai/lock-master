@@ -9,7 +9,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed (exact legacy basenames - 2026-10-10)
 
-- Legacy markers require the exact filenames `TEST.txt` / `TESTS.txt`, consistently with `lock_name_parts()`. Windows glob matching no longer promotes ordinary lowercase `test.txt` documentation into an active lock. Modern `LOCK*.txt` names remain case-insensitive; genuine legacy markers still block without expiry. Regression coverage includes a simulated case-insensitive glob on all CI hosts (BACH task #2044).
+- Legacy markers require the exact filenames `TEST.txt` / `TESTS.txt`, consistently with `lock_name_parts()`. Detection uses actual directory-entry names, avoiding both case-insensitive matches and pattern-named literal glob results on Windows Python 3.10/3.11. Ordinary lowercase `test.txt` documentation is no longer promoted into an active lock. Modern `LOCK*.txt` names, including uppercase extensions, remain case-insensitive; genuine legacy markers still block without expiry. Regression coverage simulates both glob behaviors on all CI hosts (BACH task #2044).
 
 ### Fixed (LOCK-CACHE: one file per host, write only on change - 2026-10-04)
 

@@ -1,5 +1,6 @@
 """Legacy TEST markers use their exact basename on every host (BACH task2044)."""
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -40,7 +41,28 @@ def test_case_insensitive_glob_does_not_promote_lowercase_help(tmp_path, monkeyp
     assert lock_utils.find_lock_files(tmp_path) == []
 
 
-@pytest.mark.parametrize("name", ["lock.txt", "lock.user.work.txt", "lock.condition.work.txt"])
+def test_pattern_named_glob_alias_does_not_promote_lowercase_help(tmp_path, monkeypatch):
+    """Simulate Windows Python 3.10/3.11 literal glob on every CI host."""
+    (tmp_path / "test.txt").write_text("bach test --help", encoding="utf-8")
+    original_glob = Path.glob
+    patterns = []
+
+    def pattern_named_glob(path, pattern, *args, **kwargs):
+        if path == tmp_path:
+            patterns.append(pattern)
+            if pattern == "TEST.txt":
+                return iter([SimpleNamespace(name="TEST.txt", is_file=lambda: True)])
+        return original_glob(path, pattern, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "glob", pattern_named_glob)
+    assert lock_utils.find_lock_files(tmp_path) == []
+    assert not set(patterns).intersection(lock_utils.LEGACY_LOCK_NAMES)
+
+
+@pytest.mark.parametrize("name", [
+    "lock.txt", "lock.user.work.txt", "lock.condition.work.txt",
+    "LOCK.TXT", "LOCK.USER.work.TXT",
+])
 def test_modern_lock_names_remain_case_insensitive(tmp_path, name):
     (tmp_path / name).write_text("owner: user\n", encoding="utf-8")
     locks = lock_utils.find_lock_files(tmp_path)

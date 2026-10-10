@@ -747,20 +747,16 @@ def find_lock_files(project_dir: Path, include_legacy: bool = True):
     """Find all lock files in a project root directory.
     Returns: list of (name, scope, is_legacy)."""
     results = []
-    for hit in sorted(project_dir.glob("*.txt")):
+    # Enumerate real entry names: literal globs on Windows Python 3.10/3.11
+    # can construct the returned path from the pattern's case instead.
+    for hit in sorted(project_dir.glob("*")):
         if not hit.is_file():
             continue
         scope = scope_from_name(hit.name)
         if scope is not None:
             results.append((hit.name, scope, False))
-    if include_legacy:
-        for legacy in LEGACY_LOCK_NAMES:
-            for hit in project_dir.glob(legacy):
-                # Windows glob also matches ordinary test.txt help documents.
-                # Legacy names are exact, as in lock_name_parts(); LOCK*.txt
-                # detection above deliberately remains case-insensitive.
-                if hit.name == legacy and hit.is_file():
-                    results.append((hit.name, "project", True))
+        elif include_legacy and hit.name in LEGACY_LOCK_NAMES:
+            results.append((hit.name, "project", True))
     return sorted(set(results))
 
 
