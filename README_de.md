@@ -545,7 +545,7 @@ Das vollständige Level 1 Software Bill of Materials (SBOM), das Lizenz-Audit, d
 |:---|:---|:---|
 | [ticket-master](https://github.com/ellmos-ai/ticket-master) | ellmos-ai | Autonome Ticket-Routing- und Task-Dispatching-Konsole |
 | [clutch](https://github.com/ellmos-ai/clutch) | ellmos-ai | Adaptiver Multi-Modell LLM Router & Ausführungsschaltung |
-| [coma](https://github.com/ellmos-ai/coma) | ellmos-ai | Autonomer Multi-Agenten-Orchestrator & Single-Binary-Koordinator |
+| [coma](https://github.com/ellmos-ai/coma) | ellmos-ai | Verwaltet lokale Jobdateien und startet Agentenprozesse beziehungsweise erfasst deren Status über ein Dateiprotokoll; begrenzt weder Netzwerkzugriffe noch Betriebssystemrechte der gestarteten Prozesse |
 | [swarm-ai](https://github.com/ellmos-ai/swarm-ai) | ellmos-ai | Schwarmintelligenz und autonomer Agenten-Konsens |
 | [gardener](https://github.com/ellmos-ai/gardener) | ellmos-ai | Local-First Session- und Kontextspeicher für Agenten |
 | [system-gap-master](https://github.com/ellmos-ai/system-gap-master) | ellmos-ai | Serverlose Multi-Agenten-Workspace-Synchronisation & Reconciliation |

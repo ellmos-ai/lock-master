@@ -30,6 +30,12 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 - Human maintainers who need a quick read-only overview of active agent work.
 - Users who want an optional local browser UI for live lock status and history.
 
+## Related tool
+
+[COMA](https://github.com/ellmos-ai/coma) manages local job files and starts
+agent processes or records their status through a file protocol. It does not
+limit the started processes' network access or operating system rights.
+
 ## Search Phrases
 
 ```
