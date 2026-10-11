@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # config importieren stellt sicher, dass der Repo-Root im sys.path ist
@@ -28,7 +28,10 @@ def lock_to_record(lock_path: Path, name: str, scope: str, is_legacy: bool) -> d
 
     try:
         created, expires, created_source = lock_utils.lock_created_and_expiry(lock_path)
-        created_at = created.isoformat(timespec="seconds")
+        created_at = (
+            None if created_source == "invalid"
+            else lock_utils.format_utc_iso(created)
+        )
         expires_after = str(expires)
     except (OSError, ValueError):
         created_at = None
@@ -71,7 +74,7 @@ def full_scan(config_data: dict, now: datetime | None = None) -> list[dict]:
     Im Gegensatz zu lock_scan.collect_locks() werden hier auch abgelaufene
     Locks zurückgegeben. is_expired wird pro Lock separat geprüft.
     """
-    now = now or datetime.now()
+    now = datetime.now(timezone.utc) if now is None else now
     seen: set[Path] = set()
     results: list[dict] = []
 
@@ -106,7 +109,7 @@ def check_paths(paths: list[str], now: datetime | None = None) -> dict[str, dict
 
     Gibt ein Dict zurück: path → lock_data (aktualisiert) oder None (gelöscht).
     """
-    now = now or datetime.now()
+    now = datetime.now(timezone.utc) if now is None else now
     result: dict[str, dict | None] = {}
 
     for path_str in paths:

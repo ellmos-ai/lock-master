@@ -18,16 +18,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import lock_utils
 
 
 def check_project_status(project_dir: Path, now: datetime | None = None) -> list[dict]:
-    """Check active locks for a project directory.
-    Returns list of lock data dicts."""
-    now = now or datetime.now()
+    """Check active locks for a project directory and return their status."""
+    now = datetime.now(timezone.utc) if now is None else now
+    now_utc = lock_utils._as_utc(now)
     if not project_dir.exists() or not project_dir.is_dir():
         raise ValueError(f"Project directory does not exist: {project_dir}")
 
@@ -44,22 +44,44 @@ def check_project_status(project_dir: Path, now: datetime | None = None) -> list
         elif lock_utils.is_condition_lock(lock_path, data=data):
             cond = data.get("release_condition", "?")
             remaining = f"until condition met: {cond}"
+        elif lock_utils.is_until_lock(lock_path, data=data):
+            moment = lock_utils.lock_not_before(lock_path, data=data)
+            if moment is None:
+                remaining = "MISSING not_before -> holds indefinitely (fail-closed)"
+            elif now_utc is None:
+                remaining = "current time unavailable -> holds (fail-closed)"
+            else:
+                now_local = now_utc.astimezone().replace(tzinfo=None)
+                if now_local > moment:
+                    remaining = (f"deadline passed {moment.isoformat(timespec='minutes')}"
+                                 " - guard may stop; file stays for the user")
+                else:
+                    secs = int((moment - now_local).total_seconds())
+                    h, rem = divmod(secs, 3600)
+                    remaining = f"{h}h{rem // 60:02d}m"
+        elif source == "invalid":
+            remaining = "invalid created timestamp -> active (fail-closed)"
+        elif now_utc is None:
+            remaining = "current time unavailable -> active (fail-closed)"
         else:
-            secs = int(((created + expires) - now).total_seconds())
+            secs = int(((created + expires) - now_utc).total_seconds())
             if secs < 0:
                 remaining = "expired"
             else:
                 h, rem = divmod(secs, 3600)
-                m, _ = divmod(rem, 60)
-                remaining = f"{h}h{m:02d}m"
+                remaining = f"{h}h{rem // 60:02d}m"
 
+        created_display = (
+            None if source == "invalid"
+            else lock_utils.format_utc_iso(created, timespec="minutes")
+        )
         out.append({
             "name": name,
             "path": str(lock_path),
             "scope": scope,
             "legacy": is_legacy,
             "owner": data.get("owner", ""),
-            "created": created.isoformat(timespec="minutes"),
+            "created": created_display,
             "created_source": source,
             "expires_after": str(expires),
             "operations": data.get("operations", ""),

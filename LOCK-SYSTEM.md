@@ -112,7 +112,7 @@ are ignored.
 | Field              | Required | Meaning |
 |--------------------|----------|---------|
 | `owner`            | yes      | Who holds the lock (agent / user / automation). |
-| `created`          | yes      | ISO timestamp `YYYY-MM-DDTHH:MM` (base for expiry). |
+| `created`          | yes      | ISO-8601 instant with offset; new writers use seconds and UTC `Z`. |
 | `host`             | optional | Machine/hostname holding the lock — which system locked it (cross-system). |
 | `expires_after`    | optional | e.g. `24h` / `48h` / `90m`. Default = `24h`. |
 | `release_condition`| optional | Free text: what must happen for the lock to be released. |
@@ -122,8 +122,15 @@ are ignored.
 | `scope`            | optional | Informational only; the filename is authoritative. |
 | `fence`            | optional | **Grant number** (epoch microseconds), written by `lock_create.py` for cooperative detection. The holder records it at acquisition and re-checks it before every write — see "Fencing Tokens". Absent = a lock from before fencing, handled exactly as before. |
 
-If `created` is missing or unparseable, the file's mtime is used as fallback
-for expiry calculation.
+For relative-expiry locks that use `created` as their base, an absent field
+uses the file's mtime as fallback. A lock in this category with a present but
+malformed, ambiguous, or nonexistent local timestamp remains active and is
+reported with `created_source: invalid`; mtime is diagnostic only and is not its
+expiry or claim-order time. Until and condition locks keep their own expiry rules.
+Naive legacy values are interpreted as historical local wall time on the reading
+host. The original writer's time zone cannot be recovered, so cross-host readings
+can differ. Explicit offsets are normalized to UTC, and relative expiry durations
+use elapsed UTC time.
 
 ---
 
@@ -478,10 +485,11 @@ across synced folders. Monotonicity between hosts, however, depends on clock agr
 while `new_fence(previous=...)` steps past the displaced grant on takeover, clock skew
 or backwards steps can still affect ordering if a host acquires without previous context.
 
-This borrows no new assumption: `expires_after` is **already** compared against each
-host's local clock, and the contest procedure **already** orders claims by `created`
-with a host tiebreak. If clocks drift far enough to break fencing, expiry itself was
-broken first.
+For explicit offsets, expiry and contest ordering use the same UTC instant on
+each host. Naive legacy timestamps use the reader's historical local time zone;
+their original writer zone is unknown, so cross-host ordering can differ. Invalid
+present timestamps fail closed and prevent a contested set from producing a winner.
+Fencing numbers remain wall-clock based and still depend on clock agreement.
 
 ### What this promises, and what it explicitly does not
 
@@ -630,7 +638,8 @@ the same file. `--force` still overwrites deliberately.
 1. CREATE      write the lock exclusively
 2. QUARANTINE  wait (default 300 s) for the sync to align both views
 3. RECHECK     read the directory again
-4. DECIDE      earliest `created` wins; exact tie -> lexicographically smaller host
+4. DECIDE      any active invalid created value -> no winner; otherwise earliest
+              valid instant wins; exact tie -> lexicographically smaller host
 5. LOSER       remove own lock (exit code 3), release the area
 ```
 
@@ -668,11 +677,11 @@ everything; otherwise containment with a segment boundary — `assets` overlaps
 `assets.images` but **not** `assets-backup`. A mere character prefix is not an
 ancestor relation.
 
-**Time resolution:** `created` is now written with seconds
-(`%Y-%m-%dT%H:%M:%S`). At minute granularity two near-simultaneous claims
-regularly land in the host tiebreak, where the same host loses structurally every
-time. `lock_utils._parse_created` has always read seconds ("seconds optional"), so
-this is not a format break.
+**Time resolution:** New writers emit UTC instants with seconds and a `Z` suffix
+(`%Y-%m-%dT%H:%M:%SZ`). Readers also accept explicit ISO offsets and normalize them
+to UTC. Naive legacy values use the reading host's historical local wall time; the
+original writer's zone is unknown. Ambiguous or nonexistent local times are invalid
+and remain active. Seconds reduce same-host ties for near-simultaneous claims.
 
 **An expired own lock never wins.** Other systems filtered it out long ago;
 without that check it would see itself as the earliest claim while nobody else

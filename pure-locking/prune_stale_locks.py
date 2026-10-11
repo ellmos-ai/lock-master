@@ -25,7 +25,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import lock_utils
@@ -62,7 +62,7 @@ def notify_expired_locks(webhook_url: str, removed_paths: list[str]) -> bool:
         "event": "lock_expired",
         "removed": len(removed_paths),
         "paths": removed_paths,
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
     request = urllib.request.Request(
         webhook_url,
@@ -88,7 +88,7 @@ def notify_expired_locks(webhook_url: str, removed_paths: list[str]) -> bool:
 
 
 def prune(config: dict, dry_run: bool = False, webhook_url: str | None = None) -> int:
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     removed = 0
     kept = 0
     removed_paths: list[str] = []
@@ -106,6 +106,9 @@ def prune(config: dict, dry_run: bool = False, webhook_url: str | None = None) -
                 kept += 1
                 continue
             created, expires, source = lock_utils.lock_created_and_expiry(lock_path)
+            if source == "invalid":
+                kept += 1
+                continue
             age_h = (now - created).total_seconds() / 3600
             if dry_run:
                 print(f"[would remove] {lock_path} "
