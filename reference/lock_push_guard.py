@@ -33,7 +33,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PUSH = re.compile(r"\bgit\b[^\r\n|;&]*\bpush\b", re.IGNORECASE)
@@ -138,13 +138,47 @@ _UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 DEFAULT_EXPIRES_HOURS = 24
 
 
+def _created_utc(value: str) -> datetime | None:
+    if not value or not value.strip():
+        return None
+    candidate = value.strip()
+    if candidate[-1:] in {"Z", "z"}:
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+        try:
+            return parsed.astimezone(timezone.utc)
+        except (OverflowError, ValueError):
+            return None
+    local = parsed.replace(tzinfo=None, fold=0)
+    timestamps: list[float] = []
+    try:
+        for fold in (0, 1):
+            instant = local.replace(fold=fold).timestamp()
+            if datetime.fromtimestamp(instant).replace(fold=0) != local:
+                return None
+            timestamps.append(instant)
+    except (OSError, OverflowError, ValueError):
+        return None
+    if timestamps[0] != timestamps[1]:
+        return None
+    try:
+        return datetime.fromtimestamp(timestamps[0], timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 def _lock_expired(data: dict[str, str], lock: Path) -> bool:
     """Ablauf wie lock_utils.is_expired fuer gewoehnliche Locks.
 
     Bewusst inklusive der Legacy-Faelle, die der Hook vorher nicht kannte und
     deshalb als "gilt noch" durchwinkte (Codex-Review PR#8, Punkt 3):
       expires_after fehlt oder ist kaputt -> Default 24 h, nicht "unbegrenzt"
-      created fehlt oder ist kaputt       -> Datei-mtime, nicht "unbegrenzt"
+      created fehlt                       -> Datei-mtime
+      created vorhanden, aber ungueltig   -> kein Besitznachweis (fail-closed)
     Numerische Grenzüberschreitung/Overflow bei expires_after:
       -> fail-closed (True = abgelaufen/Anspruch verloren), NIE stiller 24h-Default!
     Ist der Ablauf nicht bestimmbar, gilt der Anspruch als verloren -- ein
@@ -165,23 +199,17 @@ def _lock_expired(data: dict[str, str], lock: Path) -> bool:
         # greift wie in lock_utils der 24h-Default. Bei einem alten Lock
         # (created > 24h) fuehrt das unten zu True.
 
-    created = None
-    raw_created = data.get("created")
-    if raw_created:
-        candidate = raw_created.replace("T", " ")
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                created = datetime.strptime(candidate, fmt)
-                break
-            except ValueError:
-                continue
-    if created is None:
+    if "created" in data:
+        created = _created_utc(data.get("created", ""))
+        if created is None:
+            return True  # vorhandener, ungueltiger Zeitstempel belegt keinen Besitz
+    else:
         try:
-            created = datetime.fromtimestamp(lock.stat().st_mtime)
+            created = datetime.fromtimestamp(lock.stat().st_mtime, timezone.utc)
         except OSError:
             return True  # Zustand nicht feststellbar -> kein Besitznachweis
     try:
-        return datetime.now() > created + delta
+        return datetime.now(timezone.utc) > created + delta
     except (OverflowError, ValueError):
         return True  # Overflow bei Datumsaddition -> fail-closed
 
@@ -501,7 +529,7 @@ def _selftest() -> None:
             ("owner: A\nexpires_after: 24h\nfence: 1000\n",
              "created fehlt -> mtime-Fallback, nicht unbegrenzt"),
             ("owner: A\ncreated: kaputt\nexpires_after: 24h\nfence: 1000\n",
-             "kaputtes created -> mtime-Fallback"),
+             "kaputtes created -> fail-closed ohne mtime-Ersatz"),
         ):
             fenced.write_text(body, encoding="utf-8")
             if "created" not in body or "kaputt" in body:

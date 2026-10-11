@@ -17,7 +17,7 @@ import socket
 import subprocess
 import sys
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path, PurePosixPath
 
@@ -469,7 +469,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
         mode = body.get("mode", "hard").strip()
         expires = body.get("expires_after", "24h").strip()
         host = socket.gethostname()
-        now = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        now = lock_utils.created_utc_iso()
 
         lines = [
             f"owner: {owner}",
@@ -534,7 +534,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
         owner = body.get("owner", profile.get("name", "User (Web UI)")).strip()
         purpose = body.get("purpose", "").strip()
         host = socket.gethostname()
-        now = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        now = lock_utils.created_utc_iso()
 
         lines = [f"owner: {owner}", f"created: {now}", f"host: {host}"]
         if purpose:
@@ -1002,8 +1002,10 @@ class WatcherHandler(BaseHTTPRequestHandler):
         if not expires_at:
             return None
         try:
-            exp = datetime.fromisoformat(expires_at)
-            delta = exp - datetime.now()
+            exp = lock_utils._parse_created(expires_at)
+            if exp is None:
+                return None
+            delta = exp - datetime.now(timezone.utc)
             if delta.total_seconds() <= 0:
                 return "abgelaufen"
             hours, rem = divmod(int(delta.total_seconds()), 3600)
@@ -1011,7 +1013,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
             if hours > 0:
                 return f"{hours}h {minutes}m"
             return f"{minutes}m"
-        except ValueError:
+        except (OverflowError, TypeError, ValueError):
             return None
 
 

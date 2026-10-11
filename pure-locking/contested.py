@@ -259,23 +259,33 @@ def _claim_order(lock_path: Path) -> tuple[datetime, str]:
 def resolve_contest(
     project_dir: Path, my_lock: Path, now: datetime | None = None
 ) -> ContestResult:
-    """Entscheidet einen gleichzeitigen Anspruch deterministisch.
+    """Decides a simultaneous claim deterministically.
 
-    Gewinner ist das früheste ``created``; bei exakter Gleichheit der
-    lexikografisch kleinere Host. Beide Seiten rechnen dasselbe Ergebnis aus
-    denselben Dateien aus -- ohne Server und ohne Echtzeitkanal.
-
-    Ein **abgelaufener eigener** Lock gewinnt nie: Andere Systeme haben ihn
-    längst herausgefiltert, sodass er sich sonst als frühesten Anspruch sähe,
-    während ihn niemand sonst noch sieht -- zwei Gewinner bei identischer
-    Datenlage, ganz ohne Sync-Verzögerung.
+    The earliest valid created timestamp wins; exact ties use the lexically
+    smaller host. If any active claim has a present but invalid timestamp, no
+    claimant wins: its diagnostic mtime must never become a ranking timestamp.
     """
     if not my_lock.is_file():
         return ContestResult(False, "eigener Lock nicht mehr vorhanden")
+
+    rivals = competing_locks(project_dir, my_lock, now=now)
+    claims = [my_lock, *rivals]
+    invalid_claims = [
+        path
+        for path in claims
+        if lock_utils.lock_created_and_expiry(path)[2] == "invalid"
+    ]
+    if invalid_claims:
+        return ContestResult(
+            False,
+            "vorhandener ungültiger created-Zeitstempel; kein Gewinner",
+            winner=None,
+            competitors=rivals,
+        )
+
     if lock_utils.is_expired(my_lock, now=now):
         return ContestResult(False, "eigener Lock ist abgelaufen -- neu anlegen")
 
-    rivals = competing_locks(project_dir, my_lock, now=now)
     if not rivals:
         return ContestResult(True, "kein konkurrierender Anspruch", winner=my_lock)
 

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
+import lock_utils
 
 
 class LockDB:
@@ -278,10 +280,13 @@ class LockDB:
 
         User and condition locks are protected by policy and therefore excluded
         here as a second defence even if an older scanner persisted a nominal
-        expiry timestamp.
+        expiry timestamp. Offset-aware values are normalized to UTC. Naive
+        legacy values use the shared historical-local-time parser; malformed
+        present values remain active.
         """
-        now_dt = datetime.now()
-        now_iso = now_dt.isoformat(timespec="seconds")
+        now_utc = datetime.now(timezone.utc)
+        local_now = now_utc.astimezone().replace(tzinfo=None)
+        now_iso = local_now.isoformat(timespec="seconds")
         rows = self._conn.execute(
             "SELECT id, expires_at FROM locks "
             "WHERE status='active' AND expires_at IS NOT NULL "
@@ -290,11 +295,14 @@ class LockDB:
 
         expired_ids: list[int] = []
         for row in rows:
-            try:
-                expires_at = datetime.fromisoformat(row["expires_at"])
-            except (TypeError, ValueError):
+            raw_expires_at = row["expires_at"]
+            if not isinstance(raw_expires_at, str):
                 continue
-            if expires_at <= now_dt:
+            try:
+                expires_at = lock_utils._parse_created(raw_expires_at)
+            except (OverflowError, TypeError, ValueError):
+                continue
+            if expires_at is not None and expires_at <= now_utc:
                 expired_ids.append(row["id"])
 
         for lock_id in expired_ids:

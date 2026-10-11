@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Eigene Module
@@ -24,35 +24,47 @@ import storage
 
 # lock_scan aus dem lock-master Repo-Root importieren
 sys.path.insert(0, str(config.SCRIPTS_DIR))
+import lock_utils  # noqa: E402
+
+
+def _timestamp_for_cache(value: str | None, *, timespec: str) -> str:
+    if not value:
+        return ""
+    parsed = lock_utils._parse_created(str(value))
+    if parsed is None:
+        return ""
+    return lock_utils.format_utc_iso(parsed, timespec=timespec)
 
 
 def _format_remaining(expires_at: str | None) -> str:
-    """Gibt den absoluten Ablaufzeitpunkt aus expires_at zurueck (stabil, kein Countdown)."""
+    """Gibt den absoluten Ablaufzeitpunkt in UTC zurueck, stabil ohne Countdown."""
     if not expires_at:
         return "?"
-    try:
-        expiry = datetime.fromisoformat(expires_at)
-        # Absoluter Ablauf statt Countdown: aendert sich nicht minuetlich und
-        # loest damit keinen Schreibvorgang (Sync-Last) pro Scan aus.
-        if expiry < datetime.now():
-            return "abgelaufen"
-        return expiry.isoformat(timespec="minutes")
-    except (ValueError, TypeError):
+    expiry = lock_utils._parse_created(expires_at)
+    if expiry is None:
         return "?"
+    if expiry < datetime.now(timezone.utc):
+        return "abgelaufen"
+    return lock_utils.format_utc_iso(expiry, timespec="minutes")
 
 
 def _db_lock_to_scan_format(lock: dict) -> dict:
     """Konvertiert einen DB-Lock-Eintrag in das Format von lock_scan.collect_locks()."""
+    created_source = lock.get("created_source") or "mtime"
+    created = (
+        "" if created_source == "invalid"
+        else _timestamp_for_cache(lock.get("created_at"), timespec="minutes")
+    )
     return {
         "path": lock.get("path", ""),
         "scope": lock.get("scope", ""),
         "legacy": bool(lock.get("is_legacy", False)),
         "owner": lock.get("owner") or "",
-        "created": (lock.get("created_at") or "")[:16],
-        "created_source": lock.get("created_source") or "mtime",
+        "created": created,
+        "created_source": created_source,
         "expires_after": str(lock.get("expires_after") or ""),
         "remaining": _format_remaining(lock.get("expires_at")),
-        "expires_at": (lock.get("expires_at") or "")[:16],
+        "expires_at": _timestamp_for_cache(lock.get("expires_at"), timespec="minutes"),
     }
 
 
@@ -104,9 +116,13 @@ def _format_daemon_status(scanned_at: datetime) -> list[str]:
     pid = status.get("pid")
     last_seen_raw = status.get("last_seen")
     try:
-        last_seen = datetime.fromisoformat(str(last_seen_raw))
-        age = int((scanned_at - last_seen).total_seconds())
-    except (TypeError, ValueError):
+        last_seen = lock_utils._parse_created(str(last_seen_raw))
+        scan_time = lock_utils._as_utc(scanned_at)
+        age = (
+            int((scan_time - last_seen).total_seconds())
+            if scan_time is not None and last_seen is not None else None
+        )
+    except (OverflowError, TypeError, ValueError):
         age = None
 
     try:
@@ -131,7 +147,7 @@ def generate_cache(db: storage.LockDB) -> None:
 
     active_locks = db.get_active_locks()
     scan_format_locks = [_db_lock_to_scan_format(lock) for lock in active_locks]
-    scanned_at = datetime.now()
+    scanned_at = datetime.now(timezone.utc)
 
     # Signatur-tolerant: write_caches() nimmt in dieser Modulfassung zusaetzlich
     # die Konfiguration entgegen (Cache-Ziele stehen im "caches"-Block der
@@ -153,7 +169,7 @@ def generate_cache(db: storage.LockDB) -> None:
 
 def _write_detail_cache(locks: list[dict], scanned_at: datetime) -> None:
     """Schreibt einen Detail-Cache mit Team-Lock-Daten ins Watcher-Verzeichnis."""
-    now_iso = scanned_at.isoformat(timespec="seconds")
+    now_iso = lock_utils.format_utc_iso(scanned_at)
     # Pro Host eine eigene Datei: der Watcher-Ordner ist synchronisiert, eine gemeinsame
     # Datei erzeugt bei mehreren Hosts Konfliktkopien.
     import lock_scan

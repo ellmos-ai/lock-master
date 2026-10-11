@@ -335,7 +335,7 @@ Vorlage: `_scripts/LOCK_TEMPLATE.txt`. Zeilen mit `#` = Kommentar, Leerzeilen ig
 | Feld | Pflicht | Bedeutung |
 |---|---|---|
 | `owner` | ja | Wer hält die Sperre (Agent/User/Automation). |
-| `created` | ja | ISO-Zeitstempel `YYYY-MM-DDTHH:MM` (Basis für Verfall). |
+| `created` | ja | ISO-8601-Zeitpunkt mit Offset; neue Schreiber verwenden Sekunden und UTC-`Z`. |
 | `host` | optional | Maschinenname des Systems, das die Sperre hält (z. B. `LAPTOP`, `MACSTUDIO`, `ASUS-GEI`). Ermöglicht cross-system-Erkennung: WELCHES System sperrt gerade. Fehlt das Feld, gilt `host = None` — kein Fehler, rückwärtskompatibel. |
 | `expires_after` | optional | z. B. `24h` / `48h` / `90m`. Default = `24h`. |
 | `release_condition` | optional | Freitext: was muss passieren, damit frei wird. |
@@ -345,7 +345,15 @@ Vorlage: `_scripts/LOCK_TEMPLATE.txt`. Zeilen mit `#` = Kommentar, Leerzeilen ig
 | `scope` | optional | nur informativ; autoritativ ist der Dateiname. |
 | `fence` | optional | **Vergabenummer** (Epoch-Mikrosekunden), von `lock_create.py` für kooperative Erkennung geschrieben. Der Halter merkt sie sich beim Erwerb und prüft sie vor jedem Schreiben — siehe Abschnitt „Fencing-Tokens“. Fehlt das Feld, ist es ein Lock aus der Zeit davor und wird behandelt wie bisher. |
 
-Fehlt `created` (oder unparsebar), gilt die Datei-mtime als Fallback für den Verfall.
+Für relative Verfallsarten, deren Basis `created` ist, gilt bei fehlendem Feld
+die Datei-mtime als Fallback. Eine Sperre dieser Art bleibt bei vorhandenem,
+fehlerhaftem, mehrdeutigem oder nicht existierendem lokalem Zeitstempel aktiv und
+wird mit `created_source: invalid` gemeldet; mtime ist nur Diagnosewert und zählt
+weder für Verfall noch Anspruchsreihenfolge. Until- und Condition-Sperren behalten
+ihre eigenen Verfallsregeln. Naive Altwerte gelten als historische lokale Wandzeit
+des lesenden Hosts. Die Zeitzone des ursprünglichen Schreibhosts ist unbekannt,
+daher können Host-Lesarten abweichen. Explizite Offsets werden nach UTC normiert;
+relative Verfallsdauern werden als verstrichene UTC-Zeit berechnet.
 
 ---
 
@@ -408,10 +416,12 @@ zwischen Hosts hängt dabei von der Uhrensynchronisation ab: Während `new_fence
 bei Übernahme die Vorgängernummer übersteigt, können Uhrenversatz oder Rücksprünge die
 Reihenfolge beeinflussen, wenn ein Host ohne Kenntnis des Vorgängers neu erwirbt.
 
-Das leiht sich keine neue Annahme: `expires_after` wird **ohnehin schon** gegen die
-lokale Uhr jedes Hosts gerechnet, und das Contest-Verfahren ordnet Ansprüchen
-**ohnehin schon** nach `created` mit Host-Tiebreak. Driften die Uhren weit genug,
-um Fencing zu brechen, war der Verfall vorher kaputt.
+Explizite Offsets bezeichnen auf jedem Host denselben UTC-Zeitpunkt für Verfall
+und Anspruchsreihenfolge. Naive Altwerte verwenden die historische lokale Zeitzone
+des lesenden Hosts; die ursprüngliche Schreiber-Zeitzone ist unbekannt, daher kann
+die Reihenfolge zwischen Hosts abweichen. Vorhandene ungültige Zeitstempel verhindern
+fail-closed eine Gewinnerwahl im Contest. Fencing-Nummern bleiben wanduhrbasiert und
+hängen weiterhin von der Uhrensynchronisation ab.
 
 ### Was das zusagt — und was ausdrücklich nicht
 
@@ -550,14 +560,23 @@ Prozess dieselbe Datei anlegt. `--force` überschreibt weiterhin bewusst.
 1. ANLEGEN     Lock exklusiv schreiben
 2. QUARANTÄNE warten (Default 300 s), bis der Sync beide Sichten angleicht
 3. NACHLESEN   Verzeichnis erneut lesen
-4. ENTSCHEIDEN frühestes `created` gewinnt; exakter Gleichstand -> lexikografisch
-               kleinerer Hostname
+4. ENTSCHEIDEN ungültiges vorhandenes created bei aktivem Anspruch -> kein Gewinner;
+               sonst frühester gültiger Zeitpunkt, Gleichstand -> kleinerer Hostname
 5. VERLIERER   eigenen Lock entfernen (Exit-Code 3), Bereich freigeben
 ```
 
 Beide Seiten berechnen aus denselben Dateien dasselbe Ergebnis — kein Server,
-keine Datenbank, kein Echtzeitkanal. Das Warten **ist** der Mechanismus, keine
-Zierde: Ohne es liest das Nachlesen dieselbe unsynchronisierte Sicht wie zuvor.
+keine Datenbank, kein Echtzeitkanal. Ein vorhandener ungültiger Zeitstempel bei
+einem aktiven Anspruch sperrt die Gewinnerwahl; die diagnostische Datei-mtime zählt
+nicht als Anspruchszeitpunkt. Das Warten **ist** der Mechanismus, keine Zierde:
+Ohne es liest das Nachlesen dieselbe unsynchronisierte Sicht wie zuvor.
+
+**Zeitstempel:** Neue Schreiber geben Sekunden und UTC-`Z` aus
+(`%Y-%m-%dT%H:%M:%SZ`). Leser akzeptieren auch ISO-Offsets und normieren sie nach
+UTC. Naive Altwerte verwenden die historische lokale Wandzeit des lesenden Hosts;
+die ursprüngliche Zeitzone ist nicht rekonstruierbar. Mehrdeutige und bei der
+Zeitumstellung nicht existierende Wandzeiten bleiben aktiv und verhindern einen
+Contest-Gewinner.
 
 **Wann es läuft.** Nicht immer. Minuten Vorlauf sind für eine kurze Bearbeitung
 teuer und für einen Automationslauf, der danach stundenlang arbeitet, billig.

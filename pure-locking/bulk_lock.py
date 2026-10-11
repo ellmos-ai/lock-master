@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import json
 import socket
-from datetime import datetime
 from pathlib import Path
 
 import lock_utils
@@ -34,7 +33,7 @@ DEFAULT_MANIFEST = Path.home() / ".lock_watcher" / "bulk_lock_session.json"
 
 
 def _now_iso() -> str:
-    return datetime.now().strftime("%Y-%m-%dT%H:%M")
+    return lock_utils.created_utc_iso()
 
 
 def _lock_body(owner: str, created: str, host: str, reason: str) -> str:
@@ -76,7 +75,7 @@ def bulk_lock(roots, owner: str = "user", reason: str = "", host: str | None = N
 
     commit=False -> Dry-Run. Returns Statistik-Dict."""
     host = host or socket.gethostname()
-    created = created or _now_iso()
+    created = lock_utils.created_utc_iso(created or None)
     locked, skipped, would = [], [], []
 
     for root in roots:

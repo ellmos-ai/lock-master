@@ -21,7 +21,10 @@ File format (one setting per line, stdlib parser, no extra dependency):
   - Otherwise split on the FIRST ':'; trim key/value; key lowercased.
   Fields:
     owner             (required)  Who holds the lock.
-    created           (required)  ISO YYYY-MM-DDTHH:MM (base for expiry).
+    created           (required)  ISO-8601 timestamp with UTC offset; writers
+                                  use UTC Z (base for relative expiry). Legacy
+                                  naive values are local wall time and fail
+                                  closed when ambiguous or nonexistent.
     expires_after     (optional)  e.g. "24h" / "48h" / "90m". Default = 24h.
     release_condition (optional)  Free-text release condition.
     release_mode      (optional, only meaningful on an until lock that ALSO
@@ -54,7 +57,7 @@ import json
 import os
 import re
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Current lock files: LOCK.txt, LOCK.<scope>.txt, LOCK.team.<host>.txt,
@@ -458,31 +461,99 @@ def parse_duration(value: str | None) -> timedelta:
     return timedelta(**{unit: amount})
 
 
-def _parse_created(value: str | None) -> datetime | None:
-    """Parse ISO timestamp from 'created' field (T or space separator,
-    seconds optional)."""
-    if not value:
+def _local_wall_to_utc(value: datetime) -> datetime | None:
+    """Resolve naive local wall time only when it maps to one instant.
+
+    ``timestamp()`` uses the host's historical local timezone rules. Testing
+    both folds distinguishes a repeated DST hour from an ordinary hour; a
+    round trip distinguishes a nonexistent spring-forward hour. Either
+    ambiguity fails closed because the original writer timezone is unknown.
+    """
+    naive = value.replace(tzinfo=None, fold=0)
+    timestamps: list[float] = []
+    try:
+        for fold in (0, 1):
+            timestamp = naive.replace(fold=fold).timestamp()
+            round_trip = datetime.fromtimestamp(timestamp).replace(fold=0)
+            if round_trip != naive:
+                return None
+            timestamps.append(timestamp)
+    except (OSError, OverflowError, ValueError):
         return None
-    candidate = value.strip().replace("T", " ")
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(candidate, fmt)
-        except ValueError:
-            continue
-    return None
+    if not timestamps or timestamps[0] != timestamps[1]:
+        return None
+    try:
+        return datetime.fromtimestamp(timestamps[0], timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _as_utc(value: datetime) -> datetime | None:
+    """Convert an instant or an unambiguous local-naive value to UTC."""
+    try:
+        if value.tzinfo is None or value.utcoffset() is None:
+            return _local_wall_to_utc(value)
+        return value.astimezone(timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def format_utc_iso(value: datetime, *, timespec: str = "seconds") -> str:
+    """Format a timestamp as UTC ISO-8601 with an explicit ``Z`` suffix."""
+    utc_value = _as_utc(value)
+    if utc_value is None:
+        raise ValueError("timestamp is not an unambiguous instant")
+    return utc_value.isoformat(timespec=timespec).replace("+00:00", "Z")
+
+
+def created_utc_iso(value: str | datetime | None = None) -> str:
+    """Create a canonical UTC ``created`` value, rejecting invalid wall times."""
+    if value is None:
+        parsed = datetime.now(timezone.utc)
+    elif isinstance(value, datetime):
+        parsed = _as_utc(value)
+    else:
+        parsed = _parse_created(value)
+    if parsed is None:
+        raise ValueError("created timestamp is invalid, ambiguous, or nonexistent")
+    return format_utc_iso(parsed)
+
+
+def _parse_created(value: str | None) -> datetime | None:
+    """Parse ``created`` and return an aware UTC instant.
+
+    ISO offsets and ``Z`` are absolute. Historical naive values are interpreted
+    as local wall time using the reader host's timezone history; ambiguous,
+    nonexistent, and malformed values return ``None``.
+    """
+    if value is None or not value.strip():
+        return None
+    candidate = value.strip()
+    if candidate[-1:] in {"Z", "z"}:
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    return _as_utc(parsed)
 
 
 def lock_created_and_expiry(lock_path: Path,
                             data: dict[str, str] | None = None
                             ) -> tuple[datetime, timedelta, str]:
-    """Return (created, expires_after, source).
-    source = 'header' if created came from the file, else 'mtime' (fallback).
+    """Return (created_utc, expires_after, source).
+
+    source is ``header`` for a valid timestamp, ``mtime`` only when the field
+    is absent, or ``invalid`` when a present timestamp cannot be resolved. For
+    ``invalid``, the returned mtime is diagnostic only and never an expiry base.
 
     `data` lets a caller pass fields it has already parsed, so a decision can
     be made from ONE read of the file instead of several. Re-reading looks
     harmless and is not: between two reads the file can be replaced, and the
-    caller then judges a state that never existed."""
+    caller then judges a state that never existed.
+    """
     data = parse_lock_file(lock_path) if data is None else data
+    has_created = "created" in data
     created = _parse_created(data.get("created"))
     try:
         expires = parse_duration(data.get("expires_after"))
@@ -490,52 +561,34 @@ def lock_created_and_expiry(lock_path: Path,
         expires = timedelta(0)
     if created is not None:
         return created, expires, "header"
-    mtime = datetime.fromtimestamp(lock_path.stat().st_mtime)
-    return mtime, expires, "mtime"
-
+    mtime = datetime.fromtimestamp(lock_path.stat().st_mtime, timezone.utc)
+    return mtime, expires, "invalid" if has_created else "mtime"
 
 def is_expired(lock_path: Path, now: datetime | None = None,
                data: dict[str, str] | None = None) -> bool:
-    """Time-based expiry.
+    """Return whether a time-based lock has expired.
 
-    `data` = already-parsed fields, so the whole verdict can come from one
-    read of the file (see lock_created_and_expiry).
+    Offset-aware ``created`` values are compared as UTC instants. Historical
+    naive values mean local wall time on the reading host and are accepted only
+    when that wall time is unique under the host's historical DST rules. A
+    missing field retains the mtime fallback; a present invalid or ambiguous
+    field is visible and keeps the lock active (fail-closed).
 
-    Until locks expire at the ABSOLUTE moment in their 'not_before' field.
-    A missing or unparsable value is fail-closed: the lock never expires, so
-    a typo can only lock too long, never release too early. If the file ALSO
-    sets 'release_condition', 'release_mode' governs whether the deadline
-    alone is enough ('any') or both must hold ('all', default -- see the
-    field docs above and T-20260903-476807738).
-
-    User locks and condition locks NEVER expire by time: user locks hold
-    until the user removes them, condition locks hold until their
-    release_condition is fulfilled and the lock is removed. (Fix in v1.4.0:
-    previously a nominally expired user lock could drop out of active_locks()
-    even though the spec defines it as still valid.)
-
-    Ambiguous names (see is_ambiguous_lock) never expire either: a name that
-    reads as if two lock types were combined must not be resolved to the
-    weaker of its readings.
-
-    All other locks expire after the relative 'expires_after' duration
-    (default 24h) counted from 'created'. Numerical overflow in 'expires_after'
-    is fail-closed (immediately expired), never a silent 24h default."""
-    now = now or datetime.now()
+    Until locks still use their absolute ``not_before`` contract. User,
+    condition, and ambiguous-name locks remain non-expiring. Relative TTLs are
+    elapsed UTC durations. Overflow in a valid lock's ``expires_after`` makes
+    the claim expired, as before.
+    """
     if is_ambiguous_lock(lock_path.name):
         return False
+    now_utc = datetime.now(timezone.utc) if now is None else _as_utc(now)
     if is_until_lock(lock_path, data=data):
         moment = lock_not_before(lock_path, data)
-        if moment is None:
+        if moment is None or now_utc is None:
             return False
-        if now <= moment:
+        now_local = now_utc.astimezone().replace(tzinfo=None)
+        if now_local <= moment:
             return False
-        # Deadline reached. Without an additional release_condition field this
-        # stays a pure date check (backward-compatible). If a condition is ALSO
-        # set, release_mode decides (T-20260903-476807738): 'any' -> deadline
-        # alone is enough; 'all'/default/invalid -> the tool cannot verify the
-        # free-text condition, so it does not auto-release (fail-closed; the
-        # condition side stays a human/agent decision).
         fields = parse_lock_file(lock_path) if data is None else data
         if not fields.get("release_condition"):
             return True
@@ -543,7 +596,15 @@ def is_expired(lock_path: Path, now: datetime | None = None,
     if is_protected_lock(lock_path, data=data):
         return False
 
-    raw_exp = (data.get("expires_after") if data is not None else parse_lock_file(lock_path).get("expires_after"))
+    try:
+        created, expires, source = lock_created_and_expiry(lock_path, data)
+    except (OSError, ValueError):
+        return True
+    if source == "invalid" or now_utc is None:
+        return False
+
+    raw_exp = (data.get("expires_after") if data is not None
+               else parse_lock_file(lock_path).get("expires_after"))
     if raw_exp:
         m = _DURATION_RE.match(raw_exp)
         if m:
@@ -552,14 +613,12 @@ def is_expired(lock_path: Path, now: datetime | None = None,
                 unit = _DURATION_UNITS[m.group(2).lower()]
                 _ = timedelta(**{unit: amount})
             except (OverflowError, ValueError):
-                return True  # Overflow -> fail-closed (expired)
+                return True
 
     try:
-        created, expires, _ = lock_created_and_expiry(lock_path, data)
-        return now > created + expires
+        return now_utc > created + expires
     except (OverflowError, ValueError):
         return True
-
 
 def lock_host(lock_path: Path) -> str | None:
     """Machine/hostname from the 'host' field of the LOCK file.
@@ -850,12 +909,14 @@ def parse_team_lock_sections(raw_content: str) -> dict | None:
 
 
 def compute_expires_at(lock_path: Path) -> str | None:
-    """Absolute expiry time as an ISO string, or None if not determinable."""
+    """Absolute expiry as UTC ISO-8601, or None when it is not determinable."""
     if is_protected_lock(lock_path):
         return None
     try:
-        created, expires, _ = lock_created_and_expiry(lock_path)
-        return (created + expires).isoformat(timespec="seconds")
+        created, expires, source = lock_created_and_expiry(lock_path)
+        if source == "invalid":
+            return None
+        return format_utc_iso(created + expires)
     except (OSError, ValueError):
         return None
 

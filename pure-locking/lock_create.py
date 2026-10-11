@@ -23,10 +23,9 @@ import argparse
 import contested
 import platform
 import sys
-from datetime import datetime
 from pathlib import Path
 
-from lock_utils import is_lock_file, lock_fence, new_fence
+from lock_utils import created_utc_iso, is_lock_file, lock_fence, new_fence
 
 _SCOPE_OK = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
@@ -67,7 +66,7 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
         # Sekundengenau: Bei Minutengenauigkeit landen zwei fast gleichzeitige
         # Anspruechen im Host-Tiebreak, und dort verliert derselbe Host
         # strukturell immer. lock_utils._parse_created liest Sekunden bereits.
-        f"created: {datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}",
+        f"created: {created_utc_iso()}",
         f"host: {args.host}",
         # Fencing token: jede Vergabe bekommt eine Nummer, die nur steigen
         # kann. Der Halter merkt sie sich und prueft sie vor jedem Schreiben

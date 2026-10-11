@@ -24,6 +24,16 @@ def _write_team_lock(project: Path, host: str, scope: str | None = None,
     return path
 
 
+
+def _set_created_text(lock_path: Path, value: str) -> None:
+    lines = lock_path.read_text(encoding="utf-8").splitlines()
+    positions = [index for index, line in enumerate(lines) if line.startswith("created: ")]
+    if len(positions) != 1:
+        raise AssertionError(f"expected one created field, got {len(positions)}")
+    lines[positions[0]] = f"created: {value}"
+    lock_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 class CloudPressureCase(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -119,6 +129,32 @@ class ResolveContestCase(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_a_present_invalid_lone_own_claim_never_wins(self):
+        mine = _write_team_lock(self.project, "H1", created=self.now)
+        _set_created_text(mine, "not-an-iso-time")
+
+        result = contested.resolve_contest(self.project, mine, now=self.now)
+
+        self.assertFalse(result.won)
+        self.assertIsNone(result.winner)
+        self.assertIn("ungültiger created", result.reason)
+
+    def test_an_invalid_rival_blocks_every_contender(self):
+        mine = _write_team_lock(
+            self.project, "H1", created=self.now - timedelta(seconds=5)
+        )
+        rival = _write_team_lock(self.project, "H2", created=self.now)
+        _set_created_text(rival, "not-an-iso-time")
+
+        mine_result = contested.resolve_contest(self.project, mine, now=self.now)
+        rival_result = contested.resolve_contest(self.project, rival, now=self.now)
+
+        self.assertIn(rival, mine_result.competitors)
+        for result in (mine_result, rival_result):
+            self.assertFalse(result.won)
+            self.assertIsNone(result.winner)
+            self.assertIn("ungültiger created", result.reason)
 
     def test_a_lone_claim_wins(self):
         mine = _write_team_lock(self.project, "H1", created=self.now)
@@ -233,8 +269,8 @@ class ExclusiveCreateCase(unittest.TestCase):
         tiebreak, where the same host loses structurally every time."""
         self._run()
         created = lock_utils.parse_lock_file(self.project / "LOCK.txt")["created"]
-        self.assertRegex(created, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
-        self.assertIsNotNone(lock_utils._parse_created(created))
+        self.assertRegex(created, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        self.assertEqual(lock_utils._parse_created(created).utcoffset(), timedelta(0))
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ import os
 import platform
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import lock_utils
@@ -189,7 +189,8 @@ def _format_remaining(delta: timedelta) -> str:
 
 
 def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
-    now = now or datetime.now()
+    now = datetime.now(timezone.utc) if now is None else now
+    now_utc = lock_utils._as_utc(now)
     seen: set[Path] = set()
     out: list[dict] = []
     for d in iter_lock_dirs(config):
@@ -200,8 +201,6 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
             lock_path = d / name
             created, expires, source = lock_utils.lock_created_and_expiry(lock_path)
             data = lock_utils.parse_lock_file(lock_path)
-            # Absolute expiry: stable between scans, unlike `remaining`. The
-            # cache shows this one so it only changes when the lock set does.
             expires_at = ""
             if is_legacy:
                 remaining = "legacy"
@@ -215,26 +214,39 @@ def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
                 cond = data.get("release_condition", "?")
                 remaining = f"until condition met: {cond}"
             elif lock_utils.is_until_lock(lock_path, data=data):
-                moment = lock_utils.lock_not_before(lock_path)
+                moment = lock_utils.lock_not_before(lock_path, data=data)
                 if moment is None:
                     remaining = ("MISSING not_before -> holds indefinitely "
                                  "(fail-closed)")
-                elif now > moment:
-                    remaining = (f"deadline passed {moment.isoformat(timespec='minutes')}"
-                                 " - guard may stop; file stays for the user")
+                elif now_utc is None:
+                    remaining = "current time unavailable -> holds (fail-closed)"
                 else:
-                    remaining = (f"{_format_remaining(moment - now)} "
-                                 f"(until {moment.isoformat(timespec='minutes')})")
-                    expires_at = moment.isoformat(timespec="minutes")
+                    now_local = now_utc.astimezone().replace(tzinfo=None)
+                    if now_local > moment:
+                        remaining = (f"deadline passed {moment.isoformat(timespec='minutes')}"
+                                     " - guard may stop; file stays for the user")
+                    else:
+                        remaining = (f"{_format_remaining(moment - now_local)} "
+                                     f"(until {moment.isoformat(timespec='minutes')})")
+                        expires_at = moment.isoformat(timespec="minutes")
+            elif source == "invalid":
+                remaining = "invalid created timestamp -> active (fail-closed)"
+            elif now_utc is None:
+                remaining = "current time unavailable -> active (fail-closed)"
             else:
-                remaining = _format_remaining((created + expires) - now)
-                expires_at = (created + expires).isoformat(timespec="minutes")
+                expiry = created + expires
+                remaining = _format_remaining(expiry - now_utc)
+                expires_at = lock_utils.format_utc_iso(expiry, timespec="minutes")
+            created_display = (
+                None if source == "invalid"
+                else lock_utils.format_utc_iso(created, timespec="minutes")
+            )
             out.append({
                 "path": str(lock_path),
                 "scope": scope,
                 "legacy": is_legacy,
                 "owner": data.get("owner", ""),
-                "created": created.isoformat(timespec="minutes"),
+                "created": created_display,
                 "created_source": source,
                 "expires_after": str(expires),
                 "operations": data.get("operations", ""),
@@ -408,7 +420,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         else:
             print(msg, file=sys.stderr)
         return 2
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     hits = lock_utils.active_locks_for_path(target, now)
 
     # Two-trees rule: the twin in the other tree counts as well
@@ -572,7 +584,7 @@ def main() -> int:
                           Path(args.roots_file))
 
     config = load_config(Path(args.roots_file))
-    scanned_at = datetime.now()
+    scanned_at = datetime.now(timezone.utc)
     locks = collect_locks(config, scanned_at)
 
     if args.write_cache:

@@ -16,7 +16,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -186,6 +186,52 @@ def test_storage_does_not_expire_protected_rows(tmp_path: Path):
         assert {row["lock_type"] for row in db.get_active_locks()} == {
             "user",
             "condition",
+        }
+    finally:
+        db.close()
+
+
+def test_storage_normalizes_expiry_offsets_and_keeps_invalid_active(tmp_path: Path):
+    db = storage.LockDB(tmp_path / "expiry.db")
+    now_utc = datetime.now(timezone.utc)
+    offset = timezone(timedelta(hours=5, minutes=30))
+    past_offset = (now_utc - timedelta(minutes=10)).astimezone(offset)
+    cases = {
+        "LOCK.future-z.txt": (now_utc + timedelta(hours=1)).isoformat(
+            timespec="seconds"
+        ).replace("+00:00", "Z"),
+        "LOCK.past-offset.txt": past_offset.isoformat(timespec="seconds"),
+        "LOCK.legacy-naive.txt": (
+            datetime.now()
+            .replace(hour=12, minute=0, second=0, microsecond=0)
+            - timedelta(days=2)
+        ).isoformat(timespec="seconds"),
+        "LOCK.invalid.txt": "not-a-timestamp",
+    }
+    try:
+        for filename, expires_at in cases.items():
+            db.upsert_lock(
+                {
+                    "path": str(tmp_path / filename),
+                    "filename": filename,
+                    "project_dir": str(tmp_path),
+                    "scope": "project",
+                    "lock_type": "exclusive",
+                    "status": "active",
+                    "expires_at": expires_at,
+                }
+            )
+
+        assert db.refresh_expired_locks() == 2
+        statuses = {
+            filename: db.get_lock_by_path(str(tmp_path / filename))["status"]
+            for filename in cases
+        }
+        assert statuses == {
+            "LOCK.future-z.txt": "active",
+            "LOCK.past-offset.txt": "expired",
+            "LOCK.legacy-naive.txt": "expired",
+            "LOCK.invalid.txt": "active",
         }
     finally:
         db.close()
