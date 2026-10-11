@@ -545,7 +545,7 @@ For the complete Level 1 Software Bill of Materials (SBOM), audited dependency m
 |:---|:---|:---|
 | [ticket-master](https://github.com/ellmos-ai/ticket-master) | ellmos-ai | Autonomous ticket routing and task dispatching triage console |
 | [clutch](https://github.com/ellmos-ai/clutch) | ellmos-ai | Adaptive multi-model LLM router & agent execution gear |
-| [coma](https://github.com/ellmos-ai/coma) | ellmos-ai | Single-binary multi-agent orchestrator & execution coordinator |
+| [coma](https://github.com/ellmos-ai/coma) | ellmos-ai | Manages local job files and starts agent processes or records their status through a file protocol; it does not limit those processes' network access or operating system rights |
 | [swarm-ai](https://github.com/ellmos-ai/swarm-ai) | ellmos-ai | Swarm intelligence and autonomous agent consensus engine |
 | [gardener](https://github.com/ellmos-ai/gardener) | ellmos-ai | Local-first autonomous session and context memory engine |
 | [system-gap-master](https://github.com/ellmos-ai/system-gap-master) | ellmos-ai | Serverless multi-agent workspace synchronization & reconciliation |
