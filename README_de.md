@@ -544,6 +544,7 @@ Das vollständige Level 1 Software Bill of Materials (SBOM), das Lizenz-Audit, d
 | Geschwisterwerkzeug | Organisation | Rolle & Leistungsumfang |
 |:---|:---|:---|
 | [ticket-master](https://github.com/ellmos-ai/ticket-master) | ellmos-ai | Autonome Ticket-Routing- und Task-Dispatching-Konsole |
+| [agent-ops-stack](https://github.com/ellmos-ai/agent-ops-stack) | ellmos-ai | Lädt dieses Repository anhand seines Manifests und meldet die deklarierte Rolle `locking`; für die Einrichtung gelten die Anweisungen dieses Projekts. |
 | [clutch](https://github.com/ellmos-ai/clutch) | ellmos-ai | Adaptiver Multi-Modell LLM Router & Ausführungsschaltung |
 | [coma](https://github.com/ellmos-ai/coma) | ellmos-ai | Verwaltet lokale Jobdateien und startet Agentenprozesse beziehungsweise erfasst deren Status über ein Dateiprotokoll; begrenzt weder Netzwerkzugriffe noch Betriebssystemrechte der gestarteten Prozesse |
 | [swarm-ai](https://github.com/ellmos-ai/swarm-ai) | ellmos-ai | Schwarmintelligenz und autonomer Agenten-Konsens |
