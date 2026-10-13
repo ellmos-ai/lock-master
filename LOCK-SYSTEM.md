@@ -85,18 +85,18 @@ Watcher scan model:
 
 ---
 
-## Scope via Filename (FILENAME IS AUTHORITATIVE)
+## Scope via Filename and Explicit Protected Paths
 
 - `LOCK.txt` -- entire project locked (scope = `project`).
-- `LOCK.<scope>.txt` -- only that component locked; free scope name
-  (sub-area / sub-folder), e.g. `LOCK.frontend.txt`, `LOCK.api.txt`,
-  `LOCK.mobile.txt`.
+- `LOCK.<scope>.txt` -- names a component; the free-form name does **not**
+  prove a filesystem path. New scoped locks declare actual protected paths
+  using `--path` and the versioned fields below. Existing locks without those
+  fields conservatively block the whole containing directory.
 - `LOCK.team.<host>.txt` -- Team Lock for the whole project (see below).
 - `LOCK.team.<scope>.<host>.txt` -- Team Lock for a specific component (see below).
 - `LOCK.user.txt` / `LOCK.user.<scope>.txt` -- User Lock (see below): user-owned
   full lock, removed ONLY by the user.
-- Multiple agents can work in parallel on different components of the same
-  project using different scoped locks.
+- Multiple agents can work in parallel on disjoint explicitly declared paths.
 - Detection regex: `^LOCK(\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*)?\.txt$`
 - Legacy `TEST.txt` / `TESTS.txt` -- deprecated, do not create new ones
   These legacy basenames require the exact spelling, including case, on every host. Ordinary `test.txt` / `tests.txt` documents are not locks. Modern `LOCK*.txt` names remain case-insensitive.
@@ -120,6 +120,8 @@ are ignored.
 | `mode`             | optional | `hard` (no changes, default) \| `soft` (reads/hints ok). |
 | `purpose`          | optional | Free text: why locked / what is running. |
 | `scope`            | optional | Informational only; the filename is authoritative. |
+| `paths_version`    | optional | `1` enables explicit path-aware checks for ordinary locks. Unknown or missing versions keep the conservative whole-directory effect. |
+| `protected_paths`  | optional | `|`-separated paths without surrounding whitespace, relative to the lock file's directory. Requires `paths_version: 1`; absent, empty, invalid, or escaping paths keep the conservative whole-directory effect. |
 | `fence`            | optional | **Grant number** (epoch microseconds), written by `lock_create.py` for cooperative detection. The holder records it at acquisition and re-checks it before every write — see "Fencing Tokens". Absent = a lock from before fencing, handled exactly as before. |
 
 For relative-expiry locks that use `created` as their base, an absent field
@@ -131,6 +133,29 @@ Naive legacy values are interpreted as historical local wall time on the reading
 host. The original writer's time zone cannot be recovered, so cross-host readings
 can differ. Explicit offsets are normalized to UTC, and relative expiry durations
 use elapsed UTC time.
+
+Create a scoped lock for the **actual write areas**:
+
+```sh
+python lock_create.py <project> --scope starter --path bin --path prompts --owner agent-A
+python lock_scan.py --check-dir <project>/bin       # locked
+python lock_scan.py --check-dir <project>/installer # free if no other lock applies
+```
+
+`--scope` requires at least one `--path` for ordinary newly created locks.
+Absolute paths, `..`, symlink escapes, drive paths and malformed separators are
+rejected. Path-segment boundary whitespace is rejected because the format
+parser otherwise changes the name. Paths use `/` in the file; Windows input
+`\\` is normalized. A query
+of the project root overlaps every protected subpath and remains locked.
+Subdirectory queries inspect ancestor locks and map the same relative path to
+the main clone of a worktree and the registered mirror twin. Existing locks
+without valid explicit metadata remain broad; user, condition and until locks
+also keep their protected conservative effect regardless of path metadata.
+Root queries also inspect nested locks. That scan has a fixed work bound; when
+the bound is reached or a linked directory cannot be checked, the result is
+undetermined (exit 1), never a false "free".
+Use the current scanner on every host before relying on a free subpath result.
 
 ---
 
@@ -148,7 +173,7 @@ This failure mode is silent: both agents report success, and cloud synchronizati
 **Cooperative detection via fence tokens:** Each grant receives a monotonic epoch microsecond integer in the `fence:` field. The holder notes this number and validates it **before every destructive write or push operation**. A differing fence number signals that the lease has moved on — the agent must abort instead of writing blindly.
 
 ```bash
-python lock_create.py <project> --scope docs --owner agent-A
+python lock_create.py <project> --scope docs --path docs --owner agent-A
 # output: created LOCK.docs.txt with fence: 1789902599751740
 ```
 
@@ -454,7 +479,7 @@ field (epoch microseconds, stepped upward on takeover). The holder records it an
 means the lease moved on: refuse the write instead of quietly continuing.
 
 ```
-python lock_create.py <project> --scope docs --owner agent-A
+python lock_create.py <project> --scope docs --path docs --owner agent-A
   created: ...\LOCK.docs.txt
   fence: 1789902599751740
 ```
@@ -601,7 +626,7 @@ but a guard hook present" as its own outcome (exit 2).
    `lock_create.py`**:
 
    ```
-   python <deploy>/lock_create.py <project dir> --scope <area> --owner <agent> \
+   python <deploy>/lock_create.py <project dir> --scope <area> --path <actual-area> --owner <agent> \
        --purpose "<why>"
    ```
 
@@ -727,12 +752,28 @@ python lock_scan.py --check-dir /path/to/project
 python lock_scan.py --check-dir /path/to/project --json
 python lock_scan.py --check-dir /path/to/project --strict
 ```
-Exit 0 = free, 1 = a LOCK file applies, 2 = usage error -- PATH does not
+Exit 0 = free, 1 = a LOCK file applies or the check is undetermined, 2 = usage error -- PATH does not
 exist (Path.resolve() normalizes a nonexistent path without raising, so
 without this check a mistyped or stale PATH silently read as "free";
 T-20260922-626871087), or -- only with `--strict` -- free of LOCK files but
 a guard hook is present (without `--strict`, guard hooks are reported but
 never change the exit code).
+
+The scanner checks every lexical component of PATH before resolving it. A
+symlink, Windows junction, or other directory name surrogate at or below a
+validated scan, clone, Git, or pointer root can hide a lock or change the
+relative path used for mirror twins. It returns exit 1 with JSON
+`error: target-redirect`, the original `checked` path, and
+`descendants_complete: false`. A prefix alias above a validated root is
+accepted only above every relevant validated root and when its physical
+parent remains an ancestor of the physical target. A narrower scan root cannot
+override an enclosing Git, clone, or pointer root; unrelated roots do not
+count. Without a validated root the result is undetermined. An unreadable
+component also returns exit 1.
+PATH containing `..` returns exit 1 because normalization could erase a
+redirected component. A genuinely missing target still returns usage exit 2.
+Ordinary OneDrive cloud placeholders without a name-surrogate tag remain
+normal directory components.
 
 **Remove expired locks:**
 ```

@@ -32,6 +32,8 @@ import json
 import os
 import platform
 import re
+import stat
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -43,6 +45,133 @@ DEFAULT_ROOTS_FILE = Path(__file__).resolve().parent / "lock_roots.json"
 # An unchanged cache is rewritten at least this often, so its "As of:" line
 # stays a usable freshness signal for readers (sync_mirror accepts 180 min).
 CACHE_REFRESH_SECONDS = 30 * 60
+CHECK_DIR_MAX_DESCENDANTS = 1024
+
+
+def _is_directory_redirect(path: Path) -> bool:
+    """Detect directory links without treating OneDrive cloud placeholders as links.
+
+    Python 3.10/3.11 lack Path.is_junction(). Windows reparse *name
+    surrogates* redirect path lookup; ordinary cloud tags do not. An unreadable
+    or unclassified reparse tag cannot prove that a subtree is complete.
+    """
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    attributes = getattr(info, "st_file_attributes", 0)
+    if not attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+        return False
+    tag = getattr(info, "st_reparse_tag", None)
+    return tag is None or bool(tag & 0x20000000)  # IO_REPARSE_TAG_NAME_SURROGATE
+
+
+def _query_redirect_or_error(target: Path, config: dict) -> str | None:
+    """Reject redirects that remove a lexical ancestor from the physical path.
+
+    A prefix alias is safe only above every enclosing configured scan/clone
+    root and validated Git/pointer root. A narrow scan root cannot override a
+    wider project boundary: redirects inside that project can change the
+    relative path used for twin locks, even inside one repository.
+    """
+    if ".." in target.parts:
+        return "target-parent-segment"
+    lexical = target if target.is_absolute() else Path.cwd() / target
+    try:
+        resolved = lexical.resolve()
+        physical_ancestors = {resolved, *resolved.parents}
+    except (OSError, RuntimeError):
+        return "target-unreadable"
+    redirects = []
+    for component in reversed((lexical, *lexical.parents)):
+        try:
+            if _is_directory_redirect(component):
+                redirects.append(component)
+        except FileNotFoundError:
+            continue  # _check_dir reports a nonexistent target below
+        except (OSError, RuntimeError):
+            return "target-unreadable"
+    if not redirects:
+        return None
+
+    boundaries = []
+    twin_cfg = config.get("twin_resolution") or {}
+    configured = [entry.get("path") for entry in config.get("roots", [])]
+    configured += twin_cfg.get("clone_roots", [])
+    for raw in configured:
+        if not raw:
+            continue
+        root = Path(os.path.expandvars(str(raw)))
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        if (root == lexical or root in lexical.parents) and root.is_dir():
+            boundaries.append(root)
+    for ancestor in (lexical, *lexical.parents):
+        if (ancestor / lock_utils.REPO_POINTER_NAME).is_file():
+            if lock_utils.read_repo_pointer(ancestor) is not None:
+                boundaries.append(ancestor)
+        if (ancestor / ".git").exists():
+            try:
+                top = subprocess.run(
+                    ["git", "-C", str(ancestor), "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+                if top.returncode == 0 and Path(top.stdout.strip()).resolve() == ancestor.resolve():
+                    boundaries.append(ancestor)
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                return "target-unreadable"
+    try:
+        for component in redirects:
+            if component.parent.resolve() not in physical_ancestors:
+                return "target-redirect"
+            if not boundaries or not all(
+                component in root.parents and root.resolve() in physical_ancestors
+                for root in boundaries
+            ):
+                return "target-redirect"
+    except (OSError, RuntimeError):
+        return "target-unreadable"
+    return None
+
+
+def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
+    """Find nested locks for a subtree query, with a fail-closed work bound.
+
+    The normal ancestor lookup is fast, but asking about a project root must
+    also see a LOCK under tests/ or src/. On a huge tree the bounded walk may
+    stop early; callers must report that as undetermined, never free.
+    """
+    hits = []
+    if limit is None:
+        limit = CHECK_DIR_MAX_DESCENDANTS
+    pending = [target]
+    visited = 0
+    while pending:
+        current = pending.pop()
+        try:
+            if _is_directory_redirect(current):
+                return hits, False
+            entries = list(current.iterdir())
+            children = []
+            for entry in entries:
+                if entry.name == ".git":
+                    continue
+                if _is_directory_redirect(entry):
+                    return hits, False
+                if entry.is_dir():
+                    children.append(entry)
+        except OSError:
+            return hits, False
+        for child in children:
+            visited += 1
+            if visited > limit:
+                return hits, False
+            try:
+                hits.extend(lock_utils.active_locks_affecting_target(child, target, now))
+            except OSError:
+                return hits, False
+            pending.append(child)
+    return hits, True
 
 
 def host_name() -> str:
@@ -411,6 +540,17 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     raising, so without this check a mistyped --check-dir call silently
     reported exit 0 "free" -- worse than any other failure mode, since it
     looks identical to a genuinely clear directory (T-20260922-626871087)."""
+    config = load_config(roots_file or DEFAULT_ROOTS_FILE)
+    query_error = _query_redirect_or_error(target, config)
+    if query_error is not None:
+        if as_json:
+            print(json.dumps({"checked": str(target), "error": query_error,
+                              "locks": [], "descendants_complete": False},
+                             ensure_ascii=False))
+        else:
+            print(f"lock_scan --check-dir: {target} -- UNDETERMINED ({query_error}); "
+                  "a query-path redirect can hide lexical ancestor locks.")
+        return 1
     target = target.resolve()
     if not target.is_dir():
         msg = f"lock_scan --check-dir: {target} does not exist -- not 'free', a usage error."
@@ -422,26 +562,64 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         return 2
     now = datetime.now(timezone.utc)
     hits = lock_utils.active_locks_for_path(target, now)
+    nested_hits, descendants_complete = _descendant_locks(target, now)
+    hits.extend(nested_hits)
 
     # Two-trees rule: the twin in the other tree counts as well
     # (T-20260913-785936980). A freshly cloned repo cannot contain the
     # deliberately unversioned LOCK.user.* -- without this step one reads a
     # state out of an empty spot.
-    twin_cfg = (load_config(roots_file or DEFAULT_ROOTS_FILE) or {}).get("twin_resolution")
+    twin_cfg = config.get("twin_resolution")
+    # A worktree is not registered as a separate clone in the twin index.
+    # Resolve its main clone first; likewise walk up from mirror subfolders to
+    # the pointer. Keep the same relative path on the opposite tree.
     twins, twin_status = lock_utils.twin_dirs_for_path(target, twin_cfg)
-    for twin in twins:
-        hits.extend(
-            (name, scope, legacy, twin)
-            for name, scope, legacy in lock_utils.active_locks(twin, now)
-        )
+    # twin_dirs_for_path returns all registered twins, and for a subpath also
+    # its mapped child in EACH twin. Keep every terminal mapped path, not only
+    # the last one: a lock in mirror A must not disappear because B is listed.
+    mapped_twins = [t for t in twins if not any(t in other.parents for other in twins)]
+    if not twins and twin_status not in ("index-missing", "pointer-unreadable"):
+        anchor = lock_utils.worktree_main_dir(target)
+        if anchor is None:
+            anchor = next((p for p in (target, *target.parents)
+                           if (p / lock_utils.REPO_POINTER_NAME).is_file()), None)
+        if anchor is not None and anchor != target:
+            twins, twin_status = lock_utils.twin_dirs_for_path(anchor, twin_cfg)
+            if twins:
+                try:
+                    if lock_utils.worktree_main_dir(target) is not None:
+                        top = subprocess.run(
+                            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+                            capture_output=True, text=True, timeout=10,
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                        )
+                        relative = target.relative_to(Path(top.stdout.strip()).resolve())
+                    else:
+                        relative = target.relative_to(anchor)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    relative = Path(".")  # root query is conservative on uncertainty
+                mapped_twins = [t / relative for t in twins]
+    twin_hits = []
+    for mapped in mapped_twins:
+        twin_hits.extend(lock_utils.active_locks_for_path(mapped, now))
+        if mapped.is_dir():
+            twin_nested, twin_complete = _descendant_locks(mapped, now)
+            twin_hits.extend(twin_nested)
+            descendants_complete = descendants_complete and twin_complete
+    hits.extend(twin_hits)
+
+    main_root = lock_utils.worktree_main_dir(target)
 
     rows = [
         {
             "path": str(source_dir / name),
             "scope": scope,
             "legacy": is_legacy,
-            "from_main_repo_of_worktree": source_dir != target,
-            "from_twin": source_dir in twins,
+            "from_main_repo_of_worktree": bool(
+                main_root is not None
+                and (source_dir == main_root or source_dir in main_root.parents)
+                and source_dir != target and source_dir not in target.parents),
+            "from_twin": (name, scope, is_legacy, source_dir) in twin_hits,
         }
         for name, scope, is_legacy, source_dir in hits
     ]
@@ -451,17 +629,20 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         print(json.dumps(
             {"checked": str(target), "locks": rows, "hook_guards": guards,
              "twin_status": twin_status,
+             "descendants_complete": descendants_complete,
              "twins_checked": [str(t) for t in twins]},
             ensure_ascii=False, indent=2,
         ))
         if rows:
             return 1
-        if twin_status in ("index-missing", "pointer-unreadable"):
+        if twin_status in ("index-missing", "pointer-unreadable") or not descendants_complete:
             return 1
         return 2 if (strict and guards) else 0
 
     if not rows:
-        if twin_status == "pointer-unreadable":
+        if not descendants_complete:
+            print(f"lock_scan --check-dir: {target} -- UNDETERMINED, nested lock scan incomplete (limit, unreadable directory or link).")
+        elif twin_status == "pointer-unreadable":
             print(
                 f"lock_scan --check-dir: {target} -- UNDETERMINED, not 'free'. "
                 f"The mirror twin carries a {lock_utils.REPO_POINTER_NAME} that "
@@ -508,7 +689,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
 
     if rows:
         return 1
-    if twin_status in ("index-missing", "pointer-unreadable"):
+    if twin_status in ("index-missing", "pointer-unreadable") or not descendants_complete:
         return 1
     return 2 if (strict and guards) else 0
 

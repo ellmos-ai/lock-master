@@ -164,7 +164,7 @@ sequenceDiagram
     LM->>FS: Nach aktiven LOCK*.txt suchen
     FS-->>LM: Workspace frei (0 Sperren)
     LM-->>AgentA: Zugriff gewährt (unlocked)
-    AgentA->>LM: Scoped-Lock stempeln: lock_create.py --scope api
+    AgentA->>LM: Scoped-Lock stempeln: lock_create.py --scope api --path api
     LM->>FS: LOCK.api.txt atomar schreiben (TTL: 24h)
     FS-->>AgentA: Sperre bestätigt
 
@@ -172,7 +172,7 @@ sequenceDiagram
     AgentB->>LM: Versuch API-Modul zu ändern: lock_utils.active_locks()
     LM->>FS: LOCK.api.txt lesen (Aktiv, Inhaber: Claude Code)
     LM-->>AgentB: Zugriff verweigert (Konflikt: Scope api gesperrt)
-    AgentB->>LM: Auf Docs-Modul ausweichen: lock_create.py --scope docs
+    AgentB->>LM: Auf Docs-Modul ausweichen: lock_create.py --scope docs --path docs
     LM->>FS: LOCK.docs.txt atomar schreiben
     FS-->>AgentB: Zugriff gewährt (Paralleles Arbeiten)
 
@@ -314,7 +314,7 @@ operations: git-push, deploy
 | Typischer Bedarf | Empfohlene Aktion | Befehl / Verwendung |
 |:---|:---|:---|
 | Gleichzeitiges Bearbeiten eines Repos durch zwei Agenten verhindern | Exklusive Root-Sperre setzen | `python lock_create.py <projekt>` |
-| Paralleles Arbeiten an getrennten Modulen ermöglichen | Scoped-Sperre setzen | `python lock_create.py <projekt> --scope api` |
+| Paralleles Arbeiten an getrennten Modulen ermöglichen | Scoped-Sperre setzen | `python lock_create.py <projekt> --scope api --path api` |
 | Aktive Sperren über alle Projektbäume hinweg prüfen | Read-Only Scanner ausführen | `python lock_scan.py` |
 | Schnellen, menschenlesbaren Markdown-Status exportieren | Cache generieren | `python lock_scan.py --write-cache` |
 | Verwaiste Sperren sicher einsehen | Stale-Locks previewen | `python prune_stale_locks.py --dry-run` |
@@ -353,7 +353,7 @@ echo $?  # 0 = frei für Bearbeitung; 1 = gesperrt
 python lock_create.py /pfad/zum/projekt --owner "claude-code" --purpose "Parser Refactoring"
 
 # Scoped-Sperre für eine Teilkomponente
-python lock_create.py /pfad/zum/projekt --scope frontend --owner "codex" --purpose "UI Redesign"
+python lock_create.py /pfad/zum/projekt --scope frontend --path frontend --owner "codex" --purpose "UI Redesign"
 ```
 
 ### 4. Workspace-Hierarchie scannen

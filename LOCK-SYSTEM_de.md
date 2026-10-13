@@ -111,14 +111,45 @@ Die lokale GUI ist die Arbeitsfassung. Die nutzerneutrale, portable Variante wir
 
 ---
 
-## Scope über Dateiname (AUTORITATIV ist der Dateiname)
+## Scope über Dateiname und explizite geschützte Pfade
 
 ### Exclusive Locks (klassisch — sperren alle Systeme/Agenten)
 
 - `LOCK.txt` = ganzes Projekt gesperrt (scope = `project`).
-- `LOCK.<scope>.txt` = nur diese Komponente gesperrt; freier Scope-Name (Unterbereich/Unterordner), z. B. `LOCK.software.txt`, `LOCK.web.txt`, `LOCK.dev.txt`, `LOCK.desktop.txt`, `LOCK.mobile.txt`, `LOCK.flutter_port.txt`.
-- So können z. B. Desktop- und Mobile-Loops dasselbe Projekt parallel an verschiedenen Komponenten bearbeiten.
+- `LOCK.<scope>.txt` benennt eine Komponente. Der frei gewählte Name belegt **keinen Dateipfad**. Neue Bereichs-Locks deklarieren ihre tatsächlichen Schreibbereiche mit `--path` und den versionierten Feldern unten. Bestehende Locks ohne diese Felder sperren konservativ den gesamten enthaltenden Ordner.
+- Explizit getrennte Pfade erlauben parallele Arbeit an verschiedenen Komponenten.
 - Kein Systemname im Dateinamen nötig — der Lock blockiert alle. Das `host:`-Feld im Inhalt sagt informativ, wer sperrt.
+
+### Tatsächliche Arbeitsbereiche deklarieren
+
+Für neue gewöhnliche Bereichs-Locks verlangt `lock_create.py` mindestens ein
+`--path`. Jeder Pfad ist relativ zu dem Ordner, in dem die Lockdatei liegt.
+Mehrere Pfade sind möglich:
+
+```powershell
+python lock_create.py <projekt> --scope starter --path bin --path prompts --owner agent-A
+python lock_scan.py --check-dir <projekt>/bin       # gesperrt
+python lock_scan.py --check-dir <projekt>/installer # frei, sofern kein anderer Lock greift
+```
+
+Die Lockdatei enthält `paths_version: 1` und zum Beispiel
+`protected_paths: bin|prompts`. Absolute Pfade, `..`, Laufwerkspfade und
+Symlink-Ausbrüche sind unzulässig. Windows-Backslashes in der Eingabe werden
+zu `/` normalisiert. Leerzeichen am Rand eines Pfadsegments sind unzulässig,
+weil der Feldparser den Dateinamen sonst verändert. Ein Check des Projektroots überlappt jeden geschützten
+Teilpfad und meldet daher eine Sperre. Unterordnerchecks prüfen Vorfahren und
+denselben relativen Pfad im Hauptklon eines Worktrees sowie im registrierten
+OneDrive-Zwilling.
+Eine Rootabfrage prüft auch Locks in Unterordnern. Die Suche hat ein festes
+Verzeichnislimit; bei Limitüberschreitung oder nicht sicher prüfbarem
+Verzeichnislink meldet sie „unbestimmt“ (Exit 1), niemals fälschlich „frei“.
+
+Fehlende, leere, ungültige oder unbekannt versionierte Pfadfelder lassen
+bestehende Locks konservativ auf den ganzen enthaltenden Ordner wirken.
+User-, Condition- und Until-Locks behalten auch bei eingetragenen Pfadfeldern
+ihre bisherige konservative Schutzwirkung. Ein alter Scanner versteht diese
+Teilpfadbindung noch nicht; ein „frei“ für Teilpfade ist erst nach Umstellung
+des verwendeten Scanners auf diese Version belastbar.
 
 ### Team Locks (koordinieren Agenten eines Systems; blockieren andere Systeme)
 
@@ -380,7 +411,7 @@ abweichende Nummer heißt: das Lease ist weitergegangen — Schreibvorgang ableh
 heimlich fortsetzen.
 
 ```
-python lock_create.py <projekt> --scope docs --owner agent-A
+python lock_create.py <projekt> --scope docs --path docs --owner agent-A
   created: ...\LOCK.docs.txt
   fence: 1789902599751740
   hint: merke dir die Nummer und prüfe sie vor jedem Schreiben --
@@ -538,6 +569,23 @@ Segment `.TOPICS`) meldete Exit 0, obwohl der echte Ordner ein aktives
 Zwillingsauflösung oben funktionierte bereits korrekt; der fehlende Pfad
 wurde nur nie als Fehler erkannt.
 
+Vor dem Auflösen prüft der Scanner jede lexikalische Komponente von PATH.
+Ein Symlink, eine Windows-Junction oder eine andere Verzeichnisweiterleitung
+ab einer validierten Scan-, Klon-, Git- oder Pointer-Wurzel kann Vorfahren-Locks
+oder den relativen Pfad zum Spiegelzwilling verdecken. Dann gilt Exit 1 mit
+`error: target-redirect`, dem Originalpfad in `checked` und
+`descendants_complete: false`. Ein Präfix-Alias oberhalb der validierten Wurzel
+ist nur zulässig, wenn er oberhalb jeder einschlägigen belegten Wurzel liegt
+und sein physischer Elternpfad Vorfahr des physischen Ziels bleibt. Eine engere
+Scan-Wurzel darf eine umfassende Git-, Klon- oder Pointer-Wurzel nicht aufheben;
+unabhängige Wurzeln zählen nicht. Ohne belegte Wurzel bleibt die Abfrage
+unbestimmt. Eine unlesbare
+Komponente führt ebenfalls zu Exit 1. Enthält PATH `..`, gilt Exit 1, weil die
+Normalisierung eine
+Weiterleitung aus dem Pfad entfernen könnte. Ein tatsächlich fehlendes Ziel
+behält den bisherigen Eingabefehler Exit 2. Gewöhnliche OneDrive-Cloud-Platzhalter
+ohne Name-Surrogate-Tag bleiben regulär prüfbare Verzeichnisse.
+
 ---
 
 ## Umstrittene Locks: gleichzeitige Claims über einen synchronisierten Ordner
@@ -659,7 +707,7 @@ Neue Pipelines dürfen das Muster übernehmen, wenn Teamarbeit mehr braucht als 
 
    ```
    PYTHONIOENCODING=utf-8 python "<OneDrive>/_scripts/lock_create.py" <projektordner> \
-       --scope <bereich> --owner <agent> --purpose "<warum>"
+       --scope <bereich> --path <tatsächlicher-bereich> --owner <agent> --purpose "<warum>"
    ```
 
    Das Werkzeug legt die Datei **exklusiv** an (`open("x")`, siehe Stufe 1 unter

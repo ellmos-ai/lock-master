@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _acquire(folder: Path, owner: str, expires: str = "24h", scope: str = "work") -> int:
     """Acquire through the real CLI path and return the granted fence."""
     rc = lock_create.main([
-        str(folder), "--scope", scope, "--owner", owner,
+        str(folder), "--scope", scope, "--path", scope, "--owner", owner,
         "--expires", expires, "--no-contest",
     ])
     assert rc == 0, f"acquisition failed with exit {rc}"
@@ -171,7 +171,7 @@ def test_force_overwrite_counts_as_a_new_grant(tmp_path):
     """--force replaces the holder, so the old holder must fall out."""
     lock = tmp_path / "LOCK.work.txt"
     fence_a = _acquire(tmp_path, "agent-A")
-    lock_create.main([str(tmp_path), "--scope", "work", "--owner", "agent-B",
+    lock_create.main([str(tmp_path), "--scope", "work", "--path", "work", "--owner", "agent-B",
                       "--no-contest", "--force"])
     fence_b = lock_utils.lock_fence(lock)
     assert fence_b > fence_a
