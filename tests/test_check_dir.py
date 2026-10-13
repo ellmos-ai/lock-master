@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -236,7 +237,22 @@ class TestCheckDir:
 
 
 class TestExplicitProtectedPaths:
-    def test_declared_root_after_prefix_alias_preserves_lock_checks(self, tmp_path, capsys):
+    def test_declared_root_after_prefix_alias_preserves_lock_checks(self, capsys):
+        # pytest.ini keeps CI's tmp_path inside this Git repository. A prefix
+        # link there is project-internal and must be rejected. Model a genuine
+        # system-level prefix alias outside the repository instead.
+        checkout_parent = Path(__file__).resolve().parents[1].parent
+        probe = subprocess.run(["git", "-C", str(checkout_parent),
+                                "rev-parse", "--show-toplevel"],
+                               capture_output=True, text=True, timeout=10)
+        assert probe.returncode != 0, "prefix fixture must be outside a Git project"
+        with tempfile.TemporaryDirectory(prefix="lock-master-prefix-",
+                                         dir=checkout_parent) as td:
+            self._check_external_prefix_alias(Path(td), capsys)
+
+    @staticmethod
+    def _check_external_prefix_alias(tmp_path, capsys):
+        assert not tmp_path.resolve().is_relative_to(Path(__file__).resolve().parents[1])
         real = tmp_path / "physical"
         repo = real / "repos" / "demo"
         (repo / "tests").mkdir(parents=True)
