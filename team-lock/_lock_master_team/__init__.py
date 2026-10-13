@@ -264,8 +264,13 @@ def _guarded(lock_path: Path) -> Iterator[None]:
         release_os_lock(fd, guard_path)
 
 
-def _atomic_write(lock_path: Path, content: str) -> None:
-    """Replace ``lock_path`` after a flushed, synced unique temporary write."""
+def _atomic_write(lock_path: Path, content: str, *, expected_original: str) -> None:
+    """Replace a synced temp while the caller holds the Team-Lock OS guard.
+
+    A short-lived Windows reader can deny replacement even though it cannot
+    write. Retry only that sharing failure, while verifying that the guarded
+    target still contains the version from which ``content`` was derived.
+    """
     target_mode = stat.S_IMODE(lock_path.stat().st_mode)
     temp_name: str | None = None
     try:
@@ -283,7 +288,20 @@ def _atomic_write(lock_path: Path, content: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temp_name, target_mode)
-        os.replace(temp_name, lock_path)
+        sharing_delays = (0.025, 0.05, 0.1, 0.2)
+        for attempt in range(len(sharing_delays) + 1):
+            try:
+                os.replace(temp_name, lock_path)
+                break
+            except PermissionError as exc:
+                if (sys.platform != "win32" or getattr(exc, "winerror", None) not in (5, 32)
+                        or attempt == len(sharing_delays)):
+                    raise
+                # The guard serializes compliant writers. Refuse to overwrite
+                # any out-of-band change while a reader releases its handle.
+                if lock_path.read_text(encoding="utf-8") != expected_original:
+                    raise TeamLockFormatError("Team-Lock änderte sich während Windows-Replace") from exc
+                time.sleep(sharing_delays[attempt])
         temp_name = None
 
         if hasattr(os, "O_DIRECTORY"):
@@ -766,7 +784,7 @@ def update_team_lock(
         if success and (changed or content != original):
             lines[start:end] = updated
             rendered = "\n".join(lines).rstrip("\n") + "\n"
-            _atomic_write(lock_path, rendered)
+            _atomic_write(lock_path, rendered, expected_original=original)
         return success, message
 
 
