@@ -65,19 +65,69 @@ def _is_directory_redirect(path: Path) -> bool:
     return tag is None or bool(tag & 0x20000000)  # IO_REPARSE_TAG_NAME_SURROGATE
 
 
-def _query_redirect_or_error(target: Path) -> str | None:
-    """Reject lexical query paths whose resolution could hide an ancestor lock."""
+def _query_redirect_or_error(target: Path, config: dict) -> str | None:
+    """Reject redirects that remove a lexical ancestor from the physical path.
+
+    A prefix alias is safe only above an explicitly configured scan/clone root
+    or a validated Git/pointer root. Redirects at or below that boundary can
+    change the relative path used for twin locks, even inside one repository.
+    """
     if ".." in target.parts:
         return "target-parent-segment"
     lexical = target if target.is_absolute() else Path.cwd() / target
+    try:
+        resolved = lexical.resolve()
+        physical_ancestors = {resolved, *resolved.parents}
+    except (OSError, RuntimeError):
+        return "target-unreadable"
+    redirects = []
     for component in reversed((lexical, *lexical.parents)):
         try:
             if _is_directory_redirect(component):
-                return "target-redirect"
+                redirects.append(component)
         except FileNotFoundError:
             continue  # _check_dir reports a nonexistent target below
-        except OSError:
+        except (OSError, RuntimeError):
             return "target-unreadable"
+    if not redirects:
+        return None
+
+    boundaries = []
+    twin_cfg = config.get("twin_resolution") or {}
+    configured = [entry.get("path") for entry in config.get("roots", [])]
+    configured += twin_cfg.get("clone_roots", [])
+    for raw in configured:
+        if not raw:
+            continue
+        root = Path(os.path.expandvars(str(raw)))
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        if (root == lexical or root in lexical.parents) and root.is_dir():
+            boundaries.append(root)
+    for ancestor in (lexical, *lexical.parents):
+        if (ancestor / lock_utils.REPO_POINTER_NAME).is_file():
+            if lock_utils.read_repo_pointer(ancestor) is not None:
+                boundaries.append(ancestor)
+        if (ancestor / ".git").exists():
+            try:
+                top = subprocess.run(
+                    ["git", "-C", str(ancestor), "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+                if top.returncode == 0 and Path(top.stdout.strip()).resolve() == ancestor.resolve():
+                    boundaries.append(ancestor)
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                return "target-unreadable"
+    try:
+        for component in redirects:
+            if component.parent.resolve() not in physical_ancestors:
+                return "target-redirect"
+            if not any(component in root.parents and root.resolve() in physical_ancestors
+                       for root in boundaries):
+                return "target-redirect"
+    except (OSError, RuntimeError):
+        return "target-unreadable"
     return None
 
 
@@ -487,7 +537,8 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     raising, so without this check a mistyped --check-dir call silently
     reported exit 0 "free" -- worse than any other failure mode, since it
     looks identical to a genuinely clear directory (T-20260922-626871087)."""
-    query_error = _query_redirect_or_error(target)
+    config = load_config(roots_file or DEFAULT_ROOTS_FILE)
+    query_error = _query_redirect_or_error(target, config)
     if query_error is not None:
         if as_json:
             print(json.dumps({"checked": str(target), "error": query_error,
@@ -515,7 +566,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     # (T-20260913-785936980). A freshly cloned repo cannot contain the
     # deliberately unversioned LOCK.user.* -- without this step one reads a
     # state out of an empty spot.
-    twin_cfg = (load_config(roots_file or DEFAULT_ROOTS_FILE) or {}).get("twin_resolution")
+    twin_cfg = config.get("twin_resolution")
     # A worktree is not registered as a separate clone in the twin index.
     # Resolve its main clone first; likewise walk up from mirror subfolders to
     # the pointer. Keep the same relative path on the opposite tree.

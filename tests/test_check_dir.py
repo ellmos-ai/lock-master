@@ -236,6 +236,96 @@ class TestCheckDir:
 
 
 class TestExplicitProtectedPaths:
+    def test_declared_root_after_prefix_alias_preserves_lock_checks(self, tmp_path, capsys):
+        real = tmp_path / "physical"
+        repo = real / "repos" / "demo"
+        (repo / "tests").mkdir(parents=True)
+        alias = tmp_path / "prefix"
+        if sys.platform == "win32":
+            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(alias), str(real)],
+                                    capture_output=True, text=True, timeout=10)
+            assert result.returncode == 0, result.stderr
+        else:
+            alias.symlink_to(real, target_is_directory=True)
+        roots = tmp_path / "prefix-roots.json"
+        roots.write_text(json.dumps({"roots": [{"path": str(alias / "repos")}]},
+                                    ensure_ascii=False), encoding="utf-8")
+        try:
+            checked = alias / "repos" / "demo" / "tests"
+            unknown_roots = tmp_path / "unknown-roots.json"
+            unknown_roots.write_text('{"roots": []}', encoding="utf-8")
+            assert _check_dir(checked, True, False, unknown_roots) == 1
+            assert json.loads(capsys.readouterr().out)["error"] == "target-redirect"
+            assert _check_dir(checked, True, False, roots) == 0
+            assert json.loads(capsys.readouterr().out)["descendants_complete"] is True
+            assert lock_create.main([str(repo), "--scope", "suite", "--path",
+                                     "tests", "--no-contest"]) == 0
+            capsys.readouterr()
+            assert _check_dir(checked, True, False, roots) == 1
+            assert json.loads(capsys.readouterr().out)["locks"]
+            assert _check_dir(alias / "repos" / "demo" / "missing", True, False, roots) == 2
+            assert json.loads(capsys.readouterr().out)["error"] == "target-not-found"
+        finally:
+            assert alias.parent.resolve().is_relative_to(tmp_path.resolve())
+            assert alias.resolve().is_relative_to(tmp_path.resolve())
+            if sys.platform == "win32":
+                os.rmdir(alias)
+            else:
+                alias.unlink()
+
+    def test_internal_alias_cannot_hide_registered_mirror_lock(self, git_repo, tmp_path, capsys):
+        (git_repo / "other" / "pkg").mkdir(parents=True)
+        (git_repo / "tests").mkdir()
+        mirror = tmp_path / "mirror"
+        (mirror / "alias" / "pkg").mkdir(parents=True)
+        (mirror / "tests").mkdir()
+        assert lock_create.main([str(mirror / "alias"), "--scope", "mirror",
+                                 "--path", "pkg", "--no-contest"]) == 0
+        capsys.readouterr()
+        index = tmp_path / "alias-twins.json"
+        index.write_text(json.dumps({"by_repo_name": {},
+            "by_clone_path": {lock_utils._path_key(git_repo): [str(mirror)]},
+            "unreadable_pointers_by_dirname": {}}), encoding="utf-8")
+        roots = tmp_path / "alias-roots.json"
+        roots.write_text(json.dumps({"roots": [{"path": str(tmp_path)}],
+            "twin_resolution": {"clone_roots": [str(tmp_path)], "index_path": str(index)}}),
+            encoding="utf-8")
+
+        def make_link(link, target):
+            if sys.platform == "win32":
+                result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                                        capture_output=True, text=True, timeout=10)
+                assert result.returncode == 0, result.stderr
+            else:
+                link.symlink_to(target, target_is_directory=True)
+
+        created = []
+        try:
+            alias = git_repo / "alias"
+            make_link(alias, git_repo / "other")
+            created.append(alias)
+            assert _check_dir(alias / "pkg", True, False, roots) == 1
+            payload = json.loads(capsys.readouterr().out)
+            assert payload["error"] == "target-redirect"
+            assert payload["checked"] == str(alias / "pkg")
+            assert _check_dir(git_repo / "tests", True, False, roots) == 0
+            capsys.readouterr()
+            (git_repo / "c" / "pkg").mkdir(parents=True)
+            make_link(git_repo / "b", git_repo / "c")
+            created.append(git_repo / "b")
+            make_link(git_repo / "a", git_repo / "b")
+            created.append(git_repo / "a")
+            assert _check_dir(git_repo / "a" / "pkg", True, False, roots) == 1
+            assert json.loads(capsys.readouterr().out)["error"] == "target-redirect"
+        finally:
+            for link in reversed(created):
+                assert link.parent.resolve().is_relative_to(tmp_path.resolve())
+                assert link.resolve().is_relative_to(tmp_path.resolve())
+                if sys.platform == "win32":
+                    os.rmdir(link)
+                else:
+                    link.unlink()
+
     def test_missing_query_stays_usage_error_and_parent_segment_is_uncertain(self, tmp_path, capsys):
         missing = tmp_path / "missing"
         assert _check_dir(missing, True, False) == 2

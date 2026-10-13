@@ -760,10 +760,14 @@ a guard hook is present (without `--strict`, guard hooks are reported but
 never change the exit code).
 
 The scanner checks every lexical component of PATH before resolving it. A
-symlink, Windows junction, or other directory name surrogate in the query can
-hide a lock in the original path's ancestors; it returns exit 1 with JSON
+symlink, Windows junction, or other directory name surrogate at or below a
+validated scan, clone, Git, or pointer root can hide a lock or change the
+relative path used for mirror twins. It returns exit 1 with JSON
 `error: target-redirect`, the original `checked` path, and
-`descendants_complete: false`. An unreadable component also returns exit 1.
+`descendants_complete: false`. A prefix alias above a validated root is
+accepted only when its physical parent remains an ancestor of the physical
+target; without a validated root the result is undetermined. An unreadable
+component also returns exit 1.
 PATH containing `..` returns exit 1 because normalization could erase a
 redirected component. A genuinely missing target still returns usage exit 2.
 Ordinary OneDrive cloud placeholders without a name-surrogate tag remain

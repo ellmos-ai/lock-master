@@ -179,7 +179,9 @@ def test_check_dir_nichtexistenter_pfad_ist_kein_frei():
         roots = Path(td) / "lock_roots.json"
         roots.write_text(json.dumps({
             "default_max_depth": 4, "shallow_depth": 2, "skip_dirs": [],
-            "roots": [],
+            # On macOS tempfile may start with /var -> /private/var. Declare
+            # the fixture root so this prefix alias stays outside the project.
+            "roots": [{"path": str(Path(td))}],
         }, ensure_ascii=False), encoding="utf-8")
         missing = Path(td) / "does-not-exist" / "2026-roshambo"
 
