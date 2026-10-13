@@ -15,6 +15,7 @@ Run:
 """
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -261,20 +262,28 @@ class TestExplicitProtectedPaths:
         lock_create.main([str(outside), "--scope", "external", "--path",
                           "private", "--no-contest"])
         capsys.readouterr()
-        for link, target in ((repo / "cycle", repo), (links / "escape", outside)):
-            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
-                                    capture_output=True, text=True, timeout=10)
-            assert result.returncode == 0, result.stderr
-        assert _check_dir(repo, True, False) == 1
-        root = json.loads(capsys.readouterr().out)
-        assert root["descendants_complete"] is False
-        assert _check_dir(links, True, False) == 1
-        subtree = json.loads(capsys.readouterr().out)
-        assert subtree["descendants_complete"] is False
-        assert _check_dir(links / "escape" / "private", True, False) == 1
-        # A normal OneDrive directory need not be a redirect simply because
-        # it carries a non-surrogate cloud reparse tag.
-        assert lock_scan._is_directory_redirect(links) is False
+        created_links = []
+        try:
+            for link, target in ((repo / "cycle", repo), (links / "escape", outside)):
+                result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                                        capture_output=True, text=True, timeout=10)
+                assert result.returncode == 0, result.stderr
+                created_links.append(link)
+            assert _check_dir(repo, True, False) == 1
+            root = json.loads(capsys.readouterr().out)
+            assert root["descendants_complete"] is False
+            assert _check_dir(links, True, False) == 1
+            subtree = json.loads(capsys.readouterr().out)
+            assert subtree["descendants_complete"] is False
+            assert _check_dir(links / "escape" / "private", True, False) == 1
+            assert lock_scan._is_directory_redirect(links) is False
+        finally:
+            # rmdir removes the junction itself; never recurse into its target.
+            for link in reversed(created_links):
+                assert link.parent.resolve().is_relative_to(tmp_path.resolve())
+                assert link.resolve().is_relative_to(tmp_path.resolve())
+                assert lock_scan._is_directory_redirect(link)
+                os.rmdir(link)
 
     def test_nested_lock_blocks_root_but_not_sibling(self, tmp_path, capsys):
         (tmp_path / "tests").mkdir()
