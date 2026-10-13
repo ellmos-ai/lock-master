@@ -16,6 +16,7 @@ Run:
 
 import json
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -234,6 +235,47 @@ class TestCheckDir:
 
 
 class TestExplicitProtectedPaths:
+    def test_unreadable_nested_lock_lookup_is_incomplete(self, tmp_path, monkeypatch, capsys):
+        child = tmp_path / "unreadable"
+        child.mkdir()
+        original = lock_utils.active_locks_affecting_target
+
+        def denied(source, target, now=None):
+            if source == child:
+                raise PermissionError("synthetic unreadable subtree")
+            return original(source, target, now)
+
+        monkeypatch.setattr(lock_utils, "active_locks_affecting_target", denied)
+        assert _check_dir(tmp_path, True, False) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["descendants_complete"] is False
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows junction contract")
+    def test_junction_cycle_and_external_target_are_incomplete(self, tmp_path, capsys):
+        repo = tmp_path / "repo"
+        links = repo / "links"
+        outside = tmp_path / "outside"
+        links.mkdir(parents=True)
+        outside.mkdir()
+        (outside / "private").mkdir()
+        lock_create.main([str(outside), "--scope", "external", "--path",
+                          "private", "--no-contest"])
+        capsys.readouterr()
+        for link, target in ((repo / "cycle", repo), (links / "escape", outside)):
+            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                                    capture_output=True, text=True, timeout=10)
+            assert result.returncode == 0, result.stderr
+        assert _check_dir(repo, True, False) == 1
+        root = json.loads(capsys.readouterr().out)
+        assert root["descendants_complete"] is False
+        assert _check_dir(links, True, False) == 1
+        subtree = json.loads(capsys.readouterr().out)
+        assert subtree["descendants_complete"] is False
+        assert _check_dir(links / "escape" / "private", True, False) == 1
+        # A normal OneDrive directory need not be a redirect simply because
+        # it carries a non-surrogate cloud reparse tag.
+        assert lock_scan._is_directory_redirect(links) is False
+
     def test_nested_lock_blocks_root_but_not_sibling(self, tmp_path, capsys):
         (tmp_path / "tests").mkdir()
         (tmp_path / "installer").mkdir()
@@ -317,6 +359,20 @@ class TestExplicitProtectedPaths:
             (wt / "bin").mkdir()
             (wt / "tests").mkdir()
             assert _check_dir(wt / "bin", True, False) == 1
+            assert _check_dir(wt / "tests", True, False) == 0
+        finally:
+            _git("worktree", "remove", "--force", str(wt), cwd=git_repo)
+
+    def test_worktree_sees_nested_main_clone_lock(self, git_repo, tmp_path):
+        (git_repo / "src" / "package").mkdir(parents=True)
+        lock_create.main([str(git_repo / "src"), "--scope", "nested",
+                          "--path", "package", "--no-contest"])
+        wt = tmp_path / "wt-main-nested"
+        _git("worktree", "add", "-q", "--detach", str(wt), cwd=git_repo)
+        try:
+            (wt / "src" / "package").mkdir(parents=True)
+            (wt / "tests").mkdir()
+            assert _check_dir(wt / "src" / "package", True, False) == 1
             assert _check_dir(wt / "tests", True, False) == 0
         finally:
             _git("worktree", "remove", "--force", str(wt), cwd=git_repo)

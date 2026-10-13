@@ -1093,7 +1093,7 @@ def active_locks_for_path(path: Path, now: datetime | None = None):
             mapped = main_dir / path.relative_to(Path(result.stdout.strip()).resolve())
         except (OSError, ValueError, subprocess.SubprocessError):
             mapped = main_dir  # uncertainty must not hide a main-clone lock
-        for ancestor in (main_dir, *main_dir.parents):
+        for ancestor in (mapped, *mapped.parents):
             out.extend(active_locks_affecting_target(ancestor, mapped, now))
     return out
 

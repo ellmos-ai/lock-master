@@ -32,6 +32,7 @@ import json
 import os
 import platform
 import re
+import stat
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,23 @@ DEFAULT_ROOTS_FILE = Path(__file__).resolve().parent / "lock_roots.json"
 # stays a usable freshness signal for readers (sync_mirror accepts 180 min).
 CACHE_REFRESH_SECONDS = 30 * 60
 CHECK_DIR_MAX_DESCENDANTS = 1024
+
+
+def _is_directory_redirect(path: Path) -> bool:
+    """Detect directory links without treating OneDrive cloud placeholders as links.
+
+    Python 3.10/3.11 lack Path.is_junction(). Windows reparse *name
+    surrogates* redirect path lookup; ordinary cloud tags do not. An unreadable
+    or unclassified reparse tag cannot prove that a subtree is complete.
+    """
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    attributes = getattr(info, "st_file_attributes", 0)
+    if not attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+        return False
+    tag = getattr(info, "st_reparse_tag", None)
+    return tag is None or bool(tag & 0x20000000)  # IO_REPARSE_TAG_NAME_SURROGATE
 
 
 def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
@@ -62,18 +80,27 @@ def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
     while pending:
         current = pending.pop()
         try:
-            entries = list(current.iterdir())
-            if any(p.is_symlink() and p.is_dir() for p in entries):
+            if _is_directory_redirect(current):
                 return hits, False
-            children = [p for p in entries
-                        if p.is_dir() and not p.is_symlink() and p.name != ".git"]
+            entries = list(current.iterdir())
+            children = []
+            for entry in entries:
+                if entry.name == ".git":
+                    continue
+                if _is_directory_redirect(entry):
+                    return hits, False
+                if entry.is_dir():
+                    children.append(entry)
         except OSError:
             return hits, False
         for child in children:
             visited += 1
             if visited > limit:
                 return hits, False
-            hits.extend(lock_utils.active_locks_affecting_target(child, target, now))
+            try:
+                hits.extend(lock_utils.active_locks_affecting_target(child, target, now))
+            except OSError:
+                return hits, False
             pending.append(child)
     return hits, True
 
