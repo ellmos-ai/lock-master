@@ -32,6 +32,7 @@ import json
 import os
 import platform
 import re
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -428,12 +429,36 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     # deliberately unversioned LOCK.user.* -- without this step one reads a
     # state out of an empty spot.
     twin_cfg = (load_config(roots_file or DEFAULT_ROOTS_FILE) or {}).get("twin_resolution")
+    # A worktree is not registered as a separate clone in the twin index.
+    # Resolve its main clone first; likewise walk up from mirror subfolders to
+    # the pointer. Keep the same relative path on the opposite tree.
     twins, twin_status = lock_utils.twin_dirs_for_path(target, twin_cfg)
-    for twin in twins:
-        hits.extend(
-            (name, scope, legacy, twin)
-            for name, scope, legacy in lock_utils.active_locks(twin, now)
-        )
+    mapped = twins[-1] if twins else None
+    if not twins and twin_status not in ("index-missing", "pointer-unreadable"):
+        anchor = lock_utils.worktree_main_dir(target)
+        if anchor is None:
+            anchor = next((p for p in (target, *target.parents)
+                           if (p / lock_utils.REPO_POINTER_NAME).is_file()), None)
+        if anchor is not None and anchor != target:
+            twins, twin_status = lock_utils.twin_dirs_for_path(anchor, twin_cfg)
+            if twins:
+                try:
+                    if lock_utils.worktree_main_dir(target) is not None:
+                        top = subprocess.run(
+                            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+                            capture_output=True, text=True, timeout=10,
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                        )
+                        relative = target.relative_to(Path(top.stdout.strip()).resolve())
+                    else:
+                        relative = target.relative_to(anchor)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    relative = Path(".")  # root query is conservative on uncertainty
+                mapped = twins[0] / relative
+    twin_hits = []
+    if mapped is not None:
+        twin_hits = lock_utils.active_locks_for_path(mapped, now)
+        hits.extend(twin_hits)
 
     rows = [
         {
@@ -441,7 +466,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             "scope": scope,
             "legacy": is_legacy,
             "from_main_repo_of_worktree": source_dir != target,
-            "from_twin": source_dir in twins,
+            "from_twin": (name, scope, is_legacy, source_dir) in twin_hits,
         }
         for name, scope, is_legacy, source_dir in hits
     ]

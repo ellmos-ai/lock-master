@@ -85,18 +85,18 @@ Watcher scan model:
 
 ---
 
-## Scope via Filename (FILENAME IS AUTHORITATIVE)
+## Scope via Filename and Explicit Protected Paths
 
 - `LOCK.txt` -- entire project locked (scope = `project`).
-- `LOCK.<scope>.txt` -- only that component locked; free scope name
-  (sub-area / sub-folder), e.g. `LOCK.frontend.txt`, `LOCK.api.txt`,
-  `LOCK.mobile.txt`.
+- `LOCK.<scope>.txt` -- names a component; the free-form name does **not**
+  prove a filesystem path. New scoped locks declare actual protected paths
+  using `--path` and the versioned fields below. Existing locks without those
+  fields conservatively block the whole containing directory.
 - `LOCK.team.<host>.txt` -- Team Lock for the whole project (see below).
 - `LOCK.team.<scope>.<host>.txt` -- Team Lock for a specific component (see below).
 - `LOCK.user.txt` / `LOCK.user.<scope>.txt` -- User Lock (see below): user-owned
   full lock, removed ONLY by the user.
-- Multiple agents can work in parallel on different components of the same
-  project using different scoped locks.
+- Multiple agents can work in parallel on disjoint explicitly declared paths.
 - Detection regex: `^LOCK(\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*)?\.txt$`
 - Legacy `TEST.txt` / `TESTS.txt` -- deprecated, do not create new ones
   These legacy basenames require the exact spelling, including case, on every host. Ordinary `test.txt` / `tests.txt` documents are not locks. Modern `LOCK*.txt` names remain case-insensitive.
@@ -120,6 +120,8 @@ are ignored.
 | `mode`             | optional | `hard` (no changes, default) \| `soft` (reads/hints ok). |
 | `purpose`          | optional | Free text: why locked / what is running. |
 | `scope`            | optional | Informational only; the filename is authoritative. |
+| `paths_version`    | optional | `1` enables explicit path-aware checks for ordinary locks. Unknown or missing versions keep the conservative whole-directory effect. |
+| `protected_paths`  | optional | `|`-separated paths relative to the lock file's directory. Requires `paths_version: 1`; absent, empty, invalid, or escaping paths keep the conservative whole-directory effect. |
 | `fence`            | optional | **Grant number** (epoch microseconds), written by `lock_create.py` for cooperative detection. The holder records it at acquisition and re-checks it before every write — see "Fencing Tokens". Absent = a lock from before fencing, handled exactly as before. |
 
 For relative-expiry locks that use `created` as their base, an absent field
@@ -131,6 +133,24 @@ Naive legacy values are interpreted as historical local wall time on the reading
 host. The original writer's time zone cannot be recovered, so cross-host readings
 can differ. Explicit offsets are normalized to UTC, and relative expiry durations
 use elapsed UTC time.
+
+Create a scoped lock for the **actual write areas**:
+
+```sh
+python lock_create.py <project> --scope starter --path bin --path prompts --owner agent-A
+python lock_scan.py --check-dir <project>/bin       # locked
+python lock_scan.py --check-dir <project>/installer # free if no other lock applies
+```
+
+`--scope` requires at least one `--path` for ordinary newly created locks.
+Absolute paths, `..`, symlink escapes, drive paths and malformed separators are
+rejected. Paths use `/` in the file; Windows input `\\` is normalized. A query
+of the project root overlaps every protected subpath and remains locked.
+Subdirectory queries inspect ancestor locks and map the same relative path to
+the main clone of a worktree and the registered mirror twin. Existing locks
+without valid explicit metadata remain broad; user, condition and until locks
+also keep their protected conservative effect regardless of path metadata.
+Use the current scanner on every host before relying on a free subpath result.
 
 ---
 
@@ -148,7 +168,7 @@ This failure mode is silent: both agents report success, and cloud synchronizati
 **Cooperative detection via fence tokens:** Each grant receives a monotonic epoch microsecond integer in the `fence:` field. The holder notes this number and validates it **before every destructive write or push operation**. A differing fence number signals that the lease has moved on — the agent must abort instead of writing blindly.
 
 ```bash
-python lock_create.py <project> --scope docs --owner agent-A
+python lock_create.py <project> --scope docs --path docs --owner agent-A
 # output: created LOCK.docs.txt with fence: 1789902599751740
 ```
 
@@ -454,7 +474,7 @@ field (epoch microseconds, stepped upward on takeover). The holder records it an
 means the lease moved on: refuse the write instead of quietly continuing.
 
 ```
-python lock_create.py <project> --scope docs --owner agent-A
+python lock_create.py <project> --scope docs --path docs --owner agent-A
   created: ...\LOCK.docs.txt
   fence: 1789902599751740
 ```
@@ -601,7 +621,7 @@ but a guard hook present" as its own outcome (exit 2).
    `lock_create.py`**:
 
    ```
-   python <deploy>/lock_create.py <project dir> --scope <area> --owner <agent> \
+   python <deploy>/lock_create.py <project dir> --scope <area> --path <actual-area> --owner <agent> \
        --purpose "<why>"
    ```
 

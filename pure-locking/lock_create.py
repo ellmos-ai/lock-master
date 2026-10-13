@@ -19,6 +19,7 @@ Zero dependencies (Python 3.10+). See LOCK-SYSTEM.md for the semantics.
 from __future__ import annotations
 
 import argparse
+import re
 
 import contested
 import platform
@@ -88,6 +89,9 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
     if args.purpose:
         lines.append(f"purpose: {args.purpose}")
     lines.append(f"scope: {scope_label}")
+    if getattr(args, "paths", None):
+        lines.append("paths_version: 1")
+        lines.append(f"protected_paths: {' | '.join(args.paths)}")
 
     body = "\n".join(lines) + "\n"
 
@@ -134,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="project directory that should be locked")
     parser.add_argument("--scope", default=None,
                         help="component scope (LOCK.<scope>.txt); default: whole project")
+    parser.add_argument("--path", action="append", dest="paths", default=[],
+                        help="actual protected path relative to project_dir; repeatable")
     parser.add_argument("--team", metavar="HOST", default=None,
                         help="create a team lock for this system host name")
     parser.add_argument("--user", action="store_true",
@@ -171,6 +177,26 @@ def main(argv: list[str] | None = None) -> int:
     project_dir: Path = args.project_dir
     if not project_dir.is_dir():
         raise SystemExit(f"error: not a directory: {project_dir}")
+    if args.paths and (args.user or args.condition):
+        parser.error("--path cannot narrow a user or condition lock")
+    if args.scope and not args.paths and not (args.user or args.condition):
+        parser.error("--scope requires at least one --path for an actual protected area")
+    if args.paths and not args.scope:
+        parser.error("--path requires --scope; an unscoped LOCK.txt protects the whole project")
+    clean_paths = []
+    root = project_dir.resolve()
+    for raw in args.paths:
+        value = raw.replace("\\", "/")
+        if (not value or value.startswith("/") or ":" in value or "|" in value
+                or any(part in ("", ".", "..") for part in value.split("/"))
+                or re.search(r"[\r\n\x00]", value)):
+            parser.error(f"--path must be a relative path within project_dir: {raw!r}")
+        try:
+            (root / value).resolve().relative_to(root)
+        except (OSError, ValueError):
+            parser.error(f"--path escapes project_dir: {raw!r}")
+        clean_paths.append(value)
+    args.paths = clean_paths
 
     if args.team:
         if args.host is not None and args.host.casefold() != args.team.casefold():

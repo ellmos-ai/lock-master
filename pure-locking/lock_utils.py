@@ -8,8 +8,10 @@ Canonical spec (lifecycle, tiers, scripts): LOCK-SYSTEM.md (same directory).
 
 Convention:
   - LOCK.txt            = entire project locked      (scope = "project")
-  - LOCK.<scope>.txt    = only this component locked (scope = "<scope>")
-                          free scope name (sub-area/sub-folder),
+  - LOCK.<scope>.txt    = named component (scope = "<scope>"); the free
+                          name alone does not establish a filesystem path.
+                          New scoped locks carry explicit protected_paths,
+                          old ones conservatively cover their directory,
                           e.g. LOCK.frontend.txt, LOCK.web.txt, LOCK.api.txt
   - Detection regex: ^LOCK(\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*)?\.txt$
     Matches: LOCK.txt, LOCK.api.txt, LOCK.team.LAPTOP.txt,
@@ -41,6 +43,8 @@ File format (one setting per line, stdlib parser, no extra dependency):
     mode              (optional)  "hard" (default) | "soft".
     purpose           (optional)  Free-text description.
     scope             (optional)  Informational only; AUTHORITATIVE is the filename.
+    paths_version     (optional)  "1" for explicit relative protected_paths.
+    protected_paths   (optional)  |-separated paths inside the lock directory.
     fence             (optional)  Grant number (epoch microseconds) written by
                                   lock_create.py for cooperative detection. The
                                   holder records it at acquisition and
@@ -965,6 +969,16 @@ def worktree_main_dir(path: Path) -> Path | None:
     parent directory is the main clone. Returns None if `path` is not a
     git directory OR `path` already IS the main clone itself (then there
     is nothing additional to check)."""
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if top.returncode != 0 or not (Path(top.stdout.strip()) / ".git").is_file():
+        return None
     common = git_common_dir(path)
     if common is None:
         return None
@@ -977,26 +991,88 @@ def worktree_main_dir(path: Path) -> Path | None:
     return main_dir
 
 
+def protected_relative_paths(lock_path: Path) -> list[Path] | None:
+    """Versioned, explicit write areas; None means conservative whole-root lock.
+
+    Older locks and protected user/condition/until locks retain their existing
+    broad effect. Malformed metadata also fails closed.
+    """
+    data = parse_lock_file(lock_path)
+    if is_protected_lock(lock_path, data=data):
+        return None
+    if data.get("paths_version") != "1" or not data.get("protected_paths"):
+        return None
+    paths = []
+    for raw in data["protected_paths"].split("|"):
+        raw = raw.strip()
+        if not raw or "\\" in raw or ":" in raw or "\x00" in raw:
+            return None
+        path = Path(raw)
+        if path.is_absolute() or any(part in ("", ".", "..") for part in raw.split("/")):
+            return None
+        try:
+            resolved = (lock_path.parent / path).resolve()
+            resolved.relative_to(lock_path.parent.resolve())
+        except (OSError, ValueError):
+            return None
+        paths.append(path)
+    return paths or None
+
+
+def lock_applies_to_target(lock_path: Path, target: Path) -> bool:
+    """Check actual directory overlap, including a root query of a subarea."""
+    paths = protected_relative_paths(lock_path)
+    if paths is None:
+        return True
+    root = lock_path.parent.resolve()
+    target = target.resolve()
+    for path in paths:
+        area = (root / path).resolve()
+        # normcase handles Windows case-insensitive names; Path equality alone
+        # is not portable for synthetic Windows paths tested on POSIX.
+        a, b = os.path.normcase(str(area)), os.path.normcase(str(target))
+        if a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep):
+            return True
+    return False
+
+
+def active_locks_affecting_target(source_dir: Path, target: Path,
+                                  now: datetime | None = None):
+    """Active locks in one directory that overlap a mapped target directory."""
+    return [(name, scope, legacy, source_dir)
+            for name, scope, legacy in active_locks(source_dir, now)
+            if legacy or lock_applies_to_target(source_dir / name, target)]
+
+
 def active_locks_for_path(path: Path, now: datetime | None = None):
-    """Worktree-aware lock check for EXACTLY ONE directory -- the stage-1
+    """Worktree-aware lock check for one directory -- the stage-1
     check ("OBSERVE") before starting work at exactly this location.
 
-    Returns (name, scope, is_legacy, source_dir) for own locks in `path`
-    PLUS, if `path` is a linked git worktree, the locks of its main clone.
+    Returns (name, scope, is_legacy, source_dir) for overlapping locks in
+    `path` and its ancestors, plus mapped locks of a worktree's main clone.
     A caller that only checks `active_locks(path)` locally never sees a
     worktree's main-clone locks -- that is the exact gap from
     T-20260903-592302105.
 
     Covers the reported case (one worktree, one main clone); nested
     worktrees/submodules are not handled separately."""
-    path = Path(path)
-    out = [(name, scope, legacy, path) for name, scope, legacy in active_locks(path, now)]
+    path = Path(path).resolve()
+    out = []
+    for ancestor in (path, *path.parents):
+        out.extend(active_locks_affecting_target(ancestor, path, now))
     main_dir = worktree_main_dir(path)
     if main_dir is not None and main_dir.is_dir():
-        out.extend(
-            (name, scope, legacy, main_dir)
-            for name, scope, legacy in active_locks(main_dir, now)
-        )
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            mapped = main_dir / path.relative_to(Path(result.stdout.strip()).resolve())
+        except (OSError, ValueError, subprocess.SubprocessError):
+            mapped = main_dir  # uncertainty must not hide a main-clone lock
+        for ancestor in (main_dir, *main_dir.parents):
+            out.extend(active_locks_affecting_target(ancestor, mapped, now))
     return out
 
 
@@ -1256,7 +1332,10 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
         rel = resolved.relative_to(ancestor)
         out = list(dirs)
         if rel != Path("."):
-            out += [d / rel for d in dirs if (d / rel).is_dir()]
+            # A counterpart subdirectory may not exist yet. Keep its logical
+            # path so a root lock bound to another subpath is not reported as
+            # overlapping simply because only the twin root was returned.
+            out += [d / rel for d in dirs]
         return out, "ok"
     return [], "ok"
 

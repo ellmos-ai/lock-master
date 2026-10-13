@@ -111,14 +111,41 @@ Die lokale GUI ist die Arbeitsfassung. Die nutzerneutrale, portable Variante wir
 
 ---
 
-## Scope über Dateiname (AUTORITATIV ist der Dateiname)
+## Scope über Dateiname und explizite geschützte Pfade
 
 ### Exclusive Locks (klassisch — sperren alle Systeme/Agenten)
 
 - `LOCK.txt` = ganzes Projekt gesperrt (scope = `project`).
-- `LOCK.<scope>.txt` = nur diese Komponente gesperrt; freier Scope-Name (Unterbereich/Unterordner), z. B. `LOCK.software.txt`, `LOCK.web.txt`, `LOCK.dev.txt`, `LOCK.desktop.txt`, `LOCK.mobile.txt`, `LOCK.flutter_port.txt`.
-- So können z. B. Desktop- und Mobile-Loops dasselbe Projekt parallel an verschiedenen Komponenten bearbeiten.
+- `LOCK.<scope>.txt` benennt eine Komponente. Der frei gewählte Name belegt **keinen Dateipfad**. Neue Bereichs-Locks deklarieren ihre tatsächlichen Schreibbereiche mit `--path` und den versionierten Feldern unten. Bestehende Locks ohne diese Felder sperren konservativ den gesamten enthaltenden Ordner.
+- Explizit getrennte Pfade erlauben parallele Arbeit an verschiedenen Komponenten.
 - Kein Systemname im Dateinamen nötig — der Lock blockiert alle. Das `host:`-Feld im Inhalt sagt informativ, wer sperrt.
+
+### Tatsächliche Arbeitsbereiche deklarieren
+
+Für neue gewöhnliche Bereichs-Locks verlangt `lock_create.py` mindestens ein
+`--path`. Jeder Pfad ist relativ zu dem Ordner, in dem die Lockdatei liegt.
+Mehrere Pfade sind möglich:
+
+```powershell
+python lock_create.py <projekt> --scope starter --path bin --path prompts --owner agent-A
+python lock_scan.py --check-dir <projekt>/bin       # gesperrt
+python lock_scan.py --check-dir <projekt>/installer # frei, sofern kein anderer Lock greift
+```
+
+Die Lockdatei enthält `paths_version: 1` und zum Beispiel
+`protected_paths: bin | prompts`. Absolute Pfade, `..`, Laufwerkspfade und
+Symlink-Ausbrüche sind unzulässig. Windows-Backslashes in der Eingabe werden
+zu `/` normalisiert. Ein Check des Projektroots überlappt jeden geschützten
+Teilpfad und meldet daher eine Sperre. Unterordnerchecks prüfen Vorfahren und
+denselben relativen Pfad im Hauptklon eines Worktrees sowie im registrierten
+OneDrive-Zwilling.
+
+Fehlende, leere, ungültige oder unbekannt versionierte Pfadfelder lassen
+bestehende Locks konservativ auf den ganzen enthaltenden Ordner wirken.
+User-, Condition- und Until-Locks behalten auch bei eingetragenen Pfadfeldern
+ihre bisherige konservative Schutzwirkung. Ein alter Scanner versteht diese
+Teilpfadbindung noch nicht; ein „frei“ für Teilpfade ist erst nach Umstellung
+des verwendeten Scanners auf diese Version belastbar.
 
 ### Team Locks (koordinieren Agenten eines Systems; blockieren andere Systeme)
 
@@ -380,7 +407,7 @@ abweichende Nummer heißt: das Lease ist weitergegangen — Schreibvorgang ableh
 heimlich fortsetzen.
 
 ```
-python lock_create.py <projekt> --scope docs --owner agent-A
+python lock_create.py <projekt> --scope docs --path docs --owner agent-A
   created: ...\LOCK.docs.txt
   fence: 1789902599751740
   hint: merke dir die Nummer und prüfe sie vor jedem Schreiben --
@@ -659,7 +686,7 @@ Neue Pipelines dürfen das Muster übernehmen, wenn Teamarbeit mehr braucht als 
 
    ```
    PYTHONIOENCODING=utf-8 python "<OneDrive>/_scripts/lock_create.py" <projektordner> \
-       --scope <bereich> --owner <agent> --purpose "<warum>"
+       --scope <bereich> --path <tatsächlicher-bereich> --owner <agent> --purpose "<warum>"
    ```
 
    Das Werkzeug legt die Datei **exklusiv** an (`open("x")`, siehe Stufe 1 unter

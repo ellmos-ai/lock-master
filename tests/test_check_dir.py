@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 import lock_utils
+import lock_create
 from lock_scan import _check_dir
 
 
@@ -229,3 +230,93 @@ class TestCheckDir:
         out = capsys.readouterr().out
         assert "1 active lock(s) affect" in out
         assert "LOCK.assets.txt" in out
+
+
+class TestExplicitProtectedPaths:
+    def test_creator_and_scanner_only_block_actual_area(self, tmp_path, capsys):
+        for name in ("bin", "binary", "prompts", "installer", "tests"):
+            (tmp_path / name).mkdir()
+        assert lock_create.main([str(tmp_path), "--scope", "starter", "--path", "bin",
+                                 "--path", "prompts", "--no-contest"]) == 0
+        assert _check_dir(tmp_path / "bin", True, False) == 1
+        assert _check_dir(tmp_path / "prompts", True, False) == 1
+        for name in ("binary", "installer", "tests"):
+            assert _check_dir(tmp_path / name, True, False) == 0
+        assert _check_dir(tmp_path, True, False) == 1  # root overlaps subareas
+        capsys.readouterr()
+
+    @pytest.mark.parametrize("extra", [
+        "", "paths_version: 2\nprotected_paths: bin\n",
+        "paths_version: 1\nprotected_paths: \n",
+        "paths_version: 1\nprotected_paths: ../outside\n",
+        "paths_version: 1\nprotected_paths: /outside\n",
+        "paths_version: 1\nprotected_paths: bin/../tests\n",
+    ])
+    def test_legacy_or_malformed_metadata_remains_broad(self, tmp_path, extra):
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "tests").mkdir()
+        stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        (tmp_path / "LOCK.starter.txt").write_text(
+            f"owner: agent\ncreated: {stamp}\nexpires_after: 24h\n{extra}", encoding="utf-8")
+        assert _check_dir(tmp_path / "tests", True, False) == 1
+
+    def test_explicit_metadata_cannot_narrow_user_lock(self, tmp_path):
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "LOCK.user.starter.txt").write_text(
+            "owner: user\npaths_version: 1\nprotected_paths: bin\n", encoding="utf-8")
+        assert _check_dir(tmp_path / "tests", True, False) == 1
+
+    def test_windows_case_and_segment_boundary(self, tmp_path):
+        (tmp_path / "Bin").mkdir()
+        (tmp_path / "binary").mkdir()
+        (tmp_path / "LOCK.starter.txt").write_text(
+            "owner: agent\ncreated: " + datetime.now().strftime("%Y-%m-%dT%H:%M") +
+            "\nexpires_after: 24h\npaths_version: 1\nprotected_paths: bin\n", encoding="utf-8")
+        assert _check_dir(tmp_path / "Bin", True, False) == 1
+        assert _check_dir(tmp_path / "binary", True, False) == 0
+
+    def test_worktree_main_lock_maps_relative_subpath(self, git_repo, tmp_path):
+        (git_repo / "bin").mkdir()
+        (git_repo / "tests").mkdir()
+        lock_create.main([str(git_repo), "--scope", "starter", "--path", "bin", "--no-contest"])
+        wt = tmp_path / "wt-scoped"
+        _git("worktree", "add", "-q", "--detach", str(wt), cwd=git_repo)
+        try:
+            (wt / "bin").mkdir()
+            (wt / "tests").mkdir()
+            assert _check_dir(wt / "bin", True, False) == 1
+            assert _check_dir(wt / "tests", True, False) == 0
+        finally:
+            _git("worktree", "remove", "--force", str(wt), cwd=git_repo)
+
+    def test_twin_root_lock_maps_relative_subpath(self, git_repo, tmp_path):
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        (mirror / "bin").mkdir()
+        (mirror / "tests").mkdir()
+        (git_repo / "bin").mkdir()
+        (git_repo / "tests").mkdir()
+        (mirror / "LOCK.starter.txt").write_text(
+            "owner: agent\ncreated: " + datetime.now().strftime("%Y-%m-%dT%H:%M") +
+            "\nexpires_after: 24h\npaths_version: 1\nprotected_paths: bin\n", encoding="utf-8")
+        config = tmp_path / "roots.json"
+        index = tmp_path / "twins.json"
+        index.write_text(json.dumps({"by_repo_name": {},
+            "by_clone_path": {lock_utils._path_key(git_repo): [str(mirror)]},
+            "unreadable_pointers_by_dirname": {}}), encoding="utf-8")
+        config.write_text(json.dumps({"twin_resolution": {
+            "clone_roots": [str(tmp_path)], "index_path": str(index)}}), encoding="utf-8")
+        assert _check_dir(git_repo / "bin", True, False, config) == 1
+        assert _check_dir(git_repo / "tests", True, False, config) == 0
+        (mirror / "tests").rmdir()
+        assert _check_dir(git_repo / "tests", True, False, config) == 0
+        wt = tmp_path / "wt-twin"
+        _git("worktree", "add", "-q", "--detach", str(wt), cwd=git_repo)
+        try:
+            (wt / "bin").mkdir()
+            (wt / "tests").mkdir()
+            assert _check_dir(wt / "bin", True, False, config) == 1
+            assert _check_dir(wt / "tests", True, False, config) == 0
+        finally:
+            _git("worktree", "remove", "--force", str(wt), cwd=git_repo)
