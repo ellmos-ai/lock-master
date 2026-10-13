@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import sys
+import threading
 from pathlib import Path
 
 import pytest
 
 import lock_create
 import team_lock
+import _lock_master_team as team_lock_impl
 from team_lock import (
     TEAM_SECTIONS,
     acquire_os_lock,
@@ -460,6 +463,81 @@ def test_multiprocess_exactly_one_winner(tmp_path: Path) -> None:
     content = lock_file.read_text(encoding="utf-8")
     assert content.count("EDITING  order=") == 1
     assert "src/shared.py | tests/test_shared.py" in content
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing contract")
+def test_transient_reader_releases_replace_without_losing_claim(tmp_path: Path,
+                                                                monkeypatch) -> None:
+    lock_file = _make_lock(tmp_path)
+    ready = threading.Event()
+    first_denial = threading.Event()
+    release = threading.Event()
+
+    def hold_reader() -> None:
+        with lock_file.open("r", encoding="utf-8"):
+            ready.set()
+            release.wait(2)
+
+    reader = threading.Thread(target=hold_reader)
+    reader.start()
+    assert ready.wait(2)
+    original_replace = team_lock_impl.os.replace
+
+    def observe_replace(source, target):
+        try:
+            return original_replace(source, target)
+        except PermissionError as exc:
+            if exc.winerror == 5:
+                first_denial.set()
+                release.set()
+            raise
+
+    monkeypatch.setattr(team_lock_impl.os, "replace", observe_replace)
+    try:
+        success, _ = update_team_lock(
+            lock_file, "file_claims", "claim", "agent-1", ["src/shared.py"],
+            project_dir=tmp_path,
+        )
+    finally:
+        release.set()
+        reader.join(2)
+    assert first_denial.is_set(), "the real reader must deny the first replace"
+    assert not reader.is_alive()
+    assert success
+    assert lock_file.read_text(encoding="utf-8").count("EDITING  order=") == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing contract")
+def test_permanent_reader_denial_keeps_original_and_raises(tmp_path: Path) -> None:
+    lock_file = _make_lock(tmp_path)
+    original = lock_file.read_bytes()
+    with lock_file.open("r", encoding="utf-8"):
+        with pytest.raises(PermissionError) as failure:
+            update_team_lock(lock_file, "file_claims", "claim", "agent-1",
+                             ["src/shared.py"], project_dir=tmp_path)
+        assert failure.value.winerror == 5
+        assert lock_file.read_bytes() == original
+    assert not list(tmp_path.glob(".LOCK.team.LAPTOP.txt.*.tmp"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing contract")
+def test_external_change_during_retry_is_never_overwritten(tmp_path: Path,
+                                                            monkeypatch) -> None:
+    lock_file = _make_lock(tmp_path)
+    external = lock_file.read_text(encoding="utf-8") + "\nexternal edit\n"
+
+    def replace_after_external_change(_source, _target):
+        lock_file.write_text(external, encoding="utf-8")
+        error = PermissionError(13, "simulated sharing denial")
+        error.winerror = 5
+        raise error
+
+    monkeypatch.setattr(team_lock_impl.os, "replace", replace_after_external_change)
+    with pytest.raises(team_lock_impl.TeamLockFormatError, match="änderte sich"):
+        update_team_lock(lock_file, "file_claims", "claim", "agent-1",
+                         ["src/shared.py"], project_dir=tmp_path)
+    assert lock_file.read_text(encoding="utf-8") == external
+    assert not list(tmp_path.glob(".LOCK.team.LAPTOP.txt.*.tmp"))
 
 
 def test_guard_is_released_after_abrupt_process_exit(tmp_path: Path) -> None:
