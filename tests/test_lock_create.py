@@ -85,7 +85,8 @@ class LockCreateCase(unittest.TestCase):
     def test_scoped_lock_requires_real_path_and_rejects_escape(self):
         with self.assertRaises(SystemExit):
             self._run("--scope", "docs")
-        for bad in ("../outside", "C:\\outside", "/outside", "docs/../tests", "docs|tests"):
+        for bad in ("../outside", "C:\\outside", "/outside", "docs/../tests", "docs|tests",
+                    " leading", "trailing ", "docs/ leading", "docs/trailing ", "\tleading"):
             with self.assertRaises(SystemExit, msg=bad):
                 self._run("--scope", "docs", "--path", bad)
         self.assertFalse((self.project / "LOCK.docs.txt").exists())

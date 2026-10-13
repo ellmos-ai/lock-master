@@ -91,7 +91,7 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
     lines.append(f"scope: {scope_label}")
     if getattr(args, "paths", None):
         lines.append("paths_version: 1")
-        lines.append(f"protected_paths: {' | '.join(args.paths)}")
+        lines.append(f"protected_paths: {'|'.join(args.paths)}")
 
     body = "\n".join(lines) + "\n"
 
@@ -188,7 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     for raw in args.paths:
         value = raw.replace("\\", "/")
         if (not value or value.startswith("/") or ":" in value or "|" in value
-                or any(part in ("", ".", "..") for part in value.split("/"))
+                or any(part in ("", ".", "..") or part != part.strip()
+                       for part in value.split("/"))
                 or re.search(r"[\r\n\x00]", value)):
             parser.error(f"--path must be a relative path within project_dir: {raw!r}")
         try:

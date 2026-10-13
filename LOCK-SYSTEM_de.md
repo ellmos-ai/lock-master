@@ -133,12 +133,16 @@ python lock_scan.py --check-dir <projekt>/installer # frei, sofern kein anderer 
 ```
 
 Die Lockdatei enthält `paths_version: 1` und zum Beispiel
-`protected_paths: bin | prompts`. Absolute Pfade, `..`, Laufwerkspfade und
+`protected_paths: bin|prompts`. Absolute Pfade, `..`, Laufwerkspfade und
 Symlink-Ausbrüche sind unzulässig. Windows-Backslashes in der Eingabe werden
-zu `/` normalisiert. Ein Check des Projektroots überlappt jeden geschützten
+zu `/` normalisiert. Leerzeichen am Rand eines Pfadsegments sind unzulässig,
+weil der Feldparser den Dateinamen sonst verändert. Ein Check des Projektroots überlappt jeden geschützten
 Teilpfad und meldet daher eine Sperre. Unterordnerchecks prüfen Vorfahren und
 denselben relativen Pfad im Hauptklon eines Worktrees sowie im registrierten
 OneDrive-Zwilling.
+Eine Rootabfrage prüft auch Locks in Unterordnern. Die Suche hat ein festes
+Verzeichnislimit; bei Limitüberschreitung oder nicht sicher prüfbarem
+Verzeichnislink meldet sie „unbestimmt“ (Exit 1), niemals fälschlich „frei“.
 
 Fehlende, leere, ungültige oder unbekannt versionierte Pfadfelder lassen
 bestehende Locks konservativ auf den ganzen enthaltenden Ordner wirken.

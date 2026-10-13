@@ -23,6 +23,7 @@ import pytest
 
 import lock_utils
 import lock_create
+import lock_scan
 from lock_scan import _check_dir
 
 
@@ -233,6 +234,26 @@ class TestCheckDir:
 
 
 class TestExplicitProtectedPaths:
+    def test_nested_lock_blocks_root_but_not_sibling(self, tmp_path, capsys):
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "installer").mkdir()
+        assert lock_create.main([str(tmp_path / "tests"), "--scope", "suite",
+                                 "--path", "unit", "--no-contest"]) == 0
+        capsys.readouterr()
+        assert _check_dir(tmp_path, True, False) == 1
+        root = json.loads(capsys.readouterr().out)
+        assert any(row["path"].endswith("LOCK.suite.txt") for row in root["locks"])
+        assert _check_dir(tmp_path / "installer", True, False) == 0
+
+    def test_subtree_limit_never_reports_free(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        monkeypatch.setattr(lock_scan, "CHECK_DIR_MAX_DESCENDANTS", 1)
+        assert _check_dir(tmp_path, True, False) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["descendants_complete"] is False
+        assert payload["locks"] == []
+
     def test_creator_and_scanner_only_block_actual_area(self, tmp_path, capsys):
         for name in ("bin", "binary", "prompts", "installer", "tests"):
             (tmp_path / name).mkdir()
@@ -248,6 +269,8 @@ class TestExplicitProtectedPaths:
     @pytest.mark.parametrize("extra", [
         "", "paths_version: 2\nprotected_paths: bin\n",
         "paths_version: 1\nprotected_paths: \n",
+        "paths_version: 1\nprotected_paths:  bin\n",
+        "paths_version: 1\nprotected_paths: bin |prompts\n",
         "paths_version: 1\nprotected_paths: ../outside\n",
         "paths_version: 1\nprotected_paths: /outside\n",
         "paths_version: 1\nprotected_paths: bin/../tests\n",
@@ -267,13 +290,21 @@ class TestExplicitProtectedPaths:
             "owner: user\npaths_version: 1\nprotected_paths: bin\n", encoding="utf-8")
         assert _check_dir(tmp_path / "tests", True, False) == 1
 
+    def test_ancestor_lock_is_not_reported_as_worktree_main(self, tmp_path, capsys):
+        (tmp_path / "bin").mkdir()
+        write_lock(tmp_path)
+        assert _check_dir(tmp_path / "bin", True, False) == 1
+        rows = json.loads(capsys.readouterr().out)["locks"]
+        assert any(row["path"].endswith("LOCK.txt") for row in rows)
+        assert all(row["from_main_repo_of_worktree"] is False for row in rows)
+
     def test_windows_case_and_segment_boundary(self, tmp_path):
         (tmp_path / "Bin").mkdir()
         (tmp_path / "binary").mkdir()
         (tmp_path / "LOCK.starter.txt").write_text(
             "owner: agent\ncreated: " + datetime.now().strftime("%Y-%m-%dT%H:%M") +
             "\nexpires_after: 24h\npaths_version: 1\nprotected_paths: bin\n", encoding="utf-8")
-        assert _check_dir(tmp_path / "Bin", True, False) == 1
+        assert _check_dir(tmp_path / "Bin", True, False) == (1 if (tmp_path / "bin").exists() else 0)
         assert _check_dir(tmp_path / "binary", True, False) == 0
 
     def test_worktree_main_lock_maps_relative_subpath(self, git_repo, tmp_path):
@@ -320,3 +351,28 @@ class TestExplicitProtectedPaths:
             assert _check_dir(wt / "tests", True, False, config) == 0
         finally:
             _git("worktree", "remove", "--force", str(wt), cwd=git_repo)
+
+    def test_all_registered_twins_and_missing_child(self, git_repo, tmp_path):
+        (git_repo / "bin").mkdir()
+        (git_repo / "installer").mkdir()
+        mirrors = [tmp_path / name for name in ("mirror-a", "mirror-b", "mirror-c")]
+        for mirror in mirrors:
+            mirror.mkdir()
+        (mirrors[0] / "bin").mkdir()
+        (mirrors[1] / "bin").mkdir()
+        # mirror-c deliberately has no bin directory; its root still counts.
+        index = tmp_path / "twins-many.json"
+        index.write_text(json.dumps({"by_repo_name": {},
+            "by_clone_path": {lock_utils._path_key(git_repo): [str(m) for m in mirrors]},
+            "unreadable_pointers_by_dirname": {}}), encoding="utf-8")
+        config = tmp_path / "roots-many.json"
+        config.write_text(json.dumps({"twin_resolution": {
+            "clone_roots": [str(tmp_path)], "index_path": str(index)}}), encoding="utf-8")
+        stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        for i in (0, 2):
+            lock = mirrors[i] / "LOCK.starter.txt"
+            lock.write_text(f"owner: agent\ncreated: {stamp}\nexpires_after: 24h\n"
+                            "paths_version: 1\nprotected_paths: bin\n", encoding="utf-8")
+            assert _check_dir(git_repo / "bin", True, False, config) == 1
+            assert _check_dir(git_repo / "installer", True, False, config) == 0
+            lock.unlink()

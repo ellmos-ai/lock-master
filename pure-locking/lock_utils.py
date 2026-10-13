@@ -1002,10 +1002,20 @@ def protected_relative_paths(lock_path: Path) -> list[Path] | None:
         return None
     if data.get("paths_version") != "1" or not data.get("protected_paths"):
         return None
+    # The general key:value parser strips value whitespace. For path metadata
+    # that would silently change a real filename (" leading" -> "leading").
+    # Require the writer's unambiguous one-space field prefix and no spaces
+    # around the path separator; any other spelling remains a broad lock.
+    try:
+        fields = [line.split(":", 1)[1] for line in lock_path.read_text(encoding="utf-8").splitlines()
+                  if ":" in line and line.split(":", 1)[0].strip().lower() == "protected_paths"]
+    except OSError:
+        return None
+    if fields != [" " + data["protected_paths"]]:
+        return None
     paths = []
     for raw in data["protected_paths"].split("|"):
-        raw = raw.strip()
-        if not raw or "\\" in raw or ":" in raw or "\x00" in raw:
+        if not raw or raw != raw.strip() or "\\" in raw or ":" in raw or "\x00" in raw:
             return None
         path = Path(raw)
         if path.is_absolute() or any(part in ("", ".", "..") for part in raw.split("/")):
@@ -1033,6 +1043,18 @@ def lock_applies_to_target(lock_path: Path, target: Path) -> bool:
         a, b = os.path.normcase(str(area)), os.path.normcase(str(target))
         if a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep):
             return True
+        # macOS may use a case-insensitive volume despite os.name == 'posix'.
+        # Existing paths can be compared by filesystem identity rather than
+        # guessing the volume's case rules from the operating system.
+        try:
+            if area.exists() and any(os.path.samefile(area, p) for p in (target, *target.parents)
+                                     if p.exists()):
+                return True
+            if target.exists() and any(os.path.samefile(target, p) for p in (area, *area.parents)
+                                       if p.exists()):
+                return True
+        except OSError:
+            pass
     return False
 
 

@@ -121,7 +121,7 @@ are ignored.
 | `purpose`          | optional | Free text: why locked / what is running. |
 | `scope`            | optional | Informational only; the filename is authoritative. |
 | `paths_version`    | optional | `1` enables explicit path-aware checks for ordinary locks. Unknown or missing versions keep the conservative whole-directory effect. |
-| `protected_paths`  | optional | `|`-separated paths relative to the lock file's directory. Requires `paths_version: 1`; absent, empty, invalid, or escaping paths keep the conservative whole-directory effect. |
+| `protected_paths`  | optional | `|`-separated paths without surrounding whitespace, relative to the lock file's directory. Requires `paths_version: 1`; absent, empty, invalid, or escaping paths keep the conservative whole-directory effect. |
 | `fence`            | optional | **Grant number** (epoch microseconds), written by `lock_create.py` for cooperative detection. The holder records it at acquisition and re-checks it before every write — see "Fencing Tokens". Absent = a lock from before fencing, handled exactly as before. |
 
 For relative-expiry locks that use `created` as their base, an absent field
@@ -144,12 +144,17 @@ python lock_scan.py --check-dir <project>/installer # free if no other lock appl
 
 `--scope` requires at least one `--path` for ordinary newly created locks.
 Absolute paths, `..`, symlink escapes, drive paths and malformed separators are
-rejected. Paths use `/` in the file; Windows input `\\` is normalized. A query
+rejected. Path-segment boundary whitespace is rejected because the format
+parser otherwise changes the name. Paths use `/` in the file; Windows input
+`\\` is normalized. A query
 of the project root overlaps every protected subpath and remains locked.
 Subdirectory queries inspect ancestor locks and map the same relative path to
 the main clone of a worktree and the registered mirror twin. Existing locks
 without valid explicit metadata remain broad; user, condition and until locks
 also keep their protected conservative effect regardless of path metadata.
+Root queries also inspect nested locks. That scan has a fixed work bound; when
+the bound is reached or a linked directory cannot be checked, the result is
+undetermined (exit 1), never a false "free".
 Use the current scanner on every host before relying on a free subpath result.
 
 ---
