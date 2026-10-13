@@ -248,7 +248,10 @@ class TestExplicitProtectedPaths:
         else:
             alias.symlink_to(real, target_is_directory=True)
         roots = tmp_path / "prefix-roots.json"
-        roots.write_text(json.dumps({"roots": [{"path": str(alias / "repos")}]},
+        unrelated = tmp_path / "unrelated"
+        unrelated.mkdir()
+        roots.write_text(json.dumps({"roots": [{"path": str(alias / "repos")},
+                                              {"path": str(unrelated)}]},
                                     ensure_ascii=False), encoding="utf-8")
         try:
             checked = alias / "repos" / "demo" / "tests"
@@ -308,6 +311,22 @@ class TestExplicitProtectedPaths:
             payload = json.loads(capsys.readouterr().out)
             assert payload["error"] == "target-redirect"
             assert payload["checked"] == str(alias / "pkg")
+            # A narrower scan root must not override the enclosing Git root.
+            # Resolving this alias first would project the query to mirror/other
+            # and lose the only lock, which lives under mirror/alias.
+            unrelated = tmp_path / "unrelated"
+            unrelated.mkdir()
+            nested_roots = tmp_path / "nested-alias-roots.json"
+            nested_roots.write_text(json.dumps({
+                "roots": [{"path": str(alias / "pkg")}, {"path": str(unrelated)}],
+                "twin_resolution": {"clone_roots": [str(alias / "pkg")],
+                                    "index_path": str(index)},
+            }), encoding="utf-8")
+            assert _check_dir(alias / "pkg", True, False, nested_roots) == 1
+            payload = json.loads(capsys.readouterr().out)
+            assert payload["error"] == "target-redirect"
+            assert payload["checked"] == str(alias / "pkg")
+            assert payload["descendants_complete"] is False
             assert _check_dir(git_repo / "tests", True, False, roots) == 0
             capsys.readouterr()
             (git_repo / "c" / "pkg").mkdir(parents=True)
@@ -325,6 +344,50 @@ class TestExplicitProtectedPaths:
                     os.rmdir(link)
                 else:
                     link.unlink()
+
+    @pytest.mark.parametrize("project_authority", ["pointer", "clone_root"])
+    def test_nested_scan_root_cannot_override_other_project_boundaries(
+            self, tmp_path, capsys, project_authority):
+        repo = tmp_path / "repo"
+        (repo / "other" / "pkg").mkdir(parents=True)
+        (repo / "tests").mkdir()
+        if project_authority == "pointer":
+            (repo / lock_utils.REPO_POINTER_NAME).write_text(json.dumps({
+                "schema": "ellmos-repo-pointer-v1", "repo_name": "demo",
+                "canonical_path": str(repo),
+            }), encoding="utf-8")
+        alias = repo / "alias"
+        if sys.platform == "win32":
+            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(alias),
+                                     str(repo / "other")], capture_output=True,
+                                    text=True, timeout=10)
+            assert result.returncode == 0, result.stderr
+        else:
+            alias.symlink_to(repo / "other", target_is_directory=True)
+        roots = tmp_path / "nested-boundary-roots.json"
+        cfg = {"roots": [{"path": str(alias / "pkg")}]}
+        if project_authority == "clone_root":
+            index = tmp_path / "empty-twins.json"
+            index.write_text(json.dumps({"by_repo_name": {}, "by_clone_path": {},
+                                         "unreadable_pointers_by_dirname": {}}),
+                             encoding="utf-8")
+            cfg["twin_resolution"] = {"clone_roots": [str(repo)],
+                                      "index_path": str(index)}
+        roots.write_text(json.dumps(cfg), encoding="utf-8")
+        try:
+            assert _check_dir(alias / "pkg", True, False, roots) == 1
+            payload = json.loads(capsys.readouterr().out)
+            assert payload["error"] == "target-redirect"
+            assert payload["checked"] == str(alias / "pkg")
+            assert _check_dir(repo / "tests", True, False, roots) == 0
+            assert json.loads(capsys.readouterr().out)["descendants_complete"] is True
+        finally:
+            assert alias.parent.resolve().is_relative_to(tmp_path.resolve())
+            assert alias.resolve().is_relative_to(tmp_path.resolve())
+            if sys.platform == "win32":
+                os.rmdir(alias)
+            else:
+                alias.unlink()
 
     def test_missing_query_stays_usage_error_and_parent_segment_is_uncertain(self, tmp_path, capsys):
         missing = tmp_path / "missing"

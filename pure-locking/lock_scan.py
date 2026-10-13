@@ -68,9 +68,10 @@ def _is_directory_redirect(path: Path) -> bool:
 def _query_redirect_or_error(target: Path, config: dict) -> str | None:
     """Reject redirects that remove a lexical ancestor from the physical path.
 
-    A prefix alias is safe only above an explicitly configured scan/clone root
-    or a validated Git/pointer root. Redirects at or below that boundary can
-    change the relative path used for twin locks, even inside one repository.
+    A prefix alias is safe only above every enclosing configured scan/clone
+    root and validated Git/pointer root. A narrow scan root cannot override a
+    wider project boundary: redirects inside that project can change the
+    relative path used for twin locks, even inside one repository.
     """
     if ".." in target.parts:
         return "target-parent-segment"
@@ -123,8 +124,10 @@ def _query_redirect_or_error(target: Path, config: dict) -> str | None:
         for component in redirects:
             if component.parent.resolve() not in physical_ancestors:
                 return "target-redirect"
-            if not any(component in root.parents and root.resolve() in physical_ancestors
-                       for root in boundaries):
+            if not boundaries or not all(
+                component in root.parents and root.resolve() in physical_ancestors
+                for root in boundaries
+            ):
                 return "target-redirect"
     except (OSError, RuntimeError):
         return "target-unreadable"

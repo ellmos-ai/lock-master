@@ -765,8 +765,10 @@ validated scan, clone, Git, or pointer root can hide a lock or change the
 relative path used for mirror twins. It returns exit 1 with JSON
 `error: target-redirect`, the original `checked` path, and
 `descendants_complete: false`. A prefix alias above a validated root is
-accepted only when its physical parent remains an ancestor of the physical
-target; without a validated root the result is undetermined. An unreadable
+accepted only above every relevant validated root and when its physical
+parent remains an ancestor of the physical target. A narrower scan root cannot
+override an enclosing Git, clone, or pointer root; unrelated roots do not
+count. Without a validated root the result is undetermined. An unreadable
 component also returns exit 1.
 PATH containing `..` returns exit 1 because normalization could erase a
 redirected component. A genuinely missing target still returns usage exit 2.
