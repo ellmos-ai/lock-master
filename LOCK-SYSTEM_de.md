@@ -569,6 +569,16 @@ Segment `.TOPICS`) meldete Exit 0, obwohl der echte Ordner ein aktives
 Zwillingsauflösung oben funktionierte bereits korrekt; der fehlende Pfad
 wurde nur nie als Fehler erkannt.
 
+Vor dem Auflösen prüft der Scanner jede lexikalische Komponente von PATH.
+Ein Symlink, eine Windows-Junction oder eine andere Verzeichnisweiterleitung
+kann einen Lock in den Vorfahren des ursprünglich abgefragten Pfads verdecken.
+Dann gilt Exit 1 mit `error: target-redirect`, dem Originalpfad in `checked`
+und `descendants_complete: false`. Eine unlesbare Komponente führt ebenfalls
+zu Exit 1. Enthält PATH `..`, gilt Exit 1, weil die Normalisierung eine
+Weiterleitung aus dem Pfad entfernen könnte. Ein tatsächlich fehlendes Ziel
+behält den bisherigen Eingabefehler Exit 2. Gewöhnliche OneDrive-Cloud-Platzhalter
+ohne Name-Surrogate-Tag bleiben regulär prüfbare Verzeichnisse.
+
 ---
 
 ## Umstrittene Locks: gleichzeitige Claims über einen synchronisierten Ordner

@@ -65,6 +65,22 @@ def _is_directory_redirect(path: Path) -> bool:
     return tag is None or bool(tag & 0x20000000)  # IO_REPARSE_TAG_NAME_SURROGATE
 
 
+def _query_redirect_or_error(target: Path) -> str | None:
+    """Reject lexical query paths whose resolution could hide an ancestor lock."""
+    if ".." in target.parts:
+        return "target-parent-segment"
+    lexical = target if target.is_absolute() else Path.cwd() / target
+    for component in reversed((lexical, *lexical.parents)):
+        try:
+            if _is_directory_redirect(component):
+                return "target-redirect"
+        except FileNotFoundError:
+            continue  # _check_dir reports a nonexistent target below
+        except OSError:
+            return "target-unreadable"
+    return None
+
+
 def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
     """Find nested locks for a subtree query, with a fail-closed work bound.
 
@@ -471,6 +487,16 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     raising, so without this check a mistyped --check-dir call silently
     reported exit 0 "free" -- worse than any other failure mode, since it
     looks identical to a genuinely clear directory (T-20260922-626871087)."""
+    query_error = _query_redirect_or_error(target)
+    if query_error is not None:
+        if as_json:
+            print(json.dumps({"checked": str(target), "error": query_error,
+                              "locks": [], "descendants_complete": False},
+                             ensure_ascii=False))
+        else:
+            print(f"lock_scan --check-dir: {target} -- UNDETERMINED ({query_error}); "
+                  "a query-path redirect can hide lexical ancestor locks.")
+        return 1
     target = target.resolve()
     if not target.is_dir():
         msg = f"lock_scan --check-dir: {target} does not exist -- not 'free', a usage error."

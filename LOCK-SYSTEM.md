@@ -752,12 +752,22 @@ python lock_scan.py --check-dir /path/to/project
 python lock_scan.py --check-dir /path/to/project --json
 python lock_scan.py --check-dir /path/to/project --strict
 ```
-Exit 0 = free, 1 = a LOCK file applies, 2 = usage error -- PATH does not
+Exit 0 = free, 1 = a LOCK file applies or the check is undetermined, 2 = usage error -- PATH does not
 exist (Path.resolve() normalizes a nonexistent path without raising, so
 without this check a mistyped or stale PATH silently read as "free";
 T-20260922-626871087), or -- only with `--strict` -- free of LOCK files but
 a guard hook is present (without `--strict`, guard hooks are reported but
 never change the exit code).
+
+The scanner checks every lexical component of PATH before resolving it. A
+symlink, Windows junction, or other directory name surrogate in the query can
+hide a lock in the original path's ancestors; it returns exit 1 with JSON
+`error: target-redirect`, the original `checked` path, and
+`descendants_complete: false`. An unreadable component also returns exit 1.
+PATH containing `..` returns exit 1 because normalization could erase a
+redirected component. A genuinely missing target still returns usage exit 2.
+Ordinary OneDrive cloud placeholders without a name-surrogate tag remain
+normal directory components.
 
 **Remove expired locks:**
 ```

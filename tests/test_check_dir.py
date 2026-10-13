@@ -236,6 +236,75 @@ class TestCheckDir:
 
 
 class TestExplicitProtectedPaths:
+    def test_missing_query_stays_usage_error_and_parent_segment_is_uncertain(self, tmp_path, capsys):
+        missing = tmp_path / "missing"
+        assert _check_dir(missing, True, False) == 2
+        assert json.loads(capsys.readouterr().out)["error"] == "target-not-found"
+        (tmp_path / "existing").mkdir()
+        parent_segment = tmp_path / "existing" / ".." / "existing"
+        assert _check_dir(parent_segment, True, False) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["error"] == "target-parent-segment"
+        assert payload["descendants_complete"] is False
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows junction contract")
+    def test_direct_query_through_junction_keeps_lexical_ancestors(self, tmp_path, capsys):
+        repo = tmp_path / "repo"
+        outside = tmp_path / "outside-free"
+        repo.mkdir()
+        (repo / "tests").mkdir()
+        (outside / "package").mkdir(parents=True)
+        assert lock_create.main([str(repo), "--scope", "starter", "--path",
+                                 "bin", "--no-contest"]) == 0
+        capsys.readouterr()
+        link = repo / "bin"
+        result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                                capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        try:
+            for query in (link, link / "package"):
+                assert _check_dir(query, True, False) == 1
+                payload = json.loads(capsys.readouterr().out)
+                assert payload["checked"] == str(query)
+                assert payload["error"] == "target-redirect"
+                assert payload["descendants_complete"] is False
+            # A protected path whose endpoint escapes the lock root is itself
+            # malformed for scope narrowing and remains a broad legacy guard.
+            assert lock_utils.protected_relative_paths(repo / "LOCK.starter.txt") is None
+        finally:
+            assert link.parent.resolve().is_relative_to(tmp_path.resolve())
+            assert link.resolve().is_relative_to(tmp_path.resolve())
+            assert lock_scan._is_directory_redirect(link)
+            os.rmdir(link)
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows junction contract")
+    def test_intermediate_junction_query_and_free_real_sibling(self, tmp_path, capsys):
+        repo = tmp_path / "repo"
+        (repo / "scope").mkdir(parents=True)
+        (repo / "tests").mkdir()
+        outside = tmp_path / "outside-free"
+        (outside / "child").mkdir(parents=True)
+        assert lock_create.main([str(repo), "--scope", "starter", "--path",
+                                 "scope", "--no-contest"]) == 0
+        capsys.readouterr()
+        link = repo / "scope" / "alias"
+        result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                                capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        try:
+            assert _check_dir(link / "child", True, False) == 1
+            payload = json.loads(capsys.readouterr().out)
+            assert payload["checked"] == str(link / "child")
+            assert payload["error"] == "target-redirect"
+            assert payload["descendants_complete"] is False
+            assert _check_dir(repo / "tests", True, False) == 0
+            assert json.loads(capsys.readouterr().out)["descendants_complete"] is True
+        finally:
+            assert link.parent.resolve().is_relative_to(tmp_path.resolve())
+            assert link.resolve().is_relative_to(tmp_path.resolve())
+            assert lock_scan._is_directory_redirect(link)
+            os.rmdir(link)
+
     def test_unreadable_nested_lock_lookup_is_incomplete(self, tmp_path, monkeypatch, capsys):
         child = tmp_path / "unreadable"
         child.mkdir()
