@@ -8,8 +8,8 @@ fields and refuses to clobber an existing lock unless --force is given.
 Examples:
 
     python lock_create.py /path/to/project --owner my-agent --purpose "refactor"
-    python lock_create.py /path/to/project --scope docs --expires 90m
-    python lock_create.py /path/to/project --team LAPTOP --scope assets
+    python lock_create.py /path/to/project --scope docs --path docs --expires 90m
+    python lock_create.py /path/to/project --team LAPTOP --scope assets --path assets
     python lock_create.py /path/to/project --user
     python lock_create.py /path/to/project --condition --scope publish \
         --release-condition "PR #42 merged"

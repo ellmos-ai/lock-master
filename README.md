@@ -164,7 +164,7 @@ sequenceDiagram
     LM->>FS: Scan for active LOCK*.txt
     FS-->>LM: Workspace clean (0 locks)
     LM-->>AgentA: Access granted (unlocked)
-    AgentA->>LM: Stamp scoped lock: lock_create.py --scope api
+    AgentA->>LM: Stamp scoped lock: lock_create.py --scope api --path api
     LM->>FS: Atomically write LOCK.api.txt (TTL: 24h)
     FS-->>AgentA: Lock confirmed
 
@@ -172,7 +172,7 @@ sequenceDiagram
     AgentB->>LM: Attempt to modify api module: lock_utils.active_locks()
     LM->>FS: Read LOCK.api.txt (Active, Owner: Claude Code)
     LM-->>AgentB: Access Denied (Contested: api scope locked)
-    AgentB->>LM: Switch to docs module: lock_create.py --scope docs
+    AgentB->>LM: Switch to docs module: lock_create.py --scope docs --path docs
     LM->>FS: Atomically write LOCK.docs.txt
     FS-->>AgentB: Access granted (Parallel execution)
 
@@ -314,7 +314,7 @@ operations: git-push, deploy
 | Common Need | Recommended Action | Command / Usage |
 |:---|:---|:---|
 | Prevent simultaneous agent edits on a repo | Stamp root exclusive lock | `python lock_create.py <project>` |
-| Enable parallel agent work on separate modules | Stamp scoped component lock | `python lock_create.py <project> --scope api` |
+| Enable parallel agent work on separate modules | Stamp scoped component lock | `python lock_create.py <project> --scope api --path api` |
 | Scan active locks across all project roots | Run read-only scanner | `python lock_scan.py` |
 | Export human-readable Markdown status page | Generate lock cache | `python lock_scan.py --write-cache` |
 | Inspect expired/abandoned locks safely | Preview stale locks | `python prune_stale_locks.py --dry-run` |
@@ -353,7 +353,7 @@ echo $?  # 0 = free to work; 1 = locked
 python lock_create.py /path/to/project --owner "claude-code" --purpose "Refactoring core parser"
 
 # Scoped component lock
-python lock_create.py /path/to/project --scope frontend --owner "codex" --purpose "UI redesign"
+python lock_create.py /path/to/project --scope frontend --path frontend --owner "codex" --purpose "UI redesign"
 ```
 
 ### 4. Scan Workspace Hierarchy
