@@ -7,6 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (watcher: no back-to-back full scans - 2026-10-17)
+
+- The watcher daemon scheduled a full scan every `FULL_SCAN_INTERVAL` (60 s) although a scan over many roots takes 55-617 s (LANGLAUF-PROTOKOLL), so it scanned continuously: measured on ASUS-GEI about 45 % of one core and 3,900 `stat` calls per second for eight days. After a full scan the daemon now waits at least `FULL_SCAN_IDLE_FACTOR` (default 4) times the measured scan duration, never less than the interval (`next_full_scan_gap()`); the gap is logged when it exceeds the interval and reported as `next_full_scan_gap_s` in the daemon status. Override with `LOCK_MASTER_FULL_SCAN_IDLE_FACTOR` (`0` restores the fixed interval). Tests: `tests/test_watcher_scheduling.py`.
+
 ### Fixed (exact legacy basenames - 2026-10-10)
 
 - Legacy markers require the exact filenames `TEST.txt` / `TESTS.txt`, consistently with `lock_name_parts()`. Detection uses actual directory-entry names, avoiding both case-insensitive matches and pattern-named literal glob results on Windows Python 3.10/3.11. Ordinary lowercase `test.txt` documentation is no longer promoted into an active lock. Modern `LOCK*.txt` names, including uppercase extensions, remain case-insensitive; genuine legacy markers still block without expiry. Regression coverage simulates both glob behaviors on all CI hosts (BACH task #2044).

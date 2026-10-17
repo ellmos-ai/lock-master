@@ -21,6 +21,12 @@ DAEMON_STATUS_PATH: Path = _LOCAL_DATA_DIR / "daemon_status.json"
 # Intervalle in Sekunden
 FULL_SCAN_INTERVAL: int = 60
 CHECK_INTERVAL: int = 20
+# Pause nach einem Full-Scan: mindestens FULL_SCAN_INTERVAL, sonst das Vielfache der
+# gemessenen Scandauer. Ohne diese Bremse lief der Daemon pausenlos, weil ein Scan
+# über viele Roots 55-617 s dauert (LANGLAUF-PROTOKOLL) und das Intervall 60 s ist:
+# ASUS-GEI 2026-10-17 dauerhaft ~45 % eines Kerns und ~3.900 stat/s. Faktor 4 hält
+# den Scan-Anteil unter 20 %. Übersteuerbar per LOCK_MASTER_FULL_SCAN_IDLE_FACTOR.
+FULL_SCAN_IDLE_FACTOR: float = max(0.0, float(os.environ.get("LOCK_MASTER_FULL_SCAN_IDLE_FACTOR", "4") or 0))
 
 # Repo-Root zum Python-Path hinzufügen, damit lock_utils und lock_scan importierbar sind
 if str(SCRIPTS_DIR) not in sys.path:

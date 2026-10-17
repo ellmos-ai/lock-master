@@ -46,6 +46,21 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def next_full_scan_gap(
+    last_duration_s: float,
+    interval: float | None = None,
+    idle_factor: float | None = None,
+) -> float:
+    """Seconds to wait after a full scan before the next one may start.
+
+    Never below the configured interval; scales with the measured scan
+    duration so a slow scan (large or slow roots) does not run back to back.
+    """
+    interval = config.FULL_SCAN_INTERVAL if interval is None else interval
+    idle_factor = config.FULL_SCAN_IDLE_FACTOR if idle_factor is None else idle_factor
+    return max(float(interval), float(idle_factor) * max(0.0, float(last_duration_s)))
+
+
 def _ensure_utf8_stdio_for_stream(stream) -> None:
     """Reconfigure a single stream to tolerant UTF-8, wenn moeglich."""
     if stream is not None and hasattr(stream, "reconfigure"):
@@ -331,6 +346,7 @@ def run_daemon(update_cache: bool) -> None:
         "scan_started_at": None,
         "last_scan_finished_at": None,
         "last_scan_duration_s": None,
+        "next_full_scan_gap_s": None,
     }
 
     def _handle_signal(signum, frame):
@@ -351,11 +367,13 @@ def run_daemon(update_cache: bool) -> None:
 
     print(
         f"[{_now_iso()}] Lock-Watcher gestartet. "
-        f"Full-Scan alle {config.FULL_SCAN_INTERVAL}s, "
+        f"Full-Scan frühestens alle {config.FULL_SCAN_INTERVAL}s "
+        f"(Pause mindestens {config.FULL_SCAN_IDLE_FACTOR:g}x Scandauer), "
         f"Quick-Check alle {config.CHECK_INTERVAL}s."
     )
 
     last_full_scan: float = 0.0
+    full_scan_gap: float = float(config.FULL_SCAN_INTERVAL)
     last_check: float = 0.0
     last_stats_scan: float = 0.0
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lock-watcher-scan")
@@ -376,11 +394,17 @@ def run_daemon(update_cache: bool) -> None:
             now = time.monotonic()
 
             if pending_scan is not None and pending_scan.done():
+                duration = time.monotonic() - pending_scan_started_mono
+                full_scan_gap = next_full_scan_gap(duration)
                 with state_lock:
                     scan_state["scan_in_progress"] = False
                     scan_state["last_scan_finished_at"] = _now_iso()
-                    scan_state["last_scan_duration_s"] = round(
-                        time.monotonic() - pending_scan_started_mono, 1
+                    scan_state["last_scan_duration_s"] = round(duration, 1)
+                    scan_state["next_full_scan_gap_s"] = round(full_scan_gap, 1)
+                if full_scan_gap > config.FULL_SCAN_INTERVAL:
+                    print(
+                        f"[{_now_iso()}] Full-Scan dauerte {duration:.0f}s; "
+                        f"nächster Full-Scan frühestens in {full_scan_gap:.0f}s."
                     )
                 try:
                     stats = pending_scan.result()
@@ -398,7 +422,7 @@ def run_daemon(update_cache: bool) -> None:
                 last_full_scan = time.monotonic()
                 last_check = time.monotonic()
 
-            elif pending_scan is None and now - last_full_scan >= config.FULL_SCAN_INTERVAL:
+            elif pending_scan is None and now - last_full_scan >= full_scan_gap:
                 pending_scan = _submit_full_scan()
 
             elif pending_scan is None and now - last_check >= config.CHECK_INTERVAL:
