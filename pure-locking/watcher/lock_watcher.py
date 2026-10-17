@@ -61,6 +61,21 @@ def next_full_scan_gap(
     return max(float(interval), float(idle_factor) * max(0.0, float(last_duration_s)))
 
 
+def scan_stale_after_seconds(status: dict | None) -> float:
+    """Age of the last full scan beyond which the daemon counts as degraded.
+
+    The expected cycle is the announced gap plus one scan duration; the fixed
+    overrun margin is added on top, so a slow but healthy daemon is not
+    reported as stale during its deliberate pause.
+    """
+    status = status or {}
+    gap = status.get("next_full_scan_gap_s")
+    duration = status.get("last_scan_duration_s")
+    gap = float(gap) if isinstance(gap, (int, float)) else float(config.FULL_SCAN_INTERVAL)
+    duration = float(duration) if isinstance(duration, (int, float)) else 0.0
+    return SCAN_OVERRUN_WARN_SECONDS + gap + duration
+
+
 def _ensure_utf8_stdio_for_stream(stream) -> None:
     """Reconfigure a single stream to tolerant UTF-8, wenn moeglich."""
     if stream is not None and hasattr(stream, "reconfigure"):

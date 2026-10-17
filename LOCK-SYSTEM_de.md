@@ -63,7 +63,7 @@ Die DB liegt bewusst außerhalb von OneDrive, weil SQLite-WAL-Dateien in synchro
 
 ### Scan- und Statusmodell
 
-- Full-Scan alle 60 Sekunden über alle Roots aus `lock_roots.json`.
+- Full-Scan frühestens alle 60 Sekunden über alle Roots aus `lock_roots.json`; nach jedem Scan pausiert der Daemon mindestens das Vierfache der gemessenen Scandauer (`FULL_SCAN_IDLE_FACTOR`), damit langsame Roots keinen Dauerscan erzeugen.
 - Quick-Check alle 20 Sekunden nur für bereits bekannte aktive Locks.
 - Daemon-Heartbeat alle 5 Sekunden.
 - Raumstatistik-Scan alle 15 Minuten.

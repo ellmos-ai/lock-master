@@ -55,6 +55,23 @@ def test_defaults_come_from_config_and_env_override(monkeypatch):
         importlib.reload(config)
 
 
+def test_unusable_env_values_fall_back_to_the_default():
+    parse = config._idle_factor_from_env
+    assert parse(None) == 4 and parse("") == 4 and parse("abc") == 4
+    assert parse("inf") == 4 and parse("nan") == 4
+    assert parse("-2") == 0 and parse("2.5") == 2.5
+
+
+def test_stale_threshold_follows_the_announced_gap():
+    base = lock_watcher.SCAN_OVERRUN_WARN_SECONDS
+    assert lock_watcher.scan_stale_after_seconds(None) == base + config.FULL_SCAN_INTERVAL
+    assert lock_watcher.scan_stale_after_seconds({}) == base + config.FULL_SCAN_INTERVAL
+    status = {"next_full_scan_gap_s": 508.0, "last_scan_duration_s": 127.0}
+    assert lock_watcher.scan_stale_after_seconds(status) == base + 635.0
+    # A healthy daemon in its deliberate pause is not degraded.
+    assert 400 < lock_watcher.scan_stale_after_seconds(status)
+
+
 def test_daemon_status_reports_the_next_gap():
     source = (WATCHER / "lock_watcher.py").read_text(encoding="utf-8")
     assert '"next_full_scan_gap_s"' in source
