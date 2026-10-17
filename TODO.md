@@ -63,6 +63,11 @@
 - [x] `lock_status.py` -- per-project status check (exit 0 = no lock, exit 1 = locked) -- done 2026-07-28
 - [ ] Integration example for cron-based stale cleanup
 - [ ] Optional installer/launcher wrapper for `pure-locking/watcher/` on non-Windows systems
+- [ ] **Scan cost itself (follow-up to the adaptive gap, 2026-10-17):** one `lock_scan --check-dir` on a
+      temp path made 1,031 `find_lock_files` calls and about 30,000 `stat` calls (25 s on a loaded
+      laptop). Candidates: one `os.scandir` pass per directory instead of per-pattern `is_file` probes,
+      caching ancestor scans within a run, and skipping roots whose cloud sync is paused. The watcher's
+      15-minute `dir_stats` room scan is a second full walk and should share the same pass.
 
 ## Cloud-Sync-Preflight vor dem Lock-Check (Ticket T-20260816-998265218, 2026-08-17)
 
