@@ -16,6 +16,8 @@ data/
 .env
 .env.*
 *.env
+!.env.example
+!.env.sample
 
 # Secrets, private keys, certificates, and credentials
 *.pem
@@ -27,6 +29,10 @@ data/
 *.csr
 *.token
 *.secret
+*token*.json
+*secret*.json
+token.json
+tokens.json
 credentials.json
 secrets.json
 .npmrc
@@ -35,6 +41,8 @@ id_rsa*
 id_ed25519*
 id_ecdsa*
 id_dsa*
+*_recovery_codes.txt
+*recovery*codes*.txt
 
 # Python
 __pycache__/
@@ -103,6 +111,7 @@ wheelhouse/
 *-WORKSTATION-LG.*
 *.orig
 *.rej
+CONFLICT_REVIEW_LOG*
 uv.lock
 !package-lock.json
 LOCK.user.*

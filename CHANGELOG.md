@@ -7,6 +7,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security & Hygiene (AI Security & Dependency Audit, Gitignore Fleet Hardening & Path Sanitization - 2026-10-18)
+
+- **Supply-Chain & Dependency Audit**: Audited zero external runtime dependencies (`dependencies = []`), standard build tools (`setuptools>=61.0`), and development test dependencies (`pytest>=8.0`, `ruff>=0.6.0`); 0 vulnerabilities across all packages.
+- **Defensive Gitignore Fleet Hardening**: Hardened `.gitignore` against token and secret leaks (`*token*.json`, `*secret*.json`, `token.json`, `tokens.json`), recovery code archives (`*_recovery_codes.txt`, `*recovery*codes*.txt`), multi-host review logs (`CONFLICT_REVIEW_LOG*`), and explicit exception whitelist for environment example templates (`!.env.example`, `!.env.sample`).
+- **Privacy & Path Sanitization**: Sanitized historical marketing path reference in `MARKETING-LOG.txt` from local user path to neutral `<OneDrive>/_scripts`. Verified 0 hardcoded personal user paths across all production code, tests, and configurations.
+- **Contract Test Suite Expansion**: Extended `tests/test_metadata.py` with contract test assertions verifying the new fleet `.gitignore` patterns and zero hardcoded user paths (Gesamtsuite 356 Tests, 100% grün).
+
 ### Fixed (watcher: no back-to-back full scans - 2026-10-17)
 
 - The watcher daemon scheduled a full scan every `FULL_SCAN_INTERVAL` (60 s) although a scan over many roots takes 55-617 s (LANGLAUF-PROTOKOLL), so it scanned continuously: measured on ASUS-GEI about 45 % of one core and 3,900 `stat` calls per second for eight days. After a full scan the daemon now waits at least `FULL_SCAN_IDLE_FACTOR` (default 4) times the measured scan duration, never less than the interval (`next_full_scan_gap()`), which keeps the scan share at most 20 %; the gap is logged when it exceeds the interval and reported as `next_full_scan_gap_s` in the daemon status and the `/api/daemon` response. Trade-off: a lock created between scans is seen by the daemon database and `LOCK-CACHE` only at the next full scan, i.e. up to factor x duration later (127 s scans: about 11 minutes); the authoritative check `lock_scan --check-dir` reads the filesystem directly and is unaffected. The `degraded`/`scan_stale` threshold in the web server now follows the announced gap plus one scan duration (`scan_stale_after_seconds()`), so a healthy daemon in its pause is not reported as stale. Override with `LOCK_MASTER_FULL_SCAN_IDLE_FACTOR` (`0` restores the fixed interval; unusable values fall back to 4). Tests: `tests/test_watcher_scheduling.py`.

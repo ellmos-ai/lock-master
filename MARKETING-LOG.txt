@@ -121,7 +121,7 @@ German (DE):
 - Multi-Host Cloud-Sync & Gitignore Hardening: Extended .gitignore with full multi-host tokens (*-ASUS*, *-LAPTOP*, *-Mac Studio*, *-MacBook*, *-IDEAPAD*, *_WORKSTATION*), test caches (.pytest_temp/, .turbo/, .hypothesis/, .nyc_output/, .tox/), OS artifacts (Desktop.ini), and canonical locks (LOCK.user.*, LOCK.until.*, LOCK.condition.*, .automation-lock).
 - PEP 621 Notice URL & Pytest Basetemp: Added Notice URL in pyproject.toml; standardized --basetemp=.pytest_temp and norecursedirs in pyproject.toml and pytest.ini.
 - Level 1 SBOM & Notice Attribution Re-Audit: Re-audited THIRD_PARTY_LICENSES.md Stand 2026-09-26 confirming zero runtime dependencies, RunAsInvoker unprivileged execution, and formal link to NOTICE.
-- Zero-Drift Deployment Parity: Fully reconciled with C:\Users\lukas\OneDrive\_scripts (bin/check_deployment.py: 11/11 files in parity, exit 0).
+- Zero-Drift Deployment Parity: Fully reconciled with <OneDrive>/_scripts (bin/check_deployment.py: 11/11 files in parity, exit 0).
 - Verification Baseline: 246 passing tests (100% green), clean Ruff linting, clean bytecode compilation, and wheel smoke verification.
 
 ================================================================================
@@ -145,3 +145,13 @@ German (DE):
 - Level 1 SBOM Stand 2026-10-03 Re-Audit: Re-audited THIRD_PARTY_LICENSES.md and standalone plain-text companion THIRD_PARTY_LICENSES.txt Stand 2026-10-03 with full verification of all 10 invariants (INV-LOCAL-01 to INV-SLA-10), zero external runtime dependencies (pure Python stdlib), 100% zero-copyleft permissive stack, unprivileged RunAsInvoker guarantee, and 48h Security SLA.
 - Documentation & Badge Synchronization: Refreshed test badges in README.md and README_de.md to 282 passed (100% green), added Contributing welcome badge, synchronized Verified date to 2026-10-03, and updated llms.txt context index with 282-test baseline.
 - Verification Baseline: 282 passing tests via pytest (100% green), ruff check clean (0 errors), python -m compileall clean (0 errors), git diff --check clean (0 errors), and strict zero version modification discipline (1.6.3 frozen per T-20260920-167562623).
+
+================================================================================
+11. AI SECURITY & DEPENDENCY AUDIT: FLEET DEFENSE, GITIGNORE HARDENING & CONTRACT TESTS (2026-10-18)
+================================================================================
+- Supply-Chain & Dependency Audit: Verified zero runtime dependencies (pure Python standard library runtime), audited setuptools (82.0.1) and dev test toolchain (pytest 9.1.1, ruff 0.15.18); 0 known vulnerabilities.
+- Defensive Gitignore Fleet Hardening: Extended .gitignore with fleet-standard patterns for tokens and secrets (*token*.json, *secret*.json, token.json, tokens.json), recovery codes (*_recovery_codes.txt, *recovery*codes*.txt), multi-host coordination artifacts (CONFLICT_REVIEW_LOG*), and explicit whitelist exceptions for environment templates (!.env.example, !.env.sample).
+- Privacy & Path Sanitization: AST and regex scan verified 0 hardcoded personal user paths (C:\Users\lukas) across all Python code, tests, and configurations; sanitized historical marketing reference to neutral <OneDrive>/_scripts.
+- Contract Test Suite Expansion: Fortified tests/test_metadata.py with contract test assertions verifying the new .gitignore protection patterns and zero hardcoded user paths.
+- Plan D Mirror Parity: Synchronized byte-identical state to OneDrive mirror C:\Users\lukas\OneDrive\.TOPICS\.AI\.MODULES\.CONTROL\lock-master via repo_mirror.py --apply; Version 1.6.3 strictly frozen.
+- Verification Baseline: 356 passing tests via pytest (100% green, 3 skipped), ruff check clean (0 errors), python -m compileall clean (0 errors), git diff --check clean (0 errors).

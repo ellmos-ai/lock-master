@@ -6,6 +6,7 @@ import http.client
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -78,13 +79,19 @@ def test_loopback_http_server_enforces_host_and_origin_gates(monkeypatch, tmp_pa
     thread.start()
 
     def request(method: str, path: str, **headers: str):
-        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-        try:
-            connection.request(method, path, body="{}", headers=headers)
-            response = connection.getresponse()
-            return response.status, dict(response.getheaders()), response.read()
-        finally:
-            connection.close()
+        for attempt in range(3):
+            try:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                try:
+                    connection.request(method, path, body="{}", headers=headers)
+                    response = connection.getresponse()
+                    return response.status, dict(response.getheaders()), response.read()
+                finally:
+                    connection.close()
+            except (ConnectionError, OSError):
+                if attempt == 2:
+                    raise
+                time.sleep(0.05)
 
     try:
         allowed_host = f"127.0.0.1:{port}"
