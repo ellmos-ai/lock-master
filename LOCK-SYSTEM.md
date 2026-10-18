@@ -77,7 +77,7 @@ Open `http://127.0.0.1:8095`. The web server is intended for local use only.
 
 Watcher scan model:
 
-- full scan every 60 seconds
+- full scan at the earliest every 60 seconds; after each scan the daemon pauses at least 4x the measured scan duration (`FULL_SCAN_IDLE_FACTOR`)
 - quick check of known active locks every 20 seconds
 - daemon heartbeat every 5 seconds
 - directory statistics every 15 minutes

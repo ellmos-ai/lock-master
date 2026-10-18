@@ -115,7 +115,7 @@ notifications do not change cleanup semantics.
 
 ## Scan Model
 
-- Full scan: every 60 seconds.
+- Full scan: at the earliest every 60 seconds; after each scan the daemon pauses at least `FULL_SCAN_IDLE_FACTOR` (default 4) times the measured scan duration, so slow roots do not make it scan continuously (`LOCK_MASTER_FULL_SCAN_IDLE_FACTOR` overrides, `0` restores the fixed interval). New locks are therefore visible to the daemon only at the next full scan; `lock_scan --check-dir` reads the filesystem directly.
 - Quick check of known active locks: every 20 seconds.
 - Daemon heartbeat: every 5 seconds, in a thread independent from full scans.
 - A fresh heartbeat with an overlong or stale full scan reports `degraded`,

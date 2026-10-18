@@ -144,7 +144,7 @@ def _daemon_status_for_api(db: storage.LockDB | None = None) -> dict:
     )
     scan_stale = (
         last_scan_age_seconds is not None
-        and last_scan_age_seconds > _lw.SCAN_OVERRUN_WARN_SECONDS
+        and last_scan_age_seconds > _lw.scan_stale_after_seconds(status)
     )
     if not heartbeat_fresh:
         state = "stale"
@@ -165,6 +165,7 @@ def _daemon_status_for_api(db: storage.LockDB | None = None) -> dict:
         "scan_started_at": scan_started_at,
         "last_scan_finished_at": status.get("last_scan_finished_at"),
         "last_scan_duration_s": status.get("last_scan_duration_s"),
+        "next_full_scan_gap_s": status.get("next_full_scan_gap_s"),
         "last_scan_age_seconds": last_scan_age_seconds,
     }
 
@@ -416,7 +417,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
         age = _iso_age_seconds(stats.get("last_scan_at"))
         stats["last_scan_age_seconds"] = age
         stats["scan_stale"] = (
-            age is not None and age > _lw.SCAN_OVERRUN_WARN_SECONDS
+            age is not None and age > _lw.scan_stale_after_seconds(_lw.load_daemon_status())
         )
         self._json_response(stats)
 
