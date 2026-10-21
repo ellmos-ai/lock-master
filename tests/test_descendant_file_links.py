@@ -110,8 +110,10 @@ def test_file_link_identity_checks_do_not_require_host_symlink_privilege(monkeyp
     after = SimpleNamespace(**vars(before))
     first = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_dev=1, st_ino=21)
     last = SimpleNamespace(**vars(first))
-    if changed == "link": after.st_ino += 1
-    if changed == "target": last.st_ino += 1
+    if changed == "link":
+        after.st_ino += 1
+    if changed == "target":
+        last.st_ino += 1
     link_stats = iter([before, after])
     target_stats = iter([first, last])
     monkeypatch.setattr(Path, "lstat", lambda path: next(link_stats))
