@@ -162,13 +162,23 @@ def test_target_becoming_directory_during_classification_is_incomplete(tmp_path,
     original = Path.stat
     original_classifier = lock_scan._verified_regular_file_link
     observations = []
+    metadata_errors = []
+    swapped_target = []
     def swapped(path, *args, **kwargs):
-        result = original(path, *args, **kwargs)
+        try:
+            result = original(path, *args, **kwargs)
+        except OSError as exc:
+            if path == link and swapped_target:
+                metadata_errors.append((type(exc).__name__, exc.errno,
+                                        getattr(exc, "winerror", None),
+                                        kwargs.get("follow_symlinks", True)))
+            raise
         if path == link and kwargs.get("follow_symlinks", True):
             observations.append(result)
             if len(observations) == 1:
                 data.unlink()
                 data.mkdir()
+                swapped_target.append(True)
         return result
     def classify(path):
         if path != link:
@@ -180,7 +190,14 @@ def test_target_becoming_directory_during_classification_is_incomplete(tmp_path,
     code, payload = query(root, capsys)
     assert code == 1
     assert payload["descendants_complete"] is False
-    assert len(observations) == 2
+    assert swapped_target == [True] and data.is_dir()
+    assert stat.S_ISREG(observations[0].st_mode)
+    if len(observations) == 2:
+        assert stat.S_ISDIR(observations[1].st_mode)
+    else:
+        # A Windows file-type link can fail metadata resolution as soon as
+        # its target becomes a directory. That must reject the scan too.
+        assert len(observations) == 1 and len(metadata_errors) == 1, metadata_errors
 
 
 def test_file_link_is_not_an_authorized_query_path(tmp_path, capsys):
