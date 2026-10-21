@@ -7,6 +7,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (regular file links in bounded directory scans - 2026-10-21)
+
+- A stable symbolic link to a confirmed regular file no longer makes the
+  descendant directory scan incomplete. This supports ordinary external data
+  files without a path whitelist or opening the linked file.
+- Directory/query redirects, broken or unreadable links, changing link/target
+  identities and special-file targets remain fail-closed. Existing lock marker
+  inspection is retained, including a file link named `LOCK.user.txt`.
+- Regression coverage includes nested real locks after a file link, target
+  changes during classification, and unchanged query-path denial (BACH #2368).
+
 ### Security & Hygiene (AI Security & Dependency Audit, Gitignore Fleet Hardening & Path Sanitization - 2026-10-18)
 
 - **Supply-Chain & Dependency Audit**: Audited zero external runtime dependencies (`dependencies = []`), standard build tools (`setuptools>=61.0`), and development test dependencies (`pytest>=8.0`, `ruff>=0.6.0`); 0 vulnerabilities across all packages.

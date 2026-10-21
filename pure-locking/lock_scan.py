@@ -134,6 +134,30 @@ def _query_redirect_or_error(target: Path, config: dict) -> str | None:
     return None
 
 
+def _verified_regular_file_link(path: Path) -> bool:
+    """Classify a non-traversed file link without weakening query redirects.
+
+    A file has no child directory locks to visit. Unknown targets, directory
+    links and changing link identities cannot establish that fact. Metadata
+    reads never open or change the linked file, including a live database.
+    """
+    try:
+        before = path.lstat()
+        if not stat.S_ISLNK(before.st_mode):
+            return False
+        first = path.stat()
+        after = path.lstat()
+        last = path.stat()
+    except (OSError, RuntimeError):
+        return False
+    identity_fields = ("st_dev", "st_ino", "st_mode", "st_size",
+                       "st_mtime_ns", "st_ctime_ns", "st_reparse_tag")
+    same_link = all(getattr(before, field, None) == getattr(after, field, None)
+                    for field in identity_fields)
+    return (same_link and stat.S_ISREG(first.st_mode) and stat.S_ISREG(last.st_mode)
+            and first.st_dev == last.st_dev and first.st_ino == last.st_ino)
+
+
 def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
     """Find nested locks for a subtree query, with a fail-closed work bound.
 
@@ -157,6 +181,8 @@ def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
                 if entry.name == ".git":
                     continue
                 if _is_directory_redirect(entry):
+                    if _verified_regular_file_link(entry):
+                        continue
                     return hits, False
                 if entry.is_dir():
                     children.append(entry)
