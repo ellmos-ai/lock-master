@@ -46,6 +46,7 @@ DEFAULT_ROOTS_FILE = Path(__file__).resolve().parent / "lock_roots.json"
 # stays a usable freshness signal for readers (sync_mirror accepts 180 min).
 CACHE_REFRESH_SECONDS = 30 * 60
 CHECK_DIR_MAX_DESCENDANTS = 1024
+CHECK_DIR_MAX_DESCENDANTS_CEILING = 1_000_000
 
 
 def _is_directory_redirect(path: Path) -> bool:
@@ -134,6 +135,30 @@ def _query_redirect_or_error(target: Path, config: dict) -> str | None:
     return None
 
 
+def _verified_regular_file_link(path: Path) -> bool:
+    """Classify a non-traversed file link without weakening query redirects.
+
+    A file has no child directory locks to visit. Unknown targets, directory
+    links and changing link identities cannot establish that fact. Metadata
+    reads never open or change the linked file, including a live database.
+    """
+    try:
+        before = path.lstat()
+        if not stat.S_ISLNK(before.st_mode):
+            return False
+        first = path.stat()
+        after = path.lstat()
+        last = path.stat()
+    except (OSError, RuntimeError):
+        return False
+    identity_fields = ("st_dev", "st_ino", "st_mode", "st_size",
+                       "st_mtime_ns", "st_ctime_ns", "st_reparse_tag")
+    same_link = all(getattr(before, field, None) == getattr(after, field, None)
+                    for field in identity_fields)
+    return (same_link and stat.S_ISREG(first.st_mode) and stat.S_ISREG(last.st_mode)
+            and first.st_dev == last.st_dev and first.st_ino == last.st_ino)
+
+
 def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
     """Find nested locks for a subtree query, with a fail-closed work bound.
 
@@ -157,6 +182,8 @@ def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
                 if entry.name == ".git":
                     continue
                 if _is_directory_redirect(entry):
+                    if _verified_regular_file_link(entry):
+                        continue
                     return hits, False
                 if entry.is_dir():
                     children.append(entry)
@@ -541,6 +568,17 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     reported exit 0 "free" -- worse than any other failure mode, since it
     looks identical to a genuinely clear directory (T-20260922-626871087)."""
     config = load_config(roots_file or DEFAULT_ROOTS_FILE)
+    descendant_limit = config.get("check_dir_max_descendants", CHECK_DIR_MAX_DESCENDANTS)
+    if (type(descendant_limit) is not int
+            or not 1 <= descendant_limit <= CHECK_DIR_MAX_DESCENDANTS_CEILING):
+        if as_json:
+            print(json.dumps({"checked": str(target), "error": "invalid-descendant-limit",
+                              "locks": [], "descendants_complete": False},
+                             ensure_ascii=False))
+        else:
+            print("lock_scan --check-dir: UNDETERMINED, check_dir_max_descendants "
+                  f"must be an integer from 1 to {CHECK_DIR_MAX_DESCENDANTS_CEILING}.")
+        return 1
     query_error = _query_redirect_or_error(target, config)
     if query_error is not None:
         if as_json:
@@ -562,7 +600,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         return 2
     now = datetime.now(timezone.utc)
     hits = lock_utils.active_locks_for_path(target, now)
-    nested_hits, descendants_complete = _descendant_locks(target, now)
+    nested_hits, descendants_complete = _descendant_locks(target, now, limit=descendant_limit)
     hits.extend(nested_hits)
 
     # Two-trees rule: the twin in the other tree counts as well
@@ -603,7 +641,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     for mapped in mapped_twins:
         twin_hits.extend(lock_utils.active_locks_for_path(mapped, now))
         if mapped.is_dir():
-            twin_nested, twin_complete = _descendant_locks(mapped, now)
+            twin_nested, twin_complete = _descendant_locks(mapped, now, limit=descendant_limit)
             twin_hits.extend(twin_nested)
             descendants_complete = descendants_complete and twin_complete
     hits.extend(twin_hits)
