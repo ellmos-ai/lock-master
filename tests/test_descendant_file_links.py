@@ -217,3 +217,107 @@ def test_special_file_link_target_is_incomplete_without_opening_it(tmp_path, cap
     code, payload = query(root, capsys)
     assert code == 1
     assert payload["descendants_complete"] is False
+
+
+def configured_roots(tmp_path, root, limit):
+    roots = tmp_path / "bounded-roots.json"
+    roots.write_text(json.dumps({"roots": [{"path": str(root)}],
+                                 "check_dir_max_descendants": limit}), encoding="utf-8")
+    return roots
+
+
+def test_configured_limit_scans_large_real_tree_and_keeps_default(tmp_path, capsys):
+    root = tmp_path / "project"
+    root.mkdir()
+    for i in range(1025):
+        (root / f"child-{i:04}").mkdir()
+    defaults = tmp_path / "defaults.json"
+    defaults.write_text(json.dumps({"roots": [{"path": str(root)}]}), encoding="utf-8")
+    assert lock_scan.CHECK_DIR_MAX_DESCENDANTS == 1024
+    assert lock_scan._check_dir(root, True, False, defaults) == 1
+    assert json.loads(capsys.readouterr().out)["descendants_complete"] is False
+    roots = configured_roots(tmp_path, root, 16384)
+    assert lock_scan._check_dir(root, True, False, roots) == 0
+    assert json.loads(capsys.readouterr().out)["descendants_complete"] is True
+    marker = root / "child-1024" / "LOCK.user.txt"
+    marker.write_text("owner: fixture\n", encoding="utf-8")
+    assert lock_scan._check_dir(root, True, False, roots) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["descendants_complete"] is True
+    assert any(Path(row["path"]) == marker for row in payload["locks"])
+
+
+def test_configured_limit_can_be_reduced_without_disabling_bound(tmp_path, capsys):
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "a").mkdir()
+    (root / "b").mkdir()
+    roots = configured_roots(tmp_path, root, 1)
+    assert lock_scan._check_dir(root, True, False, roots) == 1
+    assert json.loads(capsys.readouterr().out)["descendants_complete"] is False
+
+
+@pytest.mark.parametrize("limit", [True, False, None, 0, -1, 1.5, "16384", [], {}, 1_000_001])
+def test_invalid_configured_limit_fails_closed(tmp_path, capsys, limit):
+    root = tmp_path / "project"
+    root.mkdir()
+    roots = configured_roots(tmp_path, root, limit)
+    assert lock_scan._check_dir(root, True, False, roots) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "invalid-descendant-limit"
+    assert payload["descendants_complete"] is False
+
+
+@pytest.mark.parametrize("limit", [1, 1_000_000])
+def test_configured_limit_accepts_documented_endpoints(tmp_path, capsys, limit):
+    root = tmp_path / "project"
+    root.mkdir()
+    roots = configured_roots(tmp_path, root, limit)
+    assert lock_scan._check_dir(root, True, False, roots) == 0
+    assert json.loads(capsys.readouterr().out)["descendants_complete"] is True
+
+
+@pytest.mark.parametrize("marker", ["LOCK.txt", "LOCK.user.txt", "LOCK.condition.publish.txt",
+                                  "LOCK.until.release.txt", "TEST.txt"])
+def test_configured_limit_also_scans_real_twin_and_keeps_late_locks(
+        tmp_path, capsys, monkeypatch, marker):
+    clone = tmp_path / "repos" / "demo-repo"
+    twin = tmp_path / "mirror" / "demo-repo"
+    clone.mkdir(parents=True)
+    twin.mkdir(parents=True)
+    for name in ["a", "b", "z"]:
+        (twin / name).mkdir()
+    pointer = {"schema": "ellmos-repo-pointer-v1", "repo_id": "ellmos-ai/demo-repo",
+               "local_locator": {"repo_name": "demo-repo", "windows_default": str(clone)}}
+    (twin / lock_utils.REPO_POINTER_NAME).write_text(json.dumps(pointer), encoding="utf-8")
+    index = tmp_path / "twins.json"
+    index.write_text(json.dumps(lock_utils.build_twin_index([twin])), encoding="utf-8")
+    roots = tmp_path / "roots.json"
+    config = {"roots": [{"path": str(tmp_path)}], "twin_resolution": {
+        "clone_roots": [str(tmp_path / "repos")], "index_path": str(index)}}
+    roots.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(lock_scan, "CHECK_DIR_MAX_DESCENDANTS", 1)
+    assert lock_scan._check_dir(clone, True, False, roots) == 1
+    assert json.loads(capsys.readouterr().out)["descendants_complete"] is False
+    config["check_dir_max_descendants"] = 4
+    roots.write_text(json.dumps(config), encoding="utf-8")
+    lock = twin / "z" / marker
+    lock.write_text("owner: fixture\n", encoding="utf-8")
+    assert lock_scan._check_dir(clone, True, False, roots) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["descendants_complete"] is True and payload["twin_status"] == "ok"
+    assert any(Path(row["path"]) == lock and row["from_twin"] for row in payload["locks"])
+
+
+def test_configured_limit_keeps_directory_and_query_redirects_closed(tmp_path, capsys):
+    root = tmp_path / "project"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = root / "alias"
+    make_link(link, outside, directory=True)
+    roots = configured_roots(tmp_path, root, 16384)
+    assert lock_scan._check_dir(root, True, False, roots) == 1
+    assert json.loads(capsys.readouterr().out)["descendants_complete"] is False
+    assert lock_scan._check_dir(link, True, False, roots) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "target-redirect"

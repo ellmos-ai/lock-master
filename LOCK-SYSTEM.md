@@ -152,7 +152,14 @@ Subdirectory queries inspect ancestor locks and map the same relative path to
 the main clone of a worktree and the registered mirror twin. Existing locks
 without valid explicit metadata remain broad; user, condition and until locks
 also keep their protected conservative effect regardless of path metadata.
-Root queries also inspect nested locks. That scan has a fixed work bound. When
+Root queries also inspect nested locks. That scan defaults to a bound of 1,024
+descendant directories per queried tree, including each mapped mirror twin.
+For larger trees set `"check_dir_max_descendants": 16384` in the selected
+`lock_roots.json`. This changes only the finite work bound; no directory or
+lock is excluded. Values must be JSON integers from 1 to 1,000,000. Booleans,
+strings, null and out-of-range values fail closed with exit 1 and JSON
+`error: invalid-descendant-limit`, `descendants_complete: false`; they never
+silently fall back. Without this field the default remains unchanged. When
 an encountered symbolic link is confirmed by stable metadata to point to a
 regular file, it is not traversed and does not itself make the directory scan
 incomplete. Lock marker files, including file links, are still inspected by

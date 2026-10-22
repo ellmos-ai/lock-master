@@ -140,8 +140,15 @@ weil der Feldparser den Dateinamen sonst verändert. Ein Check des Projektroots 
 Teilpfad und meldet daher eine Sperre. Unterordnerchecks prüfen Vorfahren und
 denselben relativen Pfad im Hauptklon eines Worktrees sowie im registrierten
 OneDrive-Zwilling.
-Eine Rootabfrage prüft auch Locks in Unterordnern. Die Suche hat ein festes
-Verzeichnislimit. Ein symbolischer Link auf eine durch stabile Metadaten
+Eine Rootabfrage prüft auch Locks in Unterordnern. Standardmäßig gilt ein Limit
+von 1.024 Unterverzeichnissen je geprüftem Baum, einschließlich jedes zugeordneten
+Spiegelzwillings. Für größere Bäume lässt sich in der gewählten `lock_roots.json`
+`"check_dir_max_descendants": 16384` einstellen. Dies ändert nur die endliche
+Arbeitsgrenze; kein Verzeichnis und keine Sperre wird ausgeblendet. Zulässig sind
+JSON-Ganzzahlen von 1 bis 1.000.000. Wahrheitswerte, Zeichenketten, null und Werte
+außerhalb des Bereichs sperren mit Exit 1 und JSON `error: invalid-descendant-limit`,
+`descendants_complete: false`; es gibt keinen stillen Rückfall auf einen Ersatzwert.
+Ohne dieses Feld bleibt der Standard unverändert. Ein symbolischer Link auf eine durch stabile Metadaten
 bestätigte reguläre Datei wird nicht als Verzeichnis durchlaufen und macht die
 Suche nicht allein unvollständig. Sperrmarker einschließlich Datei-Links prüft
 weiterhin der Lock-Reader. Verzeichnislinks, kaputte oder unlesbare Links,

@@ -7,6 +7,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (configurable complete directory-scan bound - 2026-10-21)
+
+- `lock_roots.json` can set `check_dir_max_descendants` for `--check-dir`,
+  consistently for the queried tree and its real mirror twins. The default
+  stays at 1,024; explicit JSON integers from 1 to 1,000,000 are supported.
+  Invalid values fail closed instead of falling back or disabling the bound.
+- Larger trees remain fully scanned without directory exclusions. Real-tree
+  and native-index twin regressions retain protected locks, redirect denial,
+  lower limits and strict configuration validation (BACH #2368).
+
 ### Fixed (regular file links in bounded directory scans - 2026-10-21)
 
 - A stable symbolic link to a confirmed regular file no longer makes the
