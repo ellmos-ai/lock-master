@@ -936,29 +936,67 @@ def compute_expires_at(lock_path: Path) -> str | None:
 # underlying work. `git rev-parse --git-common-dir` reliably leads from the
 # worktree to the shared .git and thus to the main clone.
 
-def git_common_dir(path: Path) -> Path | None:
-    """`git rev-parse --git-common-dir` for `path`, as an absolute path.
+class GitPathResolutionError(OSError):
+    """A linked worktree's Git paths cannot be trusted for a lock decision."""
 
-    None if `path` is not a git working tree, git is missing, or the call
-    fails (fail-soft: only `path` itself is then checked -- a lock is never
-    overlooked the other way around)."""
+
+def _linked_worktree_marker(path: Path) -> bool:
+    for directory in (path, *path.parents):
+        marker = directory / ".git"
+        if marker.is_file():
+            return True
+        if marker.is_dir():
+            return False
+    return False
+
+
+def _git_directory(path: Path, *args: str) -> Path | None:
+    """Decode Git's path bytes with filesystem semantics, not the console codepage."""
+    cwd = Path(path)
+    while not cwd.is_dir() and cwd != cwd.parent:
+        cwd = cwd.parent
     try:
         result = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--git-common-dir"],
-            capture_output=True, text=True, timeout=10,
+            ["git", "-C", str(cwd), "rev-parse", *args],
+            capture_output=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        if _linked_worktree_marker(Path(path)):
+            raise GitPathResolutionError(f"cannot resolve linked worktree: {path}") from exc
         return None
-    if result.returncode != 0 or not result.stdout.strip():
+    if result.returncode != 0:
+        if _linked_worktree_marker(Path(path)):
+            raise GitPathResolutionError(f"cannot resolve linked worktree: {path}")
         return None
-    common_dir = Path(result.stdout.strip())
-    if not common_dir.is_absolute():
-        common_dir = Path(path) / common_dir
+    if not result.stdout.strip():
+        raise GitPathResolutionError(f"Git returned an empty path for {path}")
     try:
-        return common_dir.resolve()
-    except OSError:
-        return common_dir
+        directory = Path(os.fsdecode(result.stdout.strip()))
+        if not directory.is_absolute():
+            directory = cwd / directory
+        directory = directory.resolve()
+        if not directory.is_dir():
+            raise GitPathResolutionError(f"Git path does not exist: {directory}")
+        return directory
+    except (OSError, UnicodeError) as exc:
+        if isinstance(exc, GitPathResolutionError):
+            raise
+        raise GitPathResolutionError(f"cannot decode or resolve Git path for {path}") from exc
+
+
+def git_common_dir(path: Path) -> Path | None:
+    """`git rev-parse --git-common-dir`, preserving Unicode filesystem paths.
+
+    None means the path is not a Git tree. A broken linked worktree raises
+    GitPathResolutionError so callers cannot mistake it for a free path.
+    """
+    return _git_directory(path, "--git-common-dir")
+
+
+def git_worktree_top_dir(path: Path) -> Path | None:
+    """Return Git's existing worktree root, or None outside a Git tree."""
+    return _git_directory(path, "--show-toplevel")
 
 
 def worktree_main_dir(path: Path) -> Path | None:
@@ -969,20 +1007,19 @@ def worktree_main_dir(path: Path) -> Path | None:
     parent directory is the main clone. Returns None if `path` is not a
     git directory OR `path` already IS the main clone itself (then there
     is nothing additional to check)."""
-    try:
-        top = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-    except (OSError, subprocess.SubprocessError):
+    top = git_worktree_top_dir(path)
+    if top is None:
         return None
-    if top.returncode != 0 or not (Path(top.stdout.strip()) / ".git").is_file():
+    if (top / ".git").is_dir():
         return None
+    if not (top / ".git").is_file():
+        raise GitPathResolutionError(f"Git worktree marker is missing: {top}")
     common = git_common_dir(path)
     if common is None:
-        return None
+        raise GitPathResolutionError(f"Git common directory is missing: {path}")
     main_dir = common.parent
+    if not (main_dir / ".git").is_dir():
+        raise GitPathResolutionError(f"Git main clone is not verifiable: {main_dir}")
     try:
         if main_dir.resolve() == Path(path).resolve():
             return None
@@ -1085,13 +1122,11 @@ def active_locks_for_path(path: Path, now: datetime | None = None):
     main_dir = worktree_main_dir(path)
     if main_dir is not None and main_dir.is_dir():
         try:
-            result = subprocess.run(
-                ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
-            mapped = main_dir / path.relative_to(Path(result.stdout.strip()).resolve())
-        except (OSError, ValueError, subprocess.SubprocessError):
+            top = git_worktree_top_dir(path)
+            if top is None:
+                raise GitPathResolutionError(f"Git worktree root is missing: {path}")
+            mapped = main_dir / path.relative_to(top)
+        except (OSError, ValueError):
             mapped = main_dir  # uncertainty must not hide a main-clone lock
         for ancestor in (mapped, *mapped.parents):
             out.extend(active_locks_affecting_target(ancestor, mapped, now))

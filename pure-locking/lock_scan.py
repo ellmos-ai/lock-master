@@ -599,7 +599,17 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             print(msg, file=sys.stderr)
         return 2
     now = datetime.now(timezone.utc)
-    hits = lock_utils.active_locks_for_path(target, now)
+    try:
+        main_root = lock_utils.worktree_main_dir(target)
+        hits = lock_utils.active_locks_for_path(target, now)
+    except lock_utils.GitPathResolutionError as exc:
+        if as_json:
+            print(json.dumps({"checked": str(target), "error": "git-worktree-unresolved",
+                              "detail": str(exc), "locks": [],
+                              "descendants_complete": False}, ensure_ascii=False))
+        else:
+            print(f"lock_scan --check-dir: {target} -- UNDETERMINED ({exc}).")
+        return 1
     nested_hits, descendants_complete = _descendant_locks(target, now, limit=descendant_limit)
     hits.extend(nested_hits)
 
@@ -617,7 +627,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     # the last one: a lock in mirror A must not disappear because B is listed.
     mapped_twins = [t for t in twins if not any(t in other.parents for other in twins)]
     if not twins and twin_status not in ("index-missing", "pointer-unreadable"):
-        anchor = lock_utils.worktree_main_dir(target)
+        anchor = main_root
         if anchor is None:
             anchor = next((p for p in (target, *target.parents)
                            if (p / lock_utils.REPO_POINTER_NAME).is_file()), None)
@@ -625,13 +635,12 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             twins, twin_status = lock_utils.twin_dirs_for_path(anchor, twin_cfg)
             if twins:
                 try:
-                    if lock_utils.worktree_main_dir(target) is not None:
-                        top = subprocess.run(
-                            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-                            capture_output=True, text=True, timeout=10,
-                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-                        )
-                        relative = target.relative_to(Path(top.stdout.strip()).resolve())
+                    if main_root is not None:
+                        top = lock_utils.git_worktree_top_dir(target)
+                        if top is None:
+                            raise lock_utils.GitPathResolutionError(
+                                f"Git worktree root is missing: {target}")
+                        relative = target.relative_to(top)
                     else:
                         relative = target.relative_to(anchor)
                 except (OSError, ValueError, subprocess.SubprocessError):
@@ -645,8 +654,6 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             twin_hits.extend(twin_nested)
             descendants_complete = descendants_complete and twin_complete
     hits.extend(twin_hits)
-
-    main_root = lock_utils.worktree_main_dir(target)
 
     rows = [
         {
