@@ -238,6 +238,22 @@ def test_andere_pointer_schemata_gelten_als_lesbar():
     assert lock_utils._pointer_repo_name({"schema": "x"}) is None
 
 
+def test_legacy_pointer_dateien_bleiben_lesbar(tmp_path):
+    clone, twin, cfg = _setup(tmp_path)
+    for pointer in (
+        {"repo_name": "demo-repo", "canonical_path": str(clone)},
+        {"project": "demo-repo", "local_clone": str(clone)},
+        {"local_locator": None, "repo_id": "ellmos-ai/demo-repo",
+         "source_of_truth": str(clone)},
+    ):
+        (twin / lock_utils.REPO_POINTER_NAME).write_text(
+            json.dumps(pointer), encoding="utf-8")
+        index = lock_utils.build_twin_index([twin])
+        Path(cfg["index_path"]).write_text(json.dumps(index), encoding="utf-8")
+        assert lock_utils.twin_dirs_for_path(clone, cfg) == ([twin], "ok")
+        assert lock_utils.twin_dirs_for_path(twin, cfg) == ([clone], "ok")
+
+
 def test_check_dir_nichtexistenter_pfad_ist_kein_frei():
     """Regressionsfall T-20260922-626871087: ein vertippter/veralteter Pfad
     wurde als 'free' (Exit 0) gemeldet -- Path.resolve() normalisiert einen

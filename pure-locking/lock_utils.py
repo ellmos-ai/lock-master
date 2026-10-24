@@ -1287,7 +1287,7 @@ def read_repo_pointer(directory: Path) -> dict | None:
         return None
     try:
         data = json.loads(f.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
+        return data if _pointer_fields_valid(data) else None
     except (OSError, ValueError):
         return None
 
@@ -1301,10 +1301,28 @@ def read_repo_pointer(directory: Path) -> dict | None:
 _CLONE_PATH_FIELDS = ("windows_default", "canonical_path", "local_clone",
                       "clone_path", "source_of_truth")
 _REPO_NAME_FIELDS = ("repo_name", "project", "module", "name")
+_REPO_ID_FIELDS = ("repo_id", "canonical_remote", "git_remote", "remote",
+                   "repository")
+
+
+def _pointer_fields_valid(pointer: object) -> bool:
+    """Reject malformed known locator fields without rejecting legacy shapes."""
+    if not isinstance(pointer, dict):
+        return False
+    locator = pointer.get("local_locator")
+    if locator is not None and not isinstance(locator, dict):
+        return False
+    for source in (pointer, locator or {}):
+        fields = (*_CLONE_PATH_FIELDS, *_REPO_NAME_FIELDS, *_REPO_ID_FIELDS)
+        if any(key in source and source[key] is not None
+               and not isinstance(source[key], str) for key in fields):
+            return False
+    return True
 
 
 def _pointer_clone_path(pointer: dict) -> Path | None:
-    pointer = pointer or {}
+    if not _pointer_fields_valid(pointer):
+        return None
     sources = (pointer.get("local_locator") or {}, pointer)
     for src in sources:
         for field in _CLONE_PATH_FIELDS:
@@ -1315,14 +1333,15 @@ def _pointer_clone_path(pointer: dict) -> Path | None:
 
 
 def _pointer_repo_name(pointer: dict) -> str | None:
-    pointer = pointer or {}
+    if not _pointer_fields_valid(pointer):
+        return None
     sources = (pointer.get("local_locator") or {}, pointer)
     for src in sources:
         for field in _REPO_NAME_FIELDS:
             name = src.get(field)
             if name:
                 return str(name)
-    for key in ("repo_id", "canonical_remote", "git_remote", "remote", "repository"):
+    for key in _REPO_ID_FIELDS:
         raw = str(pointer.get(key) or "")
         if raw:
             tail = raw.rstrip("/").split("/")[-1]

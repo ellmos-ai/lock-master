@@ -72,6 +72,54 @@ def write_twin_index(index: Path, clone: Path, mirrors: list[Path]) -> None:
                      encoding="utf-8")
 
 
+@pytest.mark.parametrize("invalid_pointer", [
+    {"local_locator": ["invalid"]},
+    {"local_locator": {"windows_default": 17}},
+])
+def test_invalid_pointer_types_keep_twin_checks_undetermined(
+        git_repo, tmp_path, invalid_pointer):
+    mirror = tmp_path / "mirror" / git_repo.name
+    mirror.mkdir(parents=True)
+    index_path = tmp_path / "TWIN-INDEX.json"
+    write_twin_index(index_path, git_repo, [mirror])
+    pointer_path = mirror / lock_utils.REPO_POINTER_NAME
+    pointer_path.write_text(json.dumps(invalid_pointer), encoding="utf-8")
+    cfg = {"roots": [{"path": str(mirror)}], "twin_resolution": {
+        "clone_roots": [str(git_repo.parent)], "index_path": str(index_path)}}
+    roots = tmp_path / "lock_roots.json"
+    roots.write_text(json.dumps(cfg), encoding="utf-8")
+
+    assert lock_utils.twin_dirs_for_path(git_repo, cfg["twin_resolution"]) == (
+        [], "index-unresolved")
+    assert lock_utils.twin_dirs_for_path(mirror, cfg["twin_resolution"]) == (
+        [], "pointer-unreadable")
+    for target, status in ((git_repo, "index-unresolved"),
+                           (mirror, "pointer-unreadable")):
+        for json_output in (True, False):
+            command = [sys.executable, "-X", "utf8", str(Path(lock_scan.__file__)),
+                       "--check-dir", str(target), "--roots-file", str(roots)]
+            if json_output:
+                command.append("--json")
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    encoding="utf-8", timeout=20)
+            assert result.returncode == 1, result.stderr
+            assert "Traceback" not in result.stderr
+            if json_output:
+                assert json.loads(result.stdout)["twin_status"] == status
+            else:
+                assert "UNDETERMINED" in result.stdout
+
+    rebuilt = lock_utils.build_twin_index([mirror])
+    assert rebuilt["unreadable_pointers_by_dirname"] == {
+        mirror.name: [str(mirror)]}
+    assert rebuilt["by_repo_name"] == {}
+    assert rebuilt["by_clone_path"] == {}
+    written, count = lock_scan.write_twin_index(cfg)
+    assert written == index_path and count == 0
+    assert json.loads(index_path.read_text(encoding="utf-8"))[
+        "unreadable_pointers_by_dirname"] == {mirror.name: [str(mirror)]}
+
+
 def write_hook(repo: Path, name: str, body: str) -> Path:
     hooks_dir = repo / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
