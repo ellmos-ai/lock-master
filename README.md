@@ -396,7 +396,11 @@ To scan multiple project hierarchies, copy `pure-locking/lock_roots.example.json
       "name": "system-wide",
       "path": "C:/_Local_DEV/state/LOCK-CACHE.{host}.md"
     }
-  ]
+  ],
+  "twin_resolution": {
+    "clone_roots": ["C:/_Local_DEV/repos"],
+    "index_path": "C:/Users/user/OneDrive/Scripts/TWIN-INDEX.{host}.json"
+  }
 }
 ```
 
@@ -407,6 +411,7 @@ To scan multiple project hierarchies, copy `pure-locking/lock_roots.example.json
 | `skip_dirs` | string[] | `[]` | Subdirectory names completely excluded from directory traversal. |
 | `roots` | object[] | `[]` | List of `{ "path": string, "shallow": bool }` definitions. |
 | `caches` | object[] | `[]` | Output destinations for Markdown status cache files. |
+| `twin_resolution` | object | absent | Optional clone roots and host-specific twin index; unresolved mapping blocks `--check-dir` with exit 1. |
 
 ---
 

@@ -523,7 +523,7 @@ def write_caches(locks: list[dict], scanned_at: datetime, config: dict) -> list[
 
 
 def write_twin_index(config: dict) -> tuple[Path, int] | None:
-    """Write TWIN-INDEX.json (repo_name -> twin directories) from the
+    """Write the host's twin index (repo_name -> twin directories) from the
     REPO.pointer.json files of the directories the scan walks anyway.
 
     Without this index --check-dir cannot resolve the clone -> mirror direction
@@ -533,11 +533,13 @@ def write_twin_index(config: dict) -> tuple[Path, int] | None:
     raw = twin_cfg.get("index_path")
     if not raw:
         return None
-    index_path = Path(os.path.expandvars(str(raw)))
+    index_path = lock_utils.twin_index_path(twin_cfg)
+    if index_path is None:
+        raise ValueError("twin index requires a known host and index path")
     index = lock_utils.build_twin_index(iter_lock_dirs(config))
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    # Every host writes this file into the same synced folder: skip the write
-    # when only `generated_at` differs, or hosts keep overwriting each other.
+    # Preserve the host file when only `generated_at` differs, avoiding sync
+    # traffic on every scan. The path itself is resolved for this host above.
     try:
         old = json.loads(index_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -626,7 +628,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     # its mapped child in EACH twin. Keep every terminal mapped path, not only
     # the last one: a lock in mirror A must not disappear because B is listed.
     mapped_twins = [t for t in twins if not any(t in other.parents for other in twins)]
-    if not twins and twin_status not in ("index-missing", "pointer-unreadable"):
+    if not twins and twin_status in ("ok", "not-applicable", "index-unmapped"):
         anchor = main_root
         if anchor is None:
             anchor = next((p for p in (target, *target.parents)
@@ -680,7 +682,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         ))
         if rows:
             return 1
-        if twin_status in ("index-missing", "pointer-unreadable") or not descendants_complete:
+        if twin_status not in ("ok", "not-applicable") or not descendants_complete:
             return 1
         return 2 if (strict and guards) else 0
 
@@ -701,6 +703,12 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
                 f"({lock_utils.TWIN_INDEX_NAME}) is missing or unreadable. An "
                 "unversioned LOCK.user.* on the mirror twin would be invisible "
                 "here (T-20260913-785936980). Create it: lock_scan.py --write-cache"
+            )
+        elif twin_status not in ("ok", "not-applicable"):
+            print(
+                f"lock_scan --check-dir: {target} -- UNDETERMINED, not 'free'. "
+                f"Twin resolution status: {twin_status}. Verify the local "
+                "pointer/index and refresh the host index under the normal locks."
             )
         else:
             suffix = f", {len(twins)} twin(s) checked" if twins else ""
@@ -734,7 +742,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
 
     if rows:
         return 1
-    if twin_status in ("index-missing", "pointer-unreadable") or not descendants_complete:
+    if twin_status not in ("ok", "not-applicable") or not descendants_complete:
         return 1
     return 2 if (strict and guards) else 0
 
@@ -810,6 +818,12 @@ def main() -> int:
                           Path(args.roots_file))
 
     config = load_config(Path(args.roots_file))
+    twin_cfg = config.get("twin_resolution") or {}
+    if (args.write_cache and twin_cfg.get("index_path")
+            and lock_utils.twin_index_path(twin_cfg) is None):
+        print("lock_scan --write-cache: twin index host/path is unresolved",
+              file=sys.stderr)
+        return 1
     scanned_at = datetime.now(timezone.utc)
     locks = collect_locks(config, scanned_at)
 

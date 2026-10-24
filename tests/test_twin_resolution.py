@@ -72,6 +72,79 @@ def test_lock_am_zwilling_ist_vom_klon_aus_sichtbar():
         assert lock_utils.active_locks(dirs[0]), "Lock am Zwilling nicht gefunden"
 
 
+def test_foreign_absolute_mirror_path_is_not_free(tmp_path):
+    clone = tmp_path / "repos" / "lock-master"
+    clone.mkdir(parents=True)
+    mirror = tmp_path / "User" / "onedrive" / "lock-master"
+    mirror.mkdir(parents=True)
+    (mirror / lock_utils.REPO_POINTER_NAME).write_text(
+        _pointer("lock-master", clone), encoding="utf-8")
+    (mirror / "LOCK.user.txt").write_text("user-held\n", encoding="utf-8")
+    foreign = tmp_path / "lukas" / "onedrive" / "lock-master"
+    index = lock_utils.build_twin_index([mirror])
+    index["by_clone_path"][lock_utils._path_key(clone)] = [str(foreign)]
+    index["by_repo_name"]["lock-master"] = [str(foreign)]
+    index_path = tmp_path / "TWIN-INDEX.json"
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    cfg = {"clone_roots": [str(clone.parent)], "index_path": str(index_path)}
+
+    dirs, status = lock_utils.twin_dirs_for_path(clone, cfg)
+    assert dirs == []
+    assert status == "index-unresolved"
+
+
+def test_legacy_and_foreign_host_indexes_are_unresolved(tmp_path):
+    clone, twin, cfg = _setup(tmp_path)
+    index_path = Path(cfg["index_path"])
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["schema"] = "ellmos-lock-twin-index-v1"
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(clone, cfg) == ([], "index-unresolved")
+
+    index["schema"] = lock_utils.TWIN_INDEX_SCHEMA
+    index["producer_host"] = "OTHER-HOST"
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(clone, cfg) == ([], "index-unresolved")
+    assert twin.is_dir()
+
+
+def test_missing_mapping_and_mismatched_pointer_are_unresolved(tmp_path):
+    clone, twin, cfg = _setup(tmp_path)
+    index_path = Path(cfg["index_path"])
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["by_clone_path"].clear()
+    index["by_repo_name"].clear()
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(clone, cfg) == ([], "index-unmapped")
+
+    index = lock_utils.build_twin_index([twin])
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    (twin / lock_utils.REPO_POINTER_NAME).write_text(
+        _pointer("demo-repo", tmp_path / "another-clone"), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(clone, cfg) == ([], "index-unresolved")
+
+
+def test_direct_pointer_with_absent_clone_is_unresolved(tmp_path):
+    clone, twin, cfg = _setup(tmp_path)
+    clone.rmdir()
+    assert lock_utils.twin_dirs_for_path(twin, cfg) == ([], "pointer-unresolved")
+
+
+def test_one_absent_or_invalid_twin_does_not_hide_other_twins(tmp_path):
+    clone, twin, cfg = _setup(tmp_path)
+    index_path = Path(cfg["index_path"])
+    missing = tmp_path / "foreign-home" / "demo-repo"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["by_repo_name"]["demo-repo"].append(str(missing))
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(clone, cfg) == ([], "index-unresolved")
+    assert twin.is_dir()
+
+    index["by_repo_name"]["demo-repo"] = "not-a-list"
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(clone, cfg) == ([], "index-unresolved")
+
+
 def test_richtung_zwilling_zu_klon():
     """Wer den OneDrive-Pfad prueft, soll den Klon mitbekommen."""
     with tempfile.TemporaryDirectory() as td:

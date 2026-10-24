@@ -789,17 +789,30 @@ vorhandenen, deklarierten `REPO.pointer.json` — kein Namensraten:
 | Richtung | Weg |
 |---|---|
 | OneDrive -> Klon | `REPO.pointer.json` liegt im geprüften Verzeichnis (`local_locator.windows_default`) |
-| Klon -> OneDrive | `TWIN-INDEX.json`, den `lock_scan.py --write-cache` aus denselben Verzeichnissen mitschreibt, die es ohnehin durchläuft |
+| Klon -> OneDrive | `TWIN-INDEX.<HOST>.json`, den `lock_scan.py --write-cache` aus denselben Verzeichnissen mitschreibt, die es ohnehin durchläuft |
 
 Konfiguriert wird das im Block `twin_resolution` in `lock_roots.json` (`clone_roots` +
-`index_path`). **Fail-closed:** Liegt der geprüfte Pfad unter einem `clone_root` und der Index
-fehlt, ist unlesbar, oder trägt der Zwilling eine kaputte `REPO.pointer.json`, meldet
+`index_path`); für `index_path` gilt `.../TWIN-INDEX.{host}.json` (alternativ
+`%COMPUTERNAME%` statt `{host}`). Schreiber und Leser lösen auf Windows, macOS
+und Linux denselben lokalen Hostnamen auf. Der alte gemeinsame
+`TWIN-INDEX.json` ist kein Ersatzpfad. **Fail-closed:** Liegt der geprüfte Pfad
+unter einem `clone_root` und der Hostindex fehlt, stammt von einem anderen
+Host, ist ungültig, enthält keine Zuordnung oder nennt einen fehlenden bzw.
+falsch zugeordneten Spiegel, oder lässt sich der Pointer nicht verifizieren, meldet
 `--check-dir` **UNBESTIMMT mit Exit 1** — nicht "frei". Fehlt der Block `twin_resolution` ganz
 (anderer Host, kein Spiegel), ist die Zwillingsprüfung "nicht anwendbar" und ändert nichts.
 
-**Nach einem Umzug, einem neuen Klon oder einem neuen Zwilling** den Index auffrischen:
-`lock_scan.py --write-cache`. Steht ein Repo nicht im Index, kennt `--check-dir` seinen
-Zwilling nicht.
+**Nach einem Umzug, einem neuen Klon oder einem neuen Zwilling** den Hostindex
+unter den üblichen Lock- und Schreibprüfungen mit `lock_scan.py --write-cache`
+auffrischen. Der Befehl schreibt auch die konfigurierten Status-Caches. Danach
+Datei, Hostfeld, deklarierte Klon-/Spiegelpfade und `--check-dir` direkt
+zurücklesen. Die alte gemeinsame Datei kann für einen Rückweg erhalten bleiben,
+wird aber von der neuen Konfiguration nicht gelesen. Ein Klon ohne Zuordnung
+unter einem konfigurierten `clone_root` bleibt unbestimmt; Hosts ohne Spiegel
+lassen `twin_resolution` weg. Der Index ist eine Momentaufnahme deklarierter
+Pointer, kein Beweis dafür, dass seit dem Scan kein neuer Spiegel entstanden ist.
+Nach Änderungen der Zuordnung auffrischen; ein bloßes Zeitlimit könnte die
+Abwesenheit eines neuen Spiegels nicht beweisen.
 
 **Merksatz:** Eine leere Stelle ist kein Zustand. Bei einem frisch geklonten Repo beweist
 "keine LOCK-Datei" gar nichts — erst der Blick auf den Zwilling tut das.
@@ -819,7 +832,7 @@ Entfernt `LOCK*.txt` mit `now > created + expires_after`. Legacy `TEST.txt`/`TES
 ```
 PYTHONIOENCODING=utf-8 python C:\Users\User\OneDrive\_scripts\lock_scan.py --write-cache
 ```
-Schreibt zwei auto-generierte Caches pro Host: systemweit `_scripts/LOCK-CACHE.<HOST>.md` (alle Roots) und nur Software `.SOFTWARE/LOCK-CACHE.<HOST>.md` (Präfix-Filter auf `.SOFTWARE`). Cache-Pfade in `lock_roots.json` nutzen `%COMPUTERNAME%` bzw. `{host}`; geschrieben wird nur, wenn sich die Lock-Menge ändert (Ablauf als absoluter Zeitpunkt, kein Countdown), sonst höchstens alle 30 min; `TWIN-INDEX.json` ebenfalls nur bei inhaltlicher Änderung. Beide sind abgeleitete Artefakte (nicht manuell editieren, in `.gitignore`); authoritativ bleiben die `LOCK*.txt` selbst.
+Schreibt zwei auto-generierte Caches pro Host: systemweit `_scripts/LOCK-CACHE.<HOST>.md` (alle Roots) und nur Software `.SOFTWARE/LOCK-CACHE.<HOST>.md` (Präfix-Filter auf `.SOFTWARE`). Cache-Pfade in `lock_roots.json` nutzen `%COMPUTERNAME%` bzw. `{host}`; geschrieben wird nur, wenn sich die Lock-Menge ändert (Ablauf als absoluter Zeitpunkt, kein Countdown), sonst höchstens alle 30 min; `TWIN-INDEX.<HOST>.json` ebenfalls nur bei inhaltlicher Änderung. Beide sind abgeleitete Artefakte (nicht manuell editieren, in `.gitignore`); maßgeblich bleiben die `LOCK*.txt` selbst.
 
 **Scan-Begrenzung (Performance):** `lock_roots.json` steuert `default_max_depth` (Default 4), `shallow_depth` (Default 2, für Roots mit `"shallow": true` wie `.WISSEN`) und `skip_dirs` (übersprungene Verzeichnisse inkl. Unterbaum, z. B. `node_modules`, `.venv`, `.git`, `build`, `releases`).
 

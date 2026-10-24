@@ -396,7 +396,11 @@ Für das Scannen mehrerer Projektbäume kopiere `pure-locking/lock_roots.example
       "name": "system-wide",
       "path": "C:/_Local_DEV/state/LOCK-CACHE.{host}.md"
     }
-  ]
+  ],
+  "twin_resolution": {
+    "clone_roots": ["C:/_Local_DEV/repos"],
+    "index_path": "C:/Users/user/OneDrive/Skripte/TWIN-INDEX.{host}.json"
+  }
 }
 ```
 
@@ -407,6 +411,7 @@ Für das Scannen mehrerer Projektbäume kopiere `pure-locking/lock_roots.example
 | `skip_dirs` | string[] | `[]` | Verzeichnisnamen, die beim Scan vollständig ignoriert werden. |
 | `roots` | object[] | `[]` | Liste von `{ "path": string, "shallow": bool }` Definitionen. |
 | `caches` | object[] | `[]` | Zielpfade für exportierte Markdown-Status-Caches. |
+| `twin_resolution` | object | fehlt | Optionale Klon-Roots und Host-spezifischer Zwillingsindex; ungeklärte Zuordnung sperrt `--check-dir` mit Exit 1. |
 
 ---
 

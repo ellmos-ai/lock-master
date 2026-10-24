@@ -839,11 +839,15 @@ already existing, declared `REPO.pointer.json` — never from guessing names:
 | Direction | Path |
 |---|---|
 | mirror → clone | `REPO.pointer.json` sits in the checked directory |
-| clone → mirror | `TWIN-INDEX.json`, written by `lock_scan.py --write-cache` from the very directories the full scan walks anyway |
+| clone → mirror | `TWIN-INDEX.<HOST>.json`, written by `lock_scan.py --write-cache` from the very directories the full scan walks anyway |
 
 Configured through the `twin_resolution` block in `lock_roots.json` (`clone_roots` +
-`index_path`). **Fail-closed:** if the checked path lies under a `clone_root` and the index
-is missing or unreadable, or the twin carries an unparsable `REPO.pointer.json`,
+`index_path`); set `index_path` to `.../TWIN-INDEX.{host}.json` (or
+`%COMPUTERNAME%` instead of `{host}`). Writer and reader resolve the same local
+host name on Windows, macOS, and Linux. The old shared `TWIN-INDEX.json` is
+not a fallback. **Fail-closed:** if the checked path lies under a `clone_root`
+and the host index is missing, from another host, malformed, lacks a mapping,
+or names an absent/mismatched mirror, or the twin pointer cannot be verified,
 `--check-dir` reports **UNDETERMINED with exit 1** — never "free". Without a
 `twin_resolution` block (another host, no mirror) twin resolution is "not applicable" and
 changes nothing.
@@ -853,8 +857,16 @@ its repository — a lock at the repository root binds everything below it. The 
 carries the declared clone path, so a clone folder named differently from `repo_name`
 resolves too. Both were fail-open paths found in review.
 
-**After a move, a new clone or a new twin** refresh the index: `lock_scan.py --write-cache`.
-A repository missing from the index has no known twin.
+**After a move, a new clone or a new twin**, refresh the host index using the
+normal lock and write gates: `lock_scan.py --write-cache`. This also writes the
+configured status caches. Verify the generated file, host field, declared
+clone/mirror paths, and a direct `--check-dir` readback before relying on it.
+The old shared file can be retained for rollback but is never read by the new
+configuration. A clone without a mapping under a configured `clone_root`
+remains undetermined; for a host with no mirrors, omit `twin_resolution`.
+The index is a snapshot of declared pointers, not proof that no new mirror was
+created after its scan. Refresh after topology changes; no time-to-live value
+can by itself prove the absence of a new mirror.
 
 **Rule of thumb:** an empty spot is not a state. In a freshly cloned repository "no LOCK
 file" proves nothing — only the look at the twin does.
