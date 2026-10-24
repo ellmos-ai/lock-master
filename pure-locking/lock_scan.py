@@ -606,7 +606,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         if as_json:
             print(json.dumps({"checked": str(target), "error": "git-worktree-unresolved",
                               "detail": str(exc), "locks": [],
-                              "descendants_complete": False}, ensure_ascii=False))
+                              "descendants_complete": False}, ensure_ascii=True))
         else:
             print(f"lock_scan --check-dir: {target} -- UNDETERMINED ({exc}).")
         return 1

@@ -218,21 +218,34 @@ class TestActiveLocksForPath:
         worktree = tmp_path / "review"
         _git("worktree", "add", "-q", "--detach", str(worktree), cwd=git_repo)
         real_run = subprocess.run
+        real_fsdecode = lock_utils.os.fsdecode
 
         def broken_common_dir(command, *args, **kwargs):
             if command[-1] == "--git-common-dir":
                 return subprocess.CompletedProcess(command, 0, b"\xff\xfe\n", b"")
             return real_run(command, *args, **kwargs)
 
+        def posix_fsdecode(raw):
+            if raw == b"\xff\xfe":
+                return raw.decode("utf-8", "surrogateescape")
+            return real_fsdecode(raw)
+
         try:
             with monkeypatch.context() as patch:
                 patch.setattr(lock_utils.subprocess, "run", broken_common_dir)
+                patch.setattr(lock_utils.os, "fsdecode", posix_fsdecode)
                 with pytest.raises(lock_utils.GitPathResolutionError):
                     lock_utils.worktree_main_dir(worktree)
                 assert _check_dir(worktree, as_json=True, strict=False) == 1
-                result = json.loads(capsys.readouterr().out)
+                json_output = capsys.readouterr().out
+                json_output.encode("utf-8")
+                result = json.loads(json_output)
                 assert result["error"] == "git-worktree-unresolved"
                 assert result["descendants_complete"] is False
+                assert _check_dir(worktree, as_json=False, strict=False) == 1
+                text_output = capsys.readouterr().out
+                text_output.encode("utf-8")
+                assert "UNDETERMINED" in text_output
         finally:
             _git("worktree", "remove", "--force", str(worktree), cwd=git_repo)
 

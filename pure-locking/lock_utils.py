@@ -977,7 +977,8 @@ def _git_directory(path: Path, *args: str) -> Path | None:
             directory = cwd / directory
         directory = directory.resolve()
         if not directory.is_dir():
-            raise GitPathResolutionError(f"Git path does not exist: {directory}")
+            raise GitPathResolutionError(
+                f"Git path does not exist: {ascii(str(directory))}")
         return directory
     except (OSError, UnicodeError) as exc:
         if isinstance(exc, GitPathResolutionError):
