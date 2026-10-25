@@ -1,0 +1,12 @@
+{
+  "name": "ellmos-lock-master",
+  "description": "File-based locks for mixed agent teams (Claude Code, Codex, Gemini, Kimi) in one repository or synced folder: hooks block edits and pushes covered by a foreign lock, commands set and release your own.",
+  "version": "1.6.3",
+  "author": {
+    "name": "ellmos-ai"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/ellmos-ai/lock-master",
+  "repository": "https://github.com/ellmos-ai/lock-master",
+  "keywords": ["locks", "multi-agent", "coordination", "hooks", "codex", "gemini", "kimi"]
+}
