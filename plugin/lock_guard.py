@@ -38,7 +38,8 @@ GIT_PUSH = re.compile(r"\bgit\b[^\n;&|]*\bpush\b")
 EDIT_OPS = {"edit", "write", "modify", "all", "*"}
 PUSH_OPS = {"push", "git-push", "publish", "all", "*"}
 UNRESOLVED = Path("<unresolved>")
-UNSAFE = re.compile(r"[~$`]")
+SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_./:\\@+,=-]+$")
+DIR_CHANGERS = {"pushd", "popd", "chdir", "Set-Location", "sl", "export", "env", "source", ".", "eval", "exec"}
 CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 
 
@@ -70,40 +71,59 @@ def targets(payload: dict) -> list[tuple[str, Path]]:
 
 
 def push_dirs(command: str, cwd: Path) -> list[Path]:
-    """Directories a `git push` in a shell command acts on: honours a preceding `cd X` and `git -C X`,
-    `--git-dir`/`--work-tree`. An unparsable command yields the marker `UNRESOLVED` (denied)."""
+    """Repositories a shell command pushes from -- by allow-list, not by deny-list.
+
+    Resolved are only plain forms: segments joined by `&&` or `;`, an optional `cd <existing dir>`, and
+    `git [-C <dir>]... push ...` (each -C applied cumulatively, as git does). Everything else that could move the
+    target -- newlines, pipes, subshells, redirections, variables, `~`, backticks, env assignments, other git
+    global options, pushd/export/env/eval, or a git push hidden inside another command -- yields UNRESOLVED,
+    which the hook denies. A command without any `git ... push` subcommand returns []."""
+    if "\n" in command or "\r" in command:
+        return [UNRESOLVED]
     try:
-        tokens = shlex.split(command.replace("&&", " ; ").replace("||", " ; "), posix=True)
+        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
     except ValueError:
         return [UNRESOLVED]
-    dirs, here, segment = [], cwd, []
-    for tok in tokens + [";"]:
-        if tok not in (";", "|", "&"):
-            segment.append(tok)
-            continue
-        if segment[:1] in (["cd"], ["pushd"]) and len(segment) > 1:
-            if UNSAFE.search(segment[1]):
+    segments, current = [], []
+    for tok in tokens:
+        if tok in ("&&", ";"):
+            segments.append(current)
+            current = []
+        elif set(tok) <= set(";&|()<>"):
+            return [UNRESOLVED]
+        else:
+            current.append(tok)
+    segments.append(current)
+    here, dirs = cwd, []
+    for seg in filter(None, segments):
+        head = seg[0]
+        if head == "cd":
+            if len(seg) != 2 or seg[1].startswith("-") or not SAFE_TOKEN.match(seg[1]):
                 return [UNRESOLVED]
-            here = (here / segment[1]) if not Path(segment[1]).is_absolute() else Path(segment[1])
-        elif "git" in segment and "push" in segment:
-            # Anything that moves the target in ways not resolved here fails closed.
-            if (segment[0] == "env" or "=" in segment[0] or any(UNSAFE.search(t) for t in segment)
-                    or any(t.startswith("-C") and t != "-C" for t in segment)
-                    or any(t.startswith(("GIT_DIR", "GIT_WORK_TREE")) for t in segment)):
+            nxt = Path(seg[1])
+            here = (nxt if nxt.is_absolute() else here / nxt).resolve()
+            if not here.is_dir():
                 return [UNRESOLVED]
-            target = here
-            for i, t in enumerate(segment[:-1]):
-                if t == "-C" or t in ("--git-dir", "--work-tree"):
-                    nxt = Path(segment[i + 1])
-                    target = nxt if nxt.is_absolute() else here / nxt
-            for t in segment:
-                for opt in ("--git-dir=", "--work-tree="):
-                    if t.startswith(opt):
-                        nxt = Path(t[len(opt):])
-                        target = nxt if nxt.is_absolute() else here / nxt
-            dirs.append(target)
-        segment = []
-    return dirs or [UNRESOLVED]
+        elif head in DIR_CHANGERS or "=" in head:
+            return [UNRESOLVED]
+        elif head == "git":
+            target, i = here, 1
+            while i < len(seg) and seg[i].startswith("-"):
+                if seg[i] == "-C" and i + 1 < len(seg) and SAFE_TOKEN.match(seg[i + 1]):
+                    nxt = Path(seg[i + 1])
+                    target = nxt if nxt.is_absolute() else target / nxt
+                    i += 2
+                else:
+                    return [UNRESOLVED]
+            if i < len(seg) and seg[i] == "push":
+                if not all(SAFE_TOKEN.match(t) for t in seg):
+                    return [UNRESOLVED]
+                dirs.append(target.resolve())
+        elif any("git" in t for t in seg) and any("push" in t for t in seg):
+            return [UNRESOLVED]  # e.g. sh -c "git push", xargs git push
+    return dirs
 
 
 def decide(lock_path: Path, op: str, prefixes: list[str], host: str) -> str:
