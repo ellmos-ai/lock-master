@@ -32,3 +32,8 @@ the project, readable by every agent and every human.
 A lock counts as this session's own when its `owner` starts with `claude-code@<HOST>` (or one of the prefixes in
 `ELLMOS_LOCK_OWNER`). Parallel Claude Code sessions on the same host therefore share ownership; use different
 owner prefixes via `ELLMOS_LOCK_OWNER` if they must block each other.
+
+## Limits
+
+The hook checks the file tools (Edit, Write, MultiEdit, NotebookEdit) and `git push`. Arbitrary shell commands that
+write files are not recognised; when a foreign lock covers the area, do not use Bash to write there either.
