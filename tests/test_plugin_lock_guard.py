@@ -133,7 +133,8 @@ def test_unresolvable_push_targets_fail_closed(project, cmd):
 
 
 @pytest.mark.parametrize("cmd", ['sh -c "git push"', "git push | cat", "(cd /x && git push)", "git -c a=b push",
-                                 "git --git-dir=/x push", "pushd /x && git push", "export GIT_DIR=/x; git push"])
+                                 "git --git-dir=/x push", "pushd /x && git push", "export GIT_DIR=/x; git push",
+                                 "declare -x GIT_DIR=/x; git push", "npm test && git push"])
 def test_push_allowlist_denies_other_shapes(project, cmd):
     assert denied({"tool_name": "Bash", "cwd": str(project), "tool_input": {"command": cmd}}), cmd
 
@@ -147,3 +148,7 @@ def test_git_commit_mentioning_push_is_not_a_push(project):
 def test_cumulative_dash_c(project):
     (project / "a" / "b").mkdir(parents=True)
     assert lock_guard.push_dirs("git -C a -C b push", project) == [(project / "a" / "b").resolve()]
+
+
+def test_plain_git_chain_with_push_resolves(project):
+    assert lock_guard.push_dirs("git add . && git commit -m x && git push", project) == [project.resolve()]

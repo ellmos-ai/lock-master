@@ -39,7 +39,6 @@ EDIT_OPS = {"edit", "write", "modify", "all", "*"}
 PUSH_OPS = {"push", "git-push", "publish", "all", "*"}
 UNRESOLVED = Path("<unresolved>")
 SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_./:\\@+,=-]+$")
-DIR_CHANGERS = {"pushd", "popd", "chdir", "Set-Location", "sl", "export", "env", "source", ".", "eval", "exec"}
 CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 
 
@@ -76,8 +75,8 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
     Resolved are only plain forms: segments joined by `&&` or `;`, an optional `cd <existing dir>`, and
     `git [-C <dir>]... push ...` (each -C applied cumulatively, as git does). Everything else that could move the
     target -- newlines, pipes, subshells, redirections, variables, `~`, backticks, env assignments, other git
-    global options, pushd/export/env/eval, or a git push hidden inside another command -- yields UNRESOLVED,
-    which the hook denies. A command without any `git ... push` subcommand returns []."""
+    global options, and every segment that is neither `cd <dir>` nor a `git` call -- yields UNRESOLVED, which the
+    hook denies. A command without any `git ... push` subcommand returns []."""
     if "\n" in command or "\r" in command:
         return [UNRESOLVED]
     try:
@@ -106,8 +105,6 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
             here = (nxt if nxt.is_absolute() else here / nxt).resolve()
             if not here.is_dir():
                 return [UNRESOLVED]
-        elif head in DIR_CHANGERS or "=" in head:
-            return [UNRESOLVED]
         elif head == "git":
             target, i = here, 1
             while i < len(seg) and seg[i].startswith("-"):
@@ -121,8 +118,8 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
                 if not all(SAFE_TOKEN.match(t) for t in seg):
                     return [UNRESOLVED]
                 dirs.append(target.resolve())
-        elif any("git" in t for t in seg) and any("push" in t for t in seg):
-            return [UNRESOLVED]  # e.g. sh -c "git push", xargs git push
+        else:
+            return [UNRESOLVED]  # any other segment (declare, export, sh -c, npm ...) could change the target
     return dirs
 
 
