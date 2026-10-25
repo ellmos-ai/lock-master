@@ -160,6 +160,95 @@ class TestActiveLocksForPath:
         finally:
             _git("worktree", "remove", "--force", str(worktree), cwd=git_repo)
 
+    @pytest.mark.parametrize("clone_name", ["repo-ü", "repo-ascii"])
+    def test_worktree_unicode_clone_and_mirror_scoped_lock(
+            self, tmp_path, capsys, clone_name):
+        """A Git worktree must keep the exact clone path when mapping its mirror."""
+        repos = tmp_path / "repos"
+        clone = repos / clone_name
+        clone.mkdir(parents=True)
+        _git("init", "-q", cwd=clone)
+        _git("config", "user.email", "test@example.com", cwd=clone)
+        _git("config", "user.name", "test", cwd=clone)
+        (clone / "README.md").write_text("x", encoding="utf-8")
+        _git("add", "README.md", cwd=clone)
+        _git("commit", "-q", "-m", "init", cwd=clone)
+
+        worktree = tmp_path / "worktrees" / "review"
+        worktree.parent.mkdir()
+        _git("worktree", "add", "-q", "--detach", str(worktree), cwd=clone)
+        try:
+            relative = Path("part-ü") / "secret" / "target"
+            target = worktree / relative
+            target.mkdir(parents=True)
+            mirror = tmp_path / "mirror-ü"
+            (mirror / relative).mkdir(parents=True)
+            (mirror / lock_utils.REPO_POINTER_NAME).write_text(json.dumps({
+                "schema": "ellmos-repo-pointer-v1",
+                "repo_id": f"ellmos-ai/{clone_name}",
+                "local_locator": {"repo_name": clone_name,
+                                  "windows_default": str(clone)},
+            }, ensure_ascii=False), encoding="utf-8")
+            assert lock_create.main([
+                str(mirror), "--scope", "secret", "--path", relative.as_posix(),
+                "--owner", "test-agent", "--no-contest",
+            ]) == 0
+            capsys.readouterr()
+
+            index = tmp_path / "twin-index.json"
+            index.write_text(json.dumps(lock_utils.build_twin_index([clone, mirror]),
+                                        ensure_ascii=False), encoding="utf-8")
+            roots = tmp_path / "lock_roots.json"
+            roots.write_text(json.dumps({
+                "roots": [{"path": str(tmp_path)}],
+                "twin_resolution": {"clone_roots": [str(repos)],
+                                    "index_path": str(index)},
+            }, ensure_ascii=False), encoding="utf-8")
+
+            assert lock_utils.worktree_main_dir(target) == clone
+            assert lock_utils.active_locks_for_path(mirror / relative)
+            assert _check_dir(target, as_json=True, strict=False, roots_file=roots) == 1
+            result = json.loads(capsys.readouterr().out)
+            assert any(row["from_twin"] for row in result["locks"])
+        finally:
+            _git("worktree", "remove", "--force", str(worktree), cwd=clone)
+
+    def test_unresolvable_git_common_dir_is_not_free(
+            self, git_repo, tmp_path, monkeypatch, capsys):
+        worktree = tmp_path / "review"
+        _git("worktree", "add", "-q", "--detach", str(worktree), cwd=git_repo)
+        real_run = subprocess.run
+        real_fsdecode = lock_utils.os.fsdecode
+
+        def broken_common_dir(command, *args, **kwargs):
+            if command[-1] == "--git-common-dir":
+                return subprocess.CompletedProcess(command, 0, b"\xff\xfe\n", b"")
+            return real_run(command, *args, **kwargs)
+
+        def posix_fsdecode(raw):
+            if raw == b"\xff\xfe":
+                return raw.decode("utf-8", "surrogateescape")
+            return real_fsdecode(raw)
+
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(lock_utils.subprocess, "run", broken_common_dir)
+                patch.setattr(lock_utils.os, "fsdecode", posix_fsdecode)
+                with pytest.raises(lock_utils.GitPathResolutionError):
+                    lock_utils.worktree_main_dir(worktree)
+                assert _check_dir(worktree, as_json=True, strict=False) == 1
+                json_output = capsys.readouterr().out
+                json_output.encode("utf-8")
+                result = json.loads(json_output)
+                assert result["error"] == "git-worktree-unresolved"
+                assert result["descendants_complete"] is False
+                assert _check_dir(worktree, as_json=False, strict=False) == 1
+                text_output = capsys.readouterr().out
+                text_output.encode("utf-8")
+                assert "UNDETERMINED" in text_output
+        finally:
+            _git("worktree", "remove", "--force", str(worktree), cwd=git_repo)
+
     def test_worktree_guard_hook_visible_from_worktree_dir(self, git_repo, tmp_path):
         # Hooks live in the shared .git (git-common-dir), so a hook placed
         # in the main clone must also be visible when checking the
