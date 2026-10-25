@@ -38,6 +38,7 @@ GIT_PUSH = re.compile(r"\bgit\b[^\n;&|]*\bpush\b")
 EDIT_OPS = {"edit", "write", "modify", "all", "*"}
 PUSH_OPS = {"push", "git-push", "publish", "all", "*"}
 UNRESOLVED = Path("<unresolved>")
+UNSAFE = re.compile(r"[~$`]")
 CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 
 
@@ -80,9 +81,16 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
         if tok not in (";", "|", "&"):
             segment.append(tok)
             continue
-        if segment[:1] == ["cd"] and len(segment) > 1:
+        if segment[:1] in (["cd"], ["pushd"]) and len(segment) > 1:
+            if UNSAFE.search(segment[1]):
+                return [UNRESOLVED]
             here = (here / segment[1]) if not Path(segment[1]).is_absolute() else Path(segment[1])
         elif "git" in segment and "push" in segment:
+            # Anything that moves the target in ways not resolved here fails closed.
+            if (segment[0] == "env" or "=" in segment[0] or any(UNSAFE.search(t) for t in segment)
+                    or any(t.startswith("-C") and t != "-C" for t in segment)
+                    or any(t.startswith(("GIT_DIR", "GIT_WORK_TREE")) for t in segment)):
+                return [UNRESOLVED]
             target = here
             for i, t in enumerate(segment[:-1]):
                 if t == "-C" or t in ("--git-dir", "--work-tree"):
