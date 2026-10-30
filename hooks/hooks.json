@@ -1,0 +1,28 @@
+{
+  "description": "Blocks edits and git pushes that a foreign active lock-master lock covers, and lists the locks affecting the working directory at session start. Local files only.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pretooluse",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

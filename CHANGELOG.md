@@ -7,6 +7,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (Claude Code plugin `ellmos-lock-master` - 2026-10-25)
+
+- The repository is now also a Claude Code plugin (`.claude-plugin/plugin.json`). Hooks deny `Edit`, `Write`,
+  `MultiEdit`, `NotebookEdit` and `git push` when a foreign active lock covers the target (via
+  `active_locks_for_path()`), and list the affecting locks at session start. Commands `/lock`, `/unlock`, `/locks`
+  and skill `lock-protocol`. Own locks (`owner` prefix `claude-code@<HOST>` or `ELLMOS_LOCK_OWNER`) and team locks of
+  the same host pass; user and until locks always block; operation-scoped locks block only their operations.
+  Fail-closed with `ELLMOS_LOCK_FAIL_OPEN=1` as escape hatch. Local files only. 11 tests.
+
 ### Added (configurable complete directory-scan bound - 2026-10-21)
 
 - `lock_roots.json` can set `check_dir_max_descendants` for `--check-dir`,

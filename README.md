@@ -323,6 +323,32 @@ operations: git-push, deploy
 
 ---
 
+### Claude Code plugin `ellmos-lock-master`
+
+This repository is also a Claude Code plugin. It makes Claude respect the locks of other agents automatically:
+
+- **Hooks:** before every `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, and before `git push`, the plugin checks
+  the target with `active_locks_for_path()` and denies the call when a foreign active lock covers it. At session start
+  it lists the locks that affect the working directory.
+- **Commands:** `/ellmos-lock-master:lock`, `/ellmos-lock-master:unlock`, `/ellmos-lock-master:locks`.
+- **Skill:** `lock-protocol` (when to lock, lock types, fencing, release).
+
+Install from the ellmos marketplace:
+
+```
+/plugin marketplace add ellmos-ai/ellmos-plugins
+/plugin install ellmos-lock-master@ellmos
+```
+
+**Data flow:** local files only. The hooks read `LOCK*.txt` files in the target directory, its parents and a
+worktree's main clone, and call `git` to resolve worktrees. Nothing is sent over the network. **Ownership:** a lock is
+the session's own when its `owner` starts with `claude-code@<HOST>` or a prefix in `ELLMOS_LOCK_OWNER`; team locks of
+the same host are shared. Internal errors deny the call; `ELLMOS_LOCK_FAIL_OPEN=1` allows instead. Python 3.10+ is
+required (`py -3` on Windows, or set `ELLMOS_PYTHON`).
+
+**Compatibility:** Claude Code (hooks, commands, skill). The `LOCK*.txt` convention is readable by Codex, Gemini, Kimi
+and humans; those agents do not get the blocking hook.
+
 ## <a id="sec-09"></a><a id="quick-start"></a>9. Quick Start & Common CLI Workflows
 
 ### 1. Copy or Install Scripts
