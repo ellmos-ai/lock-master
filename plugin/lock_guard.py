@@ -18,7 +18,9 @@ default 900 s). A file whose lease another session holds is denied. The key is
 `git:<origin>:<path in repo>`, so clones of the same repository on different
 computers -- and its worktrees and branches -- share it. Requires the
 `roshambo` package; when the URL is set and it cannot be loaded, edits fail
-closed like any other lock-check error.
+closed like any other lock-check error. A store that cannot be reached (reboot,
+VPN down; connect timeout 5 s) does not stop work: the edit goes through with a
+warning, file locks were checked as usual.
 
 Ownership: a lock is the session's own when its `owner` field starts with one
 of the prefixes in ELLMOS_LOCK_OWNER (comma-separated), default
@@ -60,6 +62,7 @@ SCP_URL = re.compile(r"^[\w.-]+@([^:/]+):(.+)$")  # git@github.com:owner/repo.gi
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 BOARD_MESSAGES = 5
 BOARD_PRESENCE = 20
+LEASE_CONNECT_TIMEOUT = 5  # seconds; the hook itself times out after 20
 
 
 def my_host() -> str:
@@ -182,14 +185,36 @@ def describe(lock_path: Path) -> str:
             f"purpose: {clean(data.get('purpose', '?'))})")
 
 
+class LeaseStoreUnavailable(Exception):
+    """The configured lease store cannot be reached. Edits continue with a warning: file locks still apply,
+    and an outage of the shared database (reboot, VPN down) must not stop every agent on the host."""
+
+
 def lease_store():
-    """The roshambo lease store named by ELLMOS_LOCK_LEASES, or None while leases are off."""
+    """The roshambo lease store named by ELLMOS_LOCK_LEASES, or None while leases are off.
+
+    A missing roshambo package or an unknown URL scheme is a local configuration error and fails closed;
+    a store that cannot be reached raises LeaseStoreUnavailable."""
     url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
     if not url:
         return None
     from roshambo.lease_store import open_lease_store  # optional dependency, only with leases on
 
-    return open_lease_store(url, os.environ.get("ELLMOS_LOCK_LEASE_SWARM", "default"))
+    if url.startswith(("postgresql://", "postgres://", "cockroachdb://")) and "connect_timeout=" not in url:
+        url += ("&" if "?" in url else "?") + f"connect_timeout={LEASE_CONNECT_TIMEOUT}"
+    try:
+        return open_lease_store(url, os.environ.get("ELLMOS_LOCK_LEASE_SWARM", "default"))
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
+
+
+def _without_dsn(exc: Exception) -> str:
+    """Error text without the configured URL (it may carry a password)."""
+    text = f"{type(exc).__name__}: {exc}"
+    url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
+    return text.replace(url, "<lease store>") if url else text
 
 
 def lease_agent(payload: dict) -> str:
@@ -233,8 +258,12 @@ def lease_denial(payload: dict, path: Path) -> str | None:
     if store is None:
         return None
     try:
-        got = store.acquire(lease_key(path), lease_agent(payload), f"{payload.get('tool_name', 'edit')} {path.name}",
-                            int(os.environ.get("ELLMOS_LOCK_LEASE_TTL", "900")), host=my_host())
+        agent, key = lease_agent(payload), lease_key(path)  # their errors stay fail-closed
+        try:
+            got = store.acquire(key, agent, f"{payload.get('tool_name', 'edit')} {path.name}",
+                                int(os.environ.get("ELLMOS_LOCK_LEASE_TTL", "900")), host=my_host())
+        except Exception as exc:
+            raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
     finally:
         store.close()
     if hasattr(got, "claim_id"):
@@ -261,7 +290,11 @@ def pretooluse(payload: dict) -> dict | None:
             return deny(f"lock-master: a foreign active lock covers this {what} {path}. "
                         "Do not work around it; coordinate with the holder or the user. "
                         + " | ".join(describe(h) for h in hits))
-        reason = lease_denial(payload, path) if op == "edit" else None
+        try:
+            reason = lease_denial(payload, path) if op == "edit" else None
+        except LeaseStoreUnavailable as exc:
+            return {"systemMessage": f"lock-master: lease store unreachable ({clean(exc, 200)}); edit allowed "
+                                     "without a lease, file locks were checked."}
         if reason:
             return deny(reason)
     return None

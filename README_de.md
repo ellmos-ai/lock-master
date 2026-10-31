@@ -352,7 +352,9 @@ Datei für die Sitzung (`ELLMOS_LOCK_LEASE_TTL`, Standard 900 s, jede Bearbeitun
 Bearbeitung einer Datei, deren Lease eine andere Sitzung hält, wird mit Halter, Host und Absicht abgelehnt; am
 Sitzungsende werden die Leases der Sitzung freigegeben. Der Schlüssel ist der Repository-Origin plus der Pfad darin,
 daher teilen ihn Klone auf verschiedenen Rechnern, Worktrees und Branches. Ist die Variable gesetzt und fehlt das
-Paket `roshambo`, werden Bearbeitungen abgelehnt (fail-closed).
+Paket `roshambo`, werden Bearbeitungen abgelehnt (fail-closed). Ist der Lease-Store nicht erreichbar (Neustart,
+VPN weg; Verbindungsaufbau höchstens 5 s), geht die Arbeit weiter: Die Bearbeitung läuft mit einem Hinweis durch,
+Datei-Locks werden weiter geprüft.
 
 **Datenfluss:** nur lokale Dateien. Die Hooks lesen `LOCK*.txt` im Zielordner, in seinen Elternordnern und im
 Hauptklon eines Worktrees und rufen `git` zur Worktree-Auflösung auf. Nichts geht ins Netz, solange Leases aus sind; mit Leases gehen
