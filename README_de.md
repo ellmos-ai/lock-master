@@ -380,8 +380,8 @@ Agenten hier, die PreToolUse-Hooks ausführen. Er liest Codex' `apply_patch` (Pf
 Begründung auf stderr ab, dem Vertrag, den beide Hosts einhalten. Besitzerpräfix und Sitzungsname folgen dem Akteur
 (`codex@<HOST>`, `kimi@<HOST>.<sid8>`). Die Payload-Formen sind die der dokumentierten Hook-Verträge, wie sie der Aktionsguard von
 workflowhooker umsetzt und testet; diese Version testet mit solchen Payloads, nicht in einer laufenden Codex- oder Kimi-Sitzung.
-`hook-master install-snippet --id lock_guard --provider codex|kimi|claude --script <dieses Repo>/plugin/lock_guard.py` gibt den
-Konfigurationsbaustein aus (er ändert nie eine Host-Konfiguration); von Hand sieht er so aus
+`hook-master install-snippet --id lock_edit_guard --provider codex|kimi|claude` gibt den
+Konfigurationsbaustein aus (er ändert nie eine Host-Konfiguration; der Baustein läuft über `library/lock_edit_guard.py` von hook-master, einen Anschluss, der dieses `lock_guard.py` ausführt, und bindet nur die Edit-Werkzeuge, `git push` bleibt beim bestehenden `lock_push_guard`); ruft man den Guard dieses Repos direkt auf, auch mit `git push` über Bash, sieht er so aus
 
 ```json
 {"hooks": {"PreToolUse": [{"matcher": "^(apply_patch|Bash)$", "hooks": [{"type": "command",

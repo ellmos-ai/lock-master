@@ -12,7 +12,9 @@ Set a lock before non-trivial work so other agents (Claude, Codex, Gemini, Kimi)
    `py -3 "${CLAUDE_PLUGIN_ROOT}/pure-locking/lock_create.py" "<project>" --scope <scope> --path <relative-path> --owner "<session name>" --purpose "<purpose>"`
    - `<session name>` is the name the SessionStart context gave this session (`claude-code@<HOST>.<sid8>`). A lock
      named after the session is unmistakably yours: parallel sessions of the same host are held off, and nobody can
-     mistake a newer grant of the same area for yours. Only when the context named no session, use `claude-code@<HOST>`.
+     mistake a newer grant of the same area for yours. If the context named none, build it:
+     `claude-code@<HOST>.` plus the first 8 letters/digits of `${CLAUDE_SESSION_ID}`, lowercase (the same rule the hook uses).
+     Only when neither is available, use `claude-code@<HOST>`.
    - `<project>` is the project root (the git top level when inside a repository).
    - `--team <HOST>` creates a team lock: agents of the same host share it, other hosts are blocked.
    - Keep the scope narrow: lock what you will actually edit, not the whole project.

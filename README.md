@@ -379,8 +379,8 @@ agents here that run PreToolUse hooks. It reads Codex's `apply_patch` (paths fro
 reason on stderr, the contract both hosts honour. Owner prefix and session name follow the actor
 (`codex@<HOST>`, `kimi@<HOST>.<sid8>`). The payload shapes are those of the documented hook contracts as implemented and
 tested in workflowhooker's action guard; this release tests them with those payloads, not inside a live Codex or Kimi
-session. `hook-master install-snippet --id lock_guard --provider codex|kimi|claude --script <this repo>/plugin/lock_guard.py`
-prints the configuration fragment (it never edits a host configuration); by hand it is
+session. `hook-master install-snippet --id lock_edit_guard --provider codex|kimi|claude`
+prints the configuration fragment (it never edits a host configuration; the fragment goes through hook-master's `library/lock_edit_guard.py`, a connector that runs this `lock_guard.py`, and binds the edit tools only, `git push` stays with the existing `lock_push_guard`); calling this repository's guard directly, with `git push` through Bash as well, it is
 
 ```json
 {"hooks": {"PreToolUse": [{"matcher": "^(apply_patch|Bash)$", "hooks": [{"type": "command",

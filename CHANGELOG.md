@@ -23,7 +23,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   claims and presence. No automatic claim at the first edit (a crash would leave claims behind; claims never expire).
 - **Codex and Kimi Code.** `lock_guard.py pretooluse --actor codex|kimi` reads `apply_patch` headers and Kimi's `WriteFile`,
   `StrReplaceFile`, `DeleteFile`, `MoveFile` (unreadable targets are denied) and denies with exit code 2 and stderr. Snippets:
-  `hook-master install-snippet --id lock_guard` (hook-master PR) or by hand from the README. Antigravity cannot be bound.
+  `hook-master install-snippet --id lock_edit_guard` (ellmos-ai/hook-master#19) or by hand from the README. Antigravity cannot be bound.
 
 ### Changed (1.8.0)
 
