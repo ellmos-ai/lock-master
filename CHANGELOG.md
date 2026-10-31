@@ -7,6 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (1.7.1 - 2026-10-31)
+
+- Release of #30 (team board robust) and #31 (lease-store outage warns; only lost connections count as outage;
+  URL scrubbed from every hook error). The scrubber now also removes the password alone and URL-decoded
+  (residual risk from the #31 review).
+
 ### Changed (plugin leases: outage does not block - 2026-10-31)
 
 - A lease store that cannot be reached no longer denies every edit: the edit goes through with a
