@@ -204,10 +204,30 @@ def lease_store():
         url += ("&" if "?" in url else "?") + f"connect_timeout={LEASE_CONNECT_TIMEOUT}"
     try:
         return open_lease_store(url, os.environ.get("ELLMOS_LOCK_LEASE_SWARM", "default"))
-    except ValueError:
-        raise
     except Exception as exc:
-        raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
+        if _store_unreachable(exc):
+            raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
+        raise
+
+
+# SQLSTATE of a lost connection: class 08, or the server shutting down / starting up (57P01-57P03).
+UNREACHABLE_SQLSTATES = ("57P01", "57P02", "57P03")
+
+
+def _store_unreachable(exc: BaseException) -> bool:
+    """Only connection-level failures count as an outage. Serialization (40001), integrity, SQL and every
+    other error mean the store answered -- treating those as 'unreachable' would let two sessions edit the
+    same file -- so they fail closed."""
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    if not isinstance(exc, psycopg.OperationalError):
+        return False
+    state = getattr(exc, "sqlstate", None)
+    return state is None or state.startswith("08") or state in UNREACHABLE_SQLSTATES
 
 
 def _without_dsn(exc: Exception) -> str:
@@ -258,12 +278,16 @@ def lease_denial(payload: dict, path: Path) -> str | None:
     if store is None:
         return None
     try:
-        agent, key = lease_agent(payload), lease_key(path)  # their errors stay fail-closed
+        # Their errors stay fail-closed: only the acquire call itself can hit an outage.
+        agent, key, host = lease_agent(payload), lease_key(path), my_host()
+        ttl = int(os.environ.get("ELLMOS_LOCK_LEASE_TTL", "900"))
+        intent = f"{payload.get('tool_name', 'edit')} {path.name}"
         try:
-            got = store.acquire(key, agent, f"{payload.get('tool_name', 'edit')} {path.name}",
-                                int(os.environ.get("ELLMOS_LOCK_LEASE_TTL", "900")), host=my_host())
+            got = store.acquire(key, agent, intent, ttl, host=host)
         except Exception as exc:
-            raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
+            if _store_unreachable(exc):
+                raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
+            raise
     finally:
         store.close()
     if hasattr(got, "claim_id"):

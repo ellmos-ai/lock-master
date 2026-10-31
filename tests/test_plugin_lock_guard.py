@@ -330,3 +330,43 @@ def test_unreachable_postgres_is_quick_and_hides_the_password(project, monkeypat
     out = lock_guard.pretooluse(edit_as(project / "src" / "a.py", "s1"))
     assert time.monotonic() - start < lock_guard.LEASE_CONNECT_TIMEOUT + 5
     assert "lease store unreachable" in out["systemMessage"] and "secretpw" not in out["systemMessage"]
+
+
+class RaisingStore(FakeLeaseStore):
+    def __init__(self, exc):
+        super().__init__()
+        self.exc = exc
+
+    def acquire(self, *args, **kwargs):
+        raise self.exc
+
+
+def run_main(monkeypatch, capsys, payload) -> dict:
+    monkeypatch.setattr(sys, "stdin", type("S", (), {"read": staticmethod(lambda: json.dumps(payload))})())
+    monkeypatch.delenv("ELLMOS_LOCK_FAIL_OPEN", raising=False)
+    lock_guard.main(["x", "pretooluse"])
+    return json.loads(capsys.readouterr().out or "{}")
+
+
+def test_store_error_that_is_no_outage_fails_closed(project, monkeypatch, capsys):
+    monkeypatch.setattr(lock_guard, "lease_store", lambda: RaisingStore(RuntimeError("deadlock detected")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_bad_ttl_fails_closed(project, leases, monkeypatch, capsys):
+    monkeypatch.setenv("ELLMOS_LOCK_LEASE_TTL", "fifteen minutes")
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_psycopg_serialization_failure_fails_closed_but_lost_connection_warns(project, monkeypatch, capsys):
+    psycopg = pytest.importorskip("psycopg")
+    monkeypatch.setattr(lock_guard, "lease_store",
+                        lambda: RaisingStore(psycopg.errors.SerializationFailure("restart transaction")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    monkeypatch.setattr(lock_guard, "lease_store",
+                        lambda: RaisingStore(psycopg.OperationalError("server closed the connection")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert "lease store unreachable" in out["systemMessage"]
