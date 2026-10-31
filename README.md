@@ -330,7 +330,8 @@ This repository is also a Claude Code plugin. It makes Claude respect the locks 
 - **Hooks:** before every `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, and before `git push`, the plugin checks
   the target with `active_locks_for_path()` and denies the call when a foreign active lock covers it. At session start
   it lists the locks that affect the working directory.
-- **Commands:** `/ellmos-lock-master:lock`, `/ellmos-lock-master:unlock`, `/ellmos-lock-master:locks`.
+- **Commands:** `/ellmos-lock-master:lock`, `/ellmos-lock-master:unlock`, `/ellmos-lock-master:locks`,
+  `/ellmos-lock-master:message`.
 - **Skill:** `lock-protocol` (when to lock, lock types, fencing, release).
 
 Install from the ellmos marketplace:
@@ -340,8 +341,21 @@ Install from the ellmos marketplace:
 /plugin install ellmos-lock-master@ellmos
 ```
 
+**Team board:** at session start the plugin also shows the presence entries and the latest five messages of this
+host's team lock (`LOCK.team.<HOST>.txt`, written by `team-lock/team_lock.py`); `/ellmos-lock-master:message <text>`
+posts a note there for the other agents on the same host.
+
+**Optional leases across computers:** set `ELLMOS_LOCK_LEASES` to a lease store of ellmos-roshambo
+(`roshambo.lease_store`, not yet public): `sqlite:///path/leases.db` for one computer, `postgresql://...` for a
+self-hosted database that several computers share. Every edit then also takes a per-file lease for the session
+(`ELLMOS_LOCK_LEASE_TTL`, default 900 s, renewed by each edit of the file). An edit of a file whose lease another
+session holds is denied with holder, host and intent; the session's leases are released at session end. The key is
+the repository origin plus the path inside it, so clones on different computers, worktrees and branches share it.
+With the variable set and the `roshambo` package missing, edits are denied (fail closed).
+
 **Data flow:** local files only. The hooks read `LOCK*.txt` files in the target directory, its parents and a
-worktree's main clone, and call `git` to resolve worktrees. Nothing is sent over the network. **Ownership:** a lock is
+worktree's main clone, and call `git` to resolve worktrees. Nothing is sent over the network unless you switch leases on; then lease key
+(repository origin and file path), host, session id and tool name go to the lease store you configured. **Ownership:** a lock is
 the session's own when its `owner` starts with `claude-code@<HOST>` or a prefix in `ELLMOS_LOCK_OWNER`; team locks of
 the same host are shared. Internal errors deny the call; `ELLMOS_LOCK_FAIL_OPEN=1` allows instead. Python 3.10+ is
 required (`py -3` on Windows, or set `ELLMOS_PYTHON`).

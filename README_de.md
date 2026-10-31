@@ -330,7 +330,8 @@ Dieses Repository ist zugleich ein Claude-Code-Plugin. Damit beachtet Claude die
 - **Hooks:** Vor jedem `Edit`, `Write`, `MultiEdit` oder `NotebookEdit` und vor `git push` prüft das Plugin das Ziel
   mit `active_locks_for_path()` und lehnt den Aufruf ab, wenn ein fremder aktiver Lock es abdeckt. Beim Sitzungsstart
   listet es die Locks, die das Arbeitsverzeichnis betreffen.
-- **Befehle:** `/ellmos-lock-master:lock`, `/ellmos-lock-master:unlock`, `/ellmos-lock-master:locks`.
+- **Befehle:** `/ellmos-lock-master:lock`, `/ellmos-lock-master:unlock`, `/ellmos-lock-master:locks`,
+  `/ellmos-lock-master:message`.
 - **Skill:** `lock-protocol` (wann sperren, Lock-Arten, Fencing, Freigabe).
 
 Installation aus dem ellmos-Marketplace:
@@ -340,8 +341,22 @@ Installation aus dem ellmos-Marketplace:
 /plugin install ellmos-lock-master@ellmos
 ```
 
+**Team-Brett:** Beim Sitzungsstart zeigt das Plugin zusätzlich die Präsenzeinträge und die fünf neuesten Nachrichten
+des Team-Locks dieses Hosts (`LOCK.team.<HOST>.txt`, geschrieben von `team-lock/team_lock.py`);
+`/ellmos-lock-master:message <Text>` hinterlässt dort eine Notiz für die anderen Agenten desselben Hosts.
+
+**Optionale Leases über Rechner hinweg:** `ELLMOS_LOCK_LEASES` auf einen Lease-Store von ellmos-roshambo setzen
+(`roshambo.lease_store`, noch nicht öffentlich): `sqlite:///pfad/leases.db` für einen Rechner, `postgresql://...` für
+eine selbst gehostete Datenbank, die mehrere Rechner teilen. Dann nimmt jede Bearbeitung zusätzlich eine Lease je
+Datei für die Sitzung (`ELLMOS_LOCK_LEASE_TTL`, Standard 900 s, jede Bearbeitung der Datei verlängert sie). Eine
+Bearbeitung einer Datei, deren Lease eine andere Sitzung hält, wird mit Halter, Host und Absicht abgelehnt; am
+Sitzungsende werden die Leases der Sitzung freigegeben. Der Schlüssel ist der Repository-Origin plus der Pfad darin,
+daher teilen ihn Klone auf verschiedenen Rechnern, Worktrees und Branches. Ist die Variable gesetzt und fehlt das
+Paket `roshambo`, werden Bearbeitungen abgelehnt (fail-closed).
+
 **Datenfluss:** nur lokale Dateien. Die Hooks lesen `LOCK*.txt` im Zielordner, in seinen Elternordnern und im
-Hauptklon eines Worktrees und rufen `git` zur Worktree-Auflösung auf. Nichts geht ins Netz. **Eigentum:** Ein Lock
+Hauptklon eines Worktrees und rufen `git` zur Worktree-Auflösung auf. Nichts geht ins Netz, solange Leases aus sind; mit Leases gehen
+Lease-Schlüssel (Repository-Origin und Dateipfad), Host, Sitzungs-ID und Werkzeugname an den eingestellten Lease-Store. **Eigentum:** Ein Lock
 gehört der Sitzung, wenn sein `owner` mit `claude-code@<HOST>` oder einem Präfix aus `ELLMOS_LOCK_OWNER` beginnt;
 Team-Locks desselben Hosts werden geteilt. Interne Fehler lehnen den Aufruf ab; `ELLMOS_LOCK_FAIL_OPEN=1` erlaubt
 stattdessen. Voraussetzung ist Python 3.10+ (`py -3` unter Windows oder `ELLMOS_PYTHON` setzen).
