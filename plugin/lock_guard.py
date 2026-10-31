@@ -231,10 +231,19 @@ def _store_unreachable(exc: BaseException) -> bool:
 
 
 def _without_dsn(exc: Exception) -> str:
-    """Error text without the configured URL (it may carry a password)."""
+    """Error text without the configured URL or its password, also in URL-decoded form."""
     text = f"{type(exc).__name__}: {exc}"
     url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
-    return text.replace(url, "<lease store>") if url else text
+    if not url:
+        return text
+    text = text.replace(url, "<lease store>")
+    try:
+        password = urllib.parse.urlsplit(url).password
+    except ValueError:
+        password = None
+    for secret in {password, urllib.parse.unquote(password)} if password else ():
+        text = text.replace(secret, "<password>")
+    return text
 
 
 def lease_agent(payload: dict) -> str:

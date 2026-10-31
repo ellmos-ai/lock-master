@@ -381,3 +381,9 @@ def test_fail_closed_message_never_shows_the_lease_store_url(project, monkeypatc
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "secretpw" not in reason and "<lease store>" in reason
+
+
+def test_password_alone_or_decoded_is_scrubbed(monkeypatch):
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", "postgresql://u:s%40cret@db.example/x")
+    text = lock_guard._without_dsn(RuntimeError("auth failed for password s@cret (raw s%40cret)"))
+    assert "s@cret" not in text and "s%40cret" not in text and "<password>" in text
