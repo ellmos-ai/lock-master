@@ -280,3 +280,23 @@ def test_session_shows_team_board_of_own_host(project):
     assert "present:" in text and "writer" in text
     assert "note 6" in text and "note 1" not in text  # only the latest five messages
     assert "/ellmos-lock-master:message" in text
+
+
+def test_unreadable_team_board_keeps_the_lock_list(project):
+    name = "LOCK.team.TESTHOST.txt"
+    write_lock(project, name, owner="kimi@TESTHOST", host="TESTHOST", purpose="parallel work")
+    with open(project / name, "ab") as fh:
+        fh.write(bytes([0xFF, 0xFE]) + b" broken bytes\n")
+    text = lock_guard.session({"cwd": str(project)})["hookSpecificOutput"]["additionalContext"]
+    assert "kimi@TESTHOST" in text and "team board unreadable" in text
+
+
+def test_presence_is_capped(project):
+    name = "LOCK.team.TESTHOST.txt"
+    write_lock(project, name, owner="kimi@TESTHOST", host="TESTHOST")
+    with open(project / name, "a", encoding="utf-8") as fh:
+        fh.write(team.TEAM_SECTIONS)
+    for i in range(lock_guard.BOARD_PRESENCE + 3):
+        team.update_team_lock(project / name, "presence", "claim", f"loop-{i} | agent{i} | writer | t", project_dir=project)
+    text = lock_guard.session({"cwd": str(project)})["hookSpecificOutput"]["additionalContext"]
+    assert text.count("present:") == lock_guard.BOARD_PRESENCE and "(+3 more present)" in text

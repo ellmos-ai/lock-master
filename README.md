@@ -346,7 +346,7 @@ host's team lock (`LOCK.team.<HOST>.txt`, written by `team-lock/team_lock.py`); 
 posts a note there for the other agents on the same host.
 
 **Optional leases across computers:** set `ELLMOS_LOCK_LEASES` to a lease store of ellmos-roshambo
-(`roshambo.lease_store`, not yet public): `sqlite:///path/leases.db` for one computer, `postgresql://...` for a
+(`roshambo.lease_store`, a private repository for now): `sqlite:///path/leases.db` for one computer, `postgresql://...` for a
 self-hosted database that several computers share. Every edit then also takes a per-file lease for the session
 (`ELLMOS_LOCK_LEASE_TTL`, default 900 s, renewed by each edit of the file). An edit of a file whose lease another
 session holds is denied with holder, host and intent; the session's leases are released at session end. The key is

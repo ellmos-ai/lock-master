@@ -59,6 +59,7 @@ CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 SCP_URL = re.compile(r"^[\w.-]+@([^:/]+):(.+)$")  # git@github.com:owner/repo.git
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 BOARD_MESSAGES = 5
+BOARD_PRESENCE = 20
 
 
 def my_host() -> str:
@@ -268,18 +269,21 @@ def pretooluse(payload: dict) -> dict | None:
 
 def team_board(lock_path: Path) -> list[str]:
     """Presence entries and the latest messages of a team lock, quoted as untrusted data."""
-    lines = lock_path.read_text(encoding="utf-8").splitlines()
-    try:
+    try:  # a broken board must never cost the lock list itself
+        lines = lock_path.read_text(encoding="utf-8").splitlines()
         layout = team._section_layout(lines)
-    except team.TeamLockFormatError as exc:
+    except (OSError, UnicodeDecodeError, team.TeamLockFormatError) as exc:
         return [f"  (team board unreadable: {clean(exc)})"]
 
     def entries(section: str) -> list[str]:
         start, end = layout[section]
         return [line.strip() for line in lines[start:end] if line.strip() and not line.strip().startswith("#")]
 
-    return ([f"  present: {clean(e, 300)}" for e in entries("presence")]
-            + [f"  message: {clean(e, 300)}" for e in entries("messages")[-BOARD_MESSAGES:]])
+    present = entries("presence")
+    shown = [f"  present: {clean(e, 300)}" for e in present[:BOARD_PRESENCE]]
+    if len(present) > BOARD_PRESENCE:
+        shown.append(f"  (+{len(present) - BOARD_PRESENCE} more present)")
+    return shown + [f"  message: {clean(e, 300)}" for e in entries("messages")[-BOARD_MESSAGES:]]
 
 
 def session(payload: dict) -> dict | None:

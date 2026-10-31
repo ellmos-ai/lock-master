@@ -7,6 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (plugin team board - 2026-10-31)
+
+- An unreadable team lock (I/O error, invalid UTF-8) no longer drops the whole session-start context; the lock
+  list stays and the board shows one "unreadable" line. Presence lines are capped at 20 (`+N more present`).
+  README: ellmos-roshambo described as private instead of "not yet public". Review findings of PR #28.
+
 ### Added (plugin: team board and optional leases - 2026-10-31, version 1.7.0)
 
 - Session start shows presence and the latest five messages of this host's team lock; new command
