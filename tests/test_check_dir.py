@@ -767,6 +767,22 @@ class TestExplicitProtectedPaths:
             f"owner: agent\ncreated: {stamp}\nexpires_after: 24h\n{extra}", encoding="utf-8")
         assert _check_dir(tmp_path / "tests", True, False) == 1
 
+    def test_unreadable_lock_metadata_remains_broad(self, tmp_path, monkeypatch):
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "tests").mkdir()
+        lock = tmp_path / "LOCK.starter.txt"
+        lock.write_text(
+            "owner: agent\ncreated: " + datetime.now().strftime("%Y-%m-%dT%H:%M") +
+            "\nexpires_after: 24h\npaths_version: 1\nprotected_paths: bin\n",
+            encoding="utf-8")
+        original_read_text = Path.read_text
+        def unreadable(path, *args, **kwargs):
+            if path == lock:
+                raise OSError("Resource deadlock avoided")
+            return original_read_text(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "read_text", unreadable)
+        assert _check_dir(tmp_path / "tests", True, False) == 1
+
     def test_explicit_metadata_cannot_narrow_user_lock(self, tmp_path):
         (tmp_path / "bin").mkdir()
         (tmp_path / "tests").mkdir()
