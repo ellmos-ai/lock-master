@@ -15,7 +15,7 @@
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Audited](https://img.shields.io/badge/Third--Party-Audited%20%7C%20100%25%20Permissive-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-active-blue.svg)](MARKETING-LOG.txt)
-[![Version 1.6.3](https://img.shields.io/badge/version-1.6.3-informational.svg)](VERSION)
+[![Version 1.6.4](https://img.shields.io/badge/version-1.6.4-informational.svg)](VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Contributing: Welcome](https://img.shields.io/badge/Contributing-Welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexing](https://img.shields.io/badge/llms.txt-indexed-purple.svg)](llms.txt)
@@ -361,7 +361,16 @@ the same host are shared. Internal errors deny the call; `ELLMOS_LOCK_FAIL_OPEN=
 required (`py -3` on Windows, or set `ELLMOS_PYTHON`).
 
 **Compatibility:** Claude Code (hooks, commands, skill). The `LOCK*.txt` convention is readable by Codex, Gemini, Kimi
-and humans; those agents do not get the blocking hook.
+and humans; those agents do not get the blocking hook. Privacy and support: <https://ellmos-ai.github.io/plugins.html>.
+
+**Examples:**
+
+1. Another agent holds `LOCK.txt` in `docs/`. Ask Claude to edit `docs/guide.md`: the edit is denied with the
+   holder, host and purpose of the lock, and Claude reports it instead of working around it.
+2. `/ellmos-lock-master:lock parser src "refactor parser"` before a larger change, `/ellmos-lock-master:unlock`
+   afterwards; other agents see the lock and leave `src/` alone in the meantime.
+3. `git push` from a repository with an active `LOCK.user.txt` (for example a frozen competition entry) is denied,
+   while edits and pushes in unlocked repositories run as usual.
 
 ## <a id="sec-09"></a><a id="quick-start"></a>9. Quick Start & Common CLI Workflows
 
@@ -436,7 +445,11 @@ To scan multiple project hierarchies, copy `pure-locking/lock_roots.example.json
       "name": "system-wide",
       "path": "C:/_Local_DEV/state/LOCK-CACHE.{host}.md"
     }
-  ]
+  ],
+  "twin_resolution": {
+    "clone_roots": ["C:/_Local_DEV/repos"],
+    "index_path": "C:/Users/user/OneDrive/Scripts/TWIN-INDEX.{host}.json"
+  }
 }
 ```
 
@@ -447,6 +460,7 @@ To scan multiple project hierarchies, copy `pure-locking/lock_roots.example.json
 | `skip_dirs` | string[] | `[]` | Subdirectory names completely excluded from directory traversal. |
 | `roots` | object[] | `[]` | List of `{ "path": string, "shallow": bool }` definitions. |
 | `caches` | object[] | `[]` | Output destinations for Markdown status cache files. |
+| `twin_resolution` | object | absent | Optional clone roots and host-specific twin index; unresolved mapping blocks `--check-dir` with exit 1. |
 
 ---
 
