@@ -7,6 +7,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (plugin: team board and optional leases - 2026-10-31, version 1.7.0)
+
+- Session start shows presence and the latest five messages of this host's team lock; new command
+  `/ellmos-lock-master:message` posts to it via `team-lock/team_lock.py add-message`.
+- Optional per-file leases across computers: with `ELLMOS_LOCK_LEASES` (`sqlite:///...` or `postgresql://...`) every
+  edit takes a lease from `roshambo.lease_store` (key `git:<origin>:<path>`, TTL `ELLMOS_LOCK_LEASE_TTL`, default
+  900 s); a lease held by another session denies the edit, a new `SessionEnd` hook releases the session's leases.
+  Fail-closed when configured but `roshambo` is missing. Off by default; tests use a fake store (roshambo stays
+  optional), one integration test runs only where `roshambo` is installed.
+
 ### Added (Claude plugin directory fields - 2026-10-31, version 1.6.4)
 
 - `.claude-plugin/plugin.json`: `icon` (`assets/icon.png`), `documentationUrl`, `supportUrl`,

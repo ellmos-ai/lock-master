@@ -1,6 +1,8 @@
 """Tests for the Claude Code plugin hook plugin/lock_guard.py."""
 import json
+import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "plugin"))
 
 import lock_guard  # noqa: E402
+import _lock_master_team as team  # noqa: E402
 import lock_utils as lu  # noqa: E402
 
 
@@ -152,3 +155,128 @@ def test_cumulative_dash_c(project):
 
 def test_plain_git_chain_with_push_resolves(project):
     assert lock_guard.push_dirs("git add . && git commit -m x && git push", project) == [project.resolve()]
+
+
+# --- optional leases (roshambo) and the team board -------------------------------------------------------------
+
+
+class FakeLeaseStore:
+    """Stands in for roshambo's lease store, so the public CI never needs the private package."""
+
+    def __init__(self):
+        self.held, self.released, self.closed = {}, [], 0
+
+    def acquire(self, resource, agent_id, intent, ttl_seconds, host=""):
+        holder = self.held.setdefault(resource, (agent_id, intent, host))
+        if holder[0] == agent_id:
+            return types.SimpleNamespace(claim_id="claim", fence=1)
+        return types.SimpleNamespace(holder=holder[0], intent=holder[1], host=holder[2], expires_at=0.0)
+
+    def release_all(self, agent_id):
+        self.released.append(agent_id)
+        return 1
+
+    def close(self):
+        self.closed += 1
+
+
+@pytest.fixture
+def leases(monkeypatch):
+    store = FakeLeaseStore()
+    monkeypatch.setattr(lock_guard, "lease_store", lambda: store)
+    return store
+
+
+def edit_as(path: Path, session_id: str) -> dict:
+    return {**edit(path), "session_id": session_id}
+
+
+def test_leases_are_off_without_url(monkeypatch):
+    monkeypatch.delenv("ELLMOS_LOCK_LEASES", raising=False)
+    assert lock_guard.lease_store() is None
+
+
+def test_lease_of_other_session_denies(project, leases):
+    target = project / "src" / "a.py"
+    assert not denied(edit_as(target, "s1"))
+    out = lock_guard.pretooluse(edit_as(target, "s2"))
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "holds the lease" in reason and "claude-code@testhost:s1" in reason
+    assert not denied(edit_as(target, "s1"))  # re-entrant for the holder
+    assert not denied(edit_as(project / "src" / "b.py", "s2"))  # other files stay free
+    assert leases.closed == 4
+
+
+def test_file_lock_is_checked_before_lease(project, leases):
+    write_lock(project, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
+    assert denied(edit_as(project / "src" / "a.py", "s1"))
+    assert leases.held == {}
+
+
+def test_lease_needs_session_id(project, leases):
+    with pytest.raises(ValueError):
+        lock_guard.pretooluse(edit(project / "src" / "a.py"))
+
+
+def test_push_takes_no_lease(project, leases):
+    assert not denied({"tool_name": "Bash", "cwd": str(project), "session_id": "s1",
+                       "tool_input": {"command": "git push"}})
+    assert leases.held == {}
+
+
+def test_session_end_releases_leases(project, leases):
+    lock_guard.session_end({"session_id": "s1"})
+    assert leases.released == ["claude-code@testhost:s1"] and leases.closed == 1
+
+
+def test_configured_leases_without_roshambo_fail_closed(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", f"sqlite:///{tmp_path / 'l.db'}")
+    monkeypatch.setitem(sys.modules, "roshambo", None)  # import fails as if not installed
+    monkeypatch.delenv("ELLMOS_LOCK_FAIL_OPEN", raising=False)
+    payload = json.dumps({**edit(tmp_path / "x.py"), "session_id": "s1"})
+    monkeypatch.setattr(sys, "stdin", type("S", (), {"read": staticmethod(lambda: payload)})())
+    lock_guard.main(["x", "pretooluse"])
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("url", ["https://github.com/Ellmos-AI/Lock-Master.git", "git@github.com:Ellmos-AI/Lock-Master",
+                                 "ssh://git@github.com/Ellmos-AI/Lock-Master.git"])
+def test_normalize_origin(url):
+    assert lock_guard.normalize_origin(url).casefold() == "github.com/ellmos-ai/lock-master"
+
+
+def test_lease_key_is_shared_by_clones_of_one_repo(tmp_path, monkeypatch):
+    keys = []
+    for name, url in (("one", "https://github.com/o/r.git"), ("two", "git@github.com:o/r.git")):
+        clone = tmp_path / name
+        (clone / "src").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(clone)], check=True)
+        subprocess.run(["git", "-C", str(clone), "remote", "add", "origin", url], check=True)
+        keys.append(lock_guard.lease_key(clone / "src" / "A.py"))
+    assert keys[0] == keys[1] == "git:github.com/o/r:src/a.py"
+    monkeypatch.setattr(lock_guard.lu, "git_worktree_top_dir", lambda path: None)  # outside any repository
+    assert lock_guard.lease_key(tmp_path / "loose.txt").startswith("path:")
+
+
+def test_real_roshambo_store_denies_second_session(project, monkeypatch, tmp_path):
+    pytest.importorskip("roshambo.lease_store")
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", f"sqlite:///{tmp_path / 'leases.db'}")
+    target = project / "src" / "a.py"
+    assert not denied(edit_as(target, "s1"))
+    assert denied(edit_as(target, "s2"))
+    lock_guard.session_end({"session_id": "s1"})
+    assert not denied(edit_as(target, "s2"))
+
+
+def test_session_shows_team_board_of_own_host(project):
+    name = "LOCK.team.TESTHOST.txt"
+    write_lock(project, name, owner="kimi@TESTHOST", host="TESTHOST", purpose="parallel work")
+    with open(project / name, "a", encoding="utf-8") as fh:
+        fh.write(team.TEAM_SECTIONS)
+    team.update_team_lock(project / name, "presence", "claim", "loop-01 | kimi | writer | docs", project_dir=project)
+    for i in range(7):
+        team.update_team_lock(project / name, "messages", "claim", f"kimi: note {i}", project_dir=project)
+    text = lock_guard.session({"cwd": str(project)})["hookSpecificOutput"]["additionalContext"]
+    assert "present:" in text and "writer" in text
+    assert "note 6" in text and "note 1" not in text  # only the latest five messages
+    assert "/ellmos-lock-master:message" in text

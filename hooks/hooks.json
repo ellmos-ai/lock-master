@@ -1,5 +1,5 @@
 {
-  "description": "Blocks edits and git pushes that a foreign active lock-master lock covers, and lists the locks affecting the working directory at session start. Local files only.",
+  "description": "Blocks edits and git pushes that a foreign active lock-master lock covers, and lists the locks affecting the working directory at session start, with presence and messages of this host's team locks. Local files only; optional per-file leases go to the lease store you configure in ELLMOS_LOCK_LEASES.",
   "hooks": {
     "PreToolUse": [
       {
@@ -19,6 +19,17 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" sessionend",
             "timeout": 20
           }
         ]
