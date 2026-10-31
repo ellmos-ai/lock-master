@@ -39,5 +39,9 @@
       "path": "/path/to/workspace/LOCK-CACHE.{host}.md",
       "filter_prefix": "/path/to/workspace"
     }
-  ]
+  ],
+  "twin_resolution": {
+    "clone_roots": ["/path/to/local/clones"],
+    "index_path": "/path/to/your-scripts-dir/TWIN-INDEX.{host}.json"
+  }
 }

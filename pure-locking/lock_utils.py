@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -1241,7 +1242,7 @@ def git_hook_guards(path: Path) -> list[dict]:
 # Resolution uses the DECLARED relationship that already exists,
 # REPO.pointer.json (field local_locator) -- no guessing from names:
 #   direction A  mirror -> clone : the pointer sits in the checked directory.
-#   direction B  clone -> mirror : via the TWIN-INDEX.json that
+#   direction B  clone -> mirror : via the host-specific twin index that
 #                                  lock_scan.py --write-cache writes alongside
 #                                  the caches, from the very directories the
 #                                  scan already walks.
@@ -1253,7 +1254,30 @@ def git_hook_guards(path: Path) -> list[dict]:
 # than an error: unavailable is not empty.
 
 REPO_POINTER_NAME = "REPO.pointer.json"
-TWIN_INDEX_NAME = "TWIN-INDEX.json"
+TWIN_INDEX_NAME = "TWIN-INDEX.<HOST>.json"
+TWIN_INDEX_SCHEMA = "ellmos-lock-twin-index-v2"
+
+
+def twin_index_host() -> str | None:
+    """Return the local host identity; an unknown identity cannot own an index."""
+    raw = os.environ.get("COMPUTERNAME") or platform.node()
+    return raw.strip() or None
+
+
+def twin_index_path(twin_config: dict | None) -> Path | None:
+    """Resolve the same host-specific index path for writers and API readers."""
+    raw = (twin_config or {}).get("index_path")
+    host = twin_index_host()
+    if not raw or not host:
+        return None
+    safe_host = re.sub(r"[^A-Za-z0-9_-]", "_", host)
+    if not safe_host:
+        return None
+    text = str(raw).replace("{host}", safe_host)
+    text = re.sub(r"%COMPUTERNAME%", lambda _m: safe_host, text,
+                  flags=re.IGNORECASE)
+    path = Path(os.path.expanduser(os.path.expandvars(text)))
+    return path if path.is_absolute() else None
 
 
 def read_repo_pointer(directory: Path) -> dict | None:
@@ -1262,7 +1286,8 @@ def read_repo_pointer(directory: Path) -> dict | None:
     if not f.is_file():
         return None
     try:
-        return json.loads(f.read_text(encoding="utf-8"))
+        data = json.loads(f.read_text(encoding="utf-8"))
+        return data if _pointer_fields_valid(data) else None
     except (OSError, ValueError):
         return None
 
@@ -1276,10 +1301,28 @@ def read_repo_pointer(directory: Path) -> dict | None:
 _CLONE_PATH_FIELDS = ("windows_default", "canonical_path", "local_clone",
                       "clone_path", "source_of_truth")
 _REPO_NAME_FIELDS = ("repo_name", "project", "module", "name")
+_REPO_ID_FIELDS = ("repo_id", "canonical_remote", "git_remote", "remote",
+                   "repository")
+
+
+def _pointer_fields_valid(pointer: object) -> bool:
+    """Reject malformed known locator fields without rejecting legacy shapes."""
+    if not isinstance(pointer, dict):
+        return False
+    locator = pointer.get("local_locator")
+    if locator is not None and not isinstance(locator, dict):
+        return False
+    for source in (pointer, locator or {}):
+        fields = (*_CLONE_PATH_FIELDS, *_REPO_NAME_FIELDS, *_REPO_ID_FIELDS)
+        if any(key in source and source[key] is not None
+               and not isinstance(source[key], str) for key in fields):
+            return False
+    return True
 
 
 def _pointer_clone_path(pointer: dict) -> Path | None:
-    pointer = pointer or {}
+    if not _pointer_fields_valid(pointer):
+        return None
     sources = (pointer.get("local_locator") or {}, pointer)
     for src in sources:
         for field in _CLONE_PATH_FIELDS:
@@ -1290,14 +1333,15 @@ def _pointer_clone_path(pointer: dict) -> Path | None:
 
 
 def _pointer_repo_name(pointer: dict) -> str | None:
-    pointer = pointer or {}
+    if not _pointer_fields_valid(pointer):
+        return None
     sources = (pointer.get("local_locator") or {}, pointer)
     for src in sources:
         for field in _REPO_NAME_FIELDS:
             name = src.get(field)
             if name:
                 return str(name)
-    for key in ("repo_id", "canonical_remote", "git_remote", "remote", "repository"):
+    for key in _REPO_ID_FIELDS:
         raw = str(pointer.get(key) or "")
         if raw:
             tail = raw.rstrip("/").split("/")[-1]
@@ -1329,18 +1373,25 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
       "not-applicable"     - no twin_resolution configured, or path outside
       "index-missing"      - path is under a clone_root but no readable index
                              -> FAIL-CLOSED, the caller must not report "free"
-      "pointer-unreadable" - the twin carries a REPO.pointer.json that could
-                             not be read -> FAIL-CLOSED as well
+      "pointer-unreadable" - a pointer cannot be read or verified
+      "pointer-unresolved" - a pointer declares an absent clone
+      "index-unresolved"  - stale, foreign or invalid index data
+      "index-unmapped"    - no declared twin or explicit no-mirror fact
     """
     path = Path(path)
     if not twin_config:
         return [], "not-applicable"
 
     # Direction A: the checked directory is itself the mirror twin.
-    pointer = read_repo_pointer(path)
-    if pointer is not None:
+    if (path / REPO_POINTER_NAME).is_file():
+        pointer = read_repo_pointer(path)
+        if pointer is None:
+            return [], "pointer-unreadable"
         clone = _pointer_clone_path(pointer)
-        return ([clone] if clone and clone.is_dir() else []), "ok"
+        if clone is None:
+            return [], "pointer-unreadable"
+        return ([clone], "ok") if clone.is_absolute() and clone.is_dir() else (
+            [], "pointer-unresolved")
 
     # Direction B: does the path live under a clone root?
     clone_roots = []
@@ -1356,14 +1407,26 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
     if not any(resolved == r or r in resolved.parents for r in clone_roots):
         return [], "not-applicable"
 
-    index_raw = twin_config.get("index_path")
-    if not index_raw:
+    index_path = twin_index_path(twin_config)
+    if index_path is None:
         return [], "index-missing"
     try:
-        index = json.loads(
-            Path(os.path.expandvars(str(index_raw))).read_text(encoding="utf-8"))
+        index = json.loads(index_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return [], "index-missing"
+
+    def valid_map(value):
+        return (isinstance(value, dict)
+                and all(isinstance(key, str) and isinstance(paths, list)
+                        and all(isinstance(item, str) for item in paths)
+                        for key, paths in value.items()))
+
+    if (not isinstance(index, dict)
+            or index.get("schema") != TWIN_INDEX_SCHEMA
+            or index.get("producer_host") != twin_index_host()
+            or not all(valid_map(index.get(key)) for key in (
+                "by_repo_name", "by_clone_path", "unreadable_pointers_by_dirname"))):
+        return [], "index-unresolved"
 
     # Walk UP to the clone root, not just the given directory. A lock at the
     # repository root binds everything below it, so asking about
@@ -1380,10 +1443,22 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
             return [], "pointer-unreadable"
         # The declared clone path wins over the name: it is unambiguous even
         # when the folder on disk carries a different name than repo_name.
-        hits = by_path.get(_path_key(ancestor)) or by_name.get(ancestor.name) or []
-        dirs = [Path(h) for h in hits if Path(h).is_dir()]
-        if not dirs:
+        # Both maps can name mirrors of this clone. Ignoring extra name hits
+        # could hide a lock when one cached list is incomplete.
+        hits = list(dict.fromkeys([
+            *(by_path.get(_path_key(ancestor)) or []),
+            *(by_name.get(ancestor.name) or []),
+        ]))
+        if not hits:
             continue
+        dirs = [Path(h) for h in hits]
+        for directory in dirs:
+            pointer = (read_repo_pointer(directory)
+                       if directory.is_absolute() and directory.is_dir() else None)
+            declared = _pointer_clone_path(pointer) if pointer else None
+            if (declared is None or not declared.is_absolute()
+                    or _path_key(declared) != _path_key(ancestor)):
+                return [], "index-unresolved"
         # The twin of an ancestor covers this path through inheritance; the
         # matching subpath below the twin is checked too, so a scoped lock
         # sitting deeper on the mirror side is not missed either.
@@ -1395,7 +1470,7 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
             # overlapping simply because only the twin root was returned.
             out += [d / rel for d in dirs]
         return out, "ok"
-    return [], "ok"
+    return [], "index-unmapped"
 
 
 def build_twin_index(directories) -> dict:
@@ -1405,6 +1480,9 @@ def build_twin_index(directories) -> dict:
     Written by lock_scan.py during the full scan (--write-cache): that scan
     already walks exactly these directories, so the index costs no second pass.
     """
+    host = twin_index_host()
+    if host is None:
+        raise ValueError("twin index requires a known host identity")
     by_name: dict[str, list[str]] = {}
     by_clone_path: dict[str, list[str]] = {}
     unreadable: dict[str, list[str]] = {}
@@ -1438,7 +1516,8 @@ def build_twin_index(directories) -> dict:
         if str(d) not in by_name[name]:
             by_name[name].append(str(d))
     return {
-        "schema": "ellmos-lock-twin-index-v1",
+        "schema": TWIN_INDEX_SCHEMA,
+        "producer_host": host,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "by_repo_name": by_name,
         "by_clone_path": by_clone_path,

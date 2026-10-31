@@ -7,12 +7,14 @@ write-only-on-change removes the cause."""
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from datetime import datetime
 from pathlib import Path
 
 import lock_scan
+import lock_utils
 
 
 def _record(path: str = r"C:\ws\p\LOCK.txt") -> dict:
@@ -134,3 +136,57 @@ def test_twin_index_not_rewritten_when_only_timestamp_differs(tmp_path: Path):
     before = idx.stat().st_mtime
     lock_scan.write_twin_index(cfg)
     assert idx.stat().st_mtime == before and idx.read_text(encoding="utf-8") == first
+
+
+def test_two_hosts_write_and_read_only_their_own_twin_index(tmp_path, monkeypatch):
+    template = tmp_path / "shared" / "TWIN-INDEX.{host}.json"
+    template.parent.mkdir()
+    cases = []
+    for host, home in (("HOST-A", "User"), ("HOST-B", "lukas")):
+        clone = tmp_path / home / "repos" / "repo-ü"
+        mirror = tmp_path / home / "onedrive" / "repo-ü"
+        clone.mkdir(parents=True)
+        mirror.mkdir(parents=True)
+        (mirror / lock_utils.REPO_POINTER_NAME).write_text(
+            json.dumps({"repo_id": "o/repo-ü", "local_locator": {
+                "repo_name": "repo-ü", "windows_default": str(clone)}},
+                ensure_ascii=False),
+            encoding="utf-8")
+        monkeypatch.setenv("COMPUTERNAME", host)
+        cfg = {"roots": [{"path": str(mirror)}], "twin_resolution": {
+            "clone_roots": [str(clone.parent)], "index_path": str(template)}}
+        path, count = lock_scan.write_twin_index(cfg)
+        assert count == 1
+        assert path.name == f"TWIN-INDEX.{host}.json"
+        cases.append((host, clone, mirror, cfg["twin_resolution"], path))
+
+    assert cases[0][4] != cases[1][4]
+    for host, clone, mirror, cfg, path in cases:
+        monkeypatch.setenv("COMPUTERNAME", host)
+        assert json.loads(path.read_text(encoding="utf-8"))[
+            "producer_host"] == host
+        assert lock_utils.twin_dirs_for_path(clone, cfg) == ([mirror], "ok")
+
+    # An old shared snapshot must never substitute for a missing host file.
+    (template.parent / "TWIN-INDEX.json").write_text(
+        cases[1][4].read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("COMPUTERNAME", "HOST-C")
+    assert lock_utils.twin_dirs_for_path(cases[0][1], cases[0][3]) == (
+        [], "index-missing")
+
+
+def test_twin_index_requires_a_known_host(tmp_path, monkeypatch):
+    monkeypatch.delenv("COMPUTERNAME", raising=False)
+    monkeypatch.setattr(lock_scan.platform, "node", lambda: "")
+    cfg = {"index_path": str(tmp_path / "TWIN-INDEX.{host}.json")}
+    assert lock_utils.twin_index_path(cfg) is None
+    assert lock_utils.twin_dirs_for_path(tmp_path, {
+        "clone_roots": [str(tmp_path)], **cfg}) == ([], "index-missing")
+
+
+def test_twin_index_host_placeholder_on_posix_and_windows(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMPUTERNAME", "My Host/01")
+    for marker in ("{host}", "%COMPUTERNAME%", "%computername%"):
+        path = lock_utils.twin_index_path({
+            "index_path": str(tmp_path / f"TWIN-INDEX.{marker}.json")})
+        assert path == tmp_path / "TWIN-INDEX.My_Host_01.json"

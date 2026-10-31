@@ -60,6 +60,66 @@ def write_lock(path: Path, owner: str = "test-agent") -> None:
     )
 
 
+def write_twin_index(index: Path, clone: Path, mirrors: list[Path]) -> None:
+    for mirror in mirrors:
+        (mirror / lock_utils.REPO_POINTER_NAME).write_text(json.dumps({
+            "schema": "ellmos-repo-pointer-v1",
+            "repo_id": f"ellmos-ai/{clone.name}",
+            "local_locator": {"repo_name": clone.name,
+                              "windows_default": str(clone)},
+        }), encoding="utf-8")
+    index.write_text(json.dumps(lock_utils.build_twin_index(mirrors)),
+                     encoding="utf-8")
+
+
+@pytest.mark.parametrize("invalid_pointer", [
+    {"local_locator": ["invalid"]},
+    {"local_locator": {"windows_default": 17}},
+])
+def test_invalid_pointer_types_keep_twin_checks_undetermined(
+        git_repo, tmp_path, invalid_pointer):
+    mirror = tmp_path / "mirror" / git_repo.name
+    mirror.mkdir(parents=True)
+    index_path = tmp_path / "TWIN-INDEX.json"
+    write_twin_index(index_path, git_repo, [mirror])
+    pointer_path = mirror / lock_utils.REPO_POINTER_NAME
+    pointer_path.write_text(json.dumps(invalid_pointer), encoding="utf-8")
+    cfg = {"roots": [{"path": str(mirror)}], "twin_resolution": {
+        "clone_roots": [str(git_repo.parent)], "index_path": str(index_path)}}
+    roots = tmp_path / "lock_roots.json"
+    roots.write_text(json.dumps(cfg), encoding="utf-8")
+
+    assert lock_utils.twin_dirs_for_path(git_repo, cfg["twin_resolution"]) == (
+        [], "index-unresolved")
+    assert lock_utils.twin_dirs_for_path(mirror, cfg["twin_resolution"]) == (
+        [], "pointer-unreadable")
+    for target, status in ((git_repo, "index-unresolved"),
+                           (mirror, "pointer-unreadable")):
+        for json_output in (True, False):
+            command = [sys.executable, "-X", "utf8", str(Path(lock_scan.__file__)),
+                       "--check-dir", str(target), "--roots-file", str(roots)]
+            if json_output:
+                command.append("--json")
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    encoding="utf-8", timeout=20)
+            assert result.returncode == 1, result.stderr
+            assert "Traceback" not in result.stderr
+            if json_output:
+                assert json.loads(result.stdout)["twin_status"] == status
+            else:
+                assert "UNDETERMINED" in result.stdout
+
+    rebuilt = lock_utils.build_twin_index([mirror])
+    assert rebuilt["unreadable_pointers_by_dirname"] == {
+        mirror.name: [str(mirror)]}
+    assert rebuilt["by_repo_name"] == {}
+    assert rebuilt["by_clone_path"] == {}
+    written, count = lock_scan.write_twin_index(cfg)
+    assert written == index_path and count == 0
+    assert json.loads(index_path.read_text(encoding="utf-8"))[
+        "unreadable_pointers_by_dirname"] == {mirror.name: [str(mirror)]}
+
+
 def write_hook(repo: Path, name: str, body: str) -> Path:
     hooks_dir = repo / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -195,14 +255,16 @@ class TestActiveLocksForPath:
             ]) == 0
             capsys.readouterr()
 
-            index = tmp_path / "twin-index.json"
+            index_template = tmp_path / "TWIN-INDEX.{host}.json"
+            index = lock_utils.twin_index_path({"index_path": str(index_template)})
+            assert index is not None
             index.write_text(json.dumps(lock_utils.build_twin_index([clone, mirror]),
                                         ensure_ascii=False), encoding="utf-8")
             roots = tmp_path / "lock_roots.json"
             roots.write_text(json.dumps({
                 "roots": [{"path": str(tmp_path)}],
                 "twin_resolution": {"clone_roots": [str(repos)],
-                                    "index_path": str(index)},
+                                    "index_path": str(index_template)},
             }, ensure_ascii=False), encoding="utf-8")
 
             assert lock_utils.worktree_main_dir(target) == clone
@@ -248,6 +310,49 @@ class TestActiveLocksForPath:
                 assert "UNDETERMINED" in text_output
         finally:
             _git("worktree", "remove", "--force", str(worktree), cwd=git_repo)
+
+    def test_host_index_missing_or_foreign_is_not_free(
+            self, git_repo, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("COMPUTERNAME", "HOST-USER")
+        (git_repo / "secret").mkdir()
+        mirror = tmp_path / "User" / "mirror" / git_repo.name
+        (mirror / "secret").mkdir(parents=True)
+        write_twin_index(tmp_path / "seed.json", git_repo, [mirror])
+        assert lock_create.main([
+            str(mirror), "--scope", "secret", "--path", "secret", "--no-contest",
+        ]) == 0
+        capsys.readouterr()
+
+        template = tmp_path / "TWIN-INDEX.{host}.json"
+        host_index = lock_utils.twin_index_path({"index_path": str(template)})
+        assert host_index is not None
+        roots = tmp_path / "roots.json"
+        roots.write_text(json.dumps({"twin_resolution": {
+            "clone_roots": [str(git_repo.parent)],
+            "index_path": str(template)}}), encoding="utf-8")
+
+        # A legacy shared index is never a fallback for the missing host file.
+        (tmp_path / "TWIN-INDEX.json").write_text(
+            (tmp_path / "seed.json").read_text(encoding="utf-8"), encoding="utf-8")
+        assert _check_dir(git_repo / "secret", True, False, roots) == 1
+        assert json.loads(capsys.readouterr().out)["twin_status"] == "index-missing"
+
+        foreign = tmp_path / "lukas" / "mirror" / git_repo.name
+        index = lock_utils.build_twin_index([mirror])
+        index["by_clone_path"][lock_utils._path_key(git_repo)] = [str(foreign)]
+        index["by_repo_name"][git_repo.name] = [str(foreign)]
+        host_index.write_text(json.dumps(index), encoding="utf-8")
+        assert _check_dir(git_repo / "secret", True, False, roots) == 1
+        assert json.loads(capsys.readouterr().out)["twin_status"] == "index-unresolved"
+        assert _check_dir(git_repo / "secret", False, False, roots) == 1
+        assert "UNDETERMINED" in capsys.readouterr().out
+
+        host_index.write_text(json.dumps(lock_utils.build_twin_index([mirror])),
+                              encoding="utf-8")
+        assert _check_dir(git_repo / "secret", True, False, roots) == 1
+        result = json.loads(capsys.readouterr().out)
+        assert result["twin_status"] == "ok"
+        assert any(row["from_twin"] for row in result["locks"])
 
     def test_worktree_guard_hook_visible_from_worktree_dir(self, git_repo, tmp_path):
         # Hooks live in the shared .git (git-common-dir), so a hook placed
@@ -391,9 +496,7 @@ class TestExplicitProtectedPaths:
                                  "--path", "pkg", "--no-contest"]) == 0
         capsys.readouterr()
         index = tmp_path / "alias-twins.json"
-        index.write_text(json.dumps({"by_repo_name": {},
-            "by_clone_path": {lock_utils._path_key(git_repo): [str(mirror)]},
-            "unreadable_pointers_by_dirname": {}}), encoding="utf-8")
+        write_twin_index(index, git_repo, [mirror])
         roots = tmp_path / "alias-roots.json"
         roots.write_text(json.dumps({"roots": [{"path": str(tmp_path)}],
             "twin_resolution": {"clone_roots": [str(tmp_path)], "index_path": str(index)}}),
@@ -473,8 +576,7 @@ class TestExplicitProtectedPaths:
         cfg = {"roots": [{"path": str(alias / "pkg")}]}
         if project_authority == "clone_root":
             index = tmp_path / "empty-twins.json"
-            index.write_text(json.dumps({"by_repo_name": {}, "by_clone_path": {},
-                                         "unreadable_pointers_by_dirname": {}}),
+            index.write_text(json.dumps(lock_utils.build_twin_index([])),
                              encoding="utf-8")
             cfg["twin_resolution"] = {"clone_roots": [str(repo)],
                                       "index_path": str(index)}
@@ -484,8 +586,12 @@ class TestExplicitProtectedPaths:
             payload = json.loads(capsys.readouterr().out)
             assert payload["error"] == "target-redirect"
             assert payload["checked"] == str(alias / "pkg")
-            assert _check_dir(repo / "tests", True, False, roots) == 0
-            assert json.loads(capsys.readouterr().out)["descendants_complete"] is True
+            assert _check_dir(repo / "tests", True, False, roots) == (
+                1 if project_authority == "clone_root" else 0)
+            result = json.loads(capsys.readouterr().out)
+            assert result["descendants_complete"] is True
+            if project_authority == "clone_root":
+                assert result["twin_status"] == "index-unmapped"
         finally:
             assert alias.parent.resolve().is_relative_to(tmp_path.resolve())
             assert alias.resolve().is_relative_to(tmp_path.resolve())
@@ -725,9 +831,7 @@ class TestExplicitProtectedPaths:
             "\nexpires_after: 24h\npaths_version: 1\nprotected_paths: bin\n", encoding="utf-8")
         config = tmp_path / "roots.json"
         index = tmp_path / "twins.json"
-        index.write_text(json.dumps({"by_repo_name": {},
-            "by_clone_path": {lock_utils._path_key(git_repo): [str(mirror)]},
-            "unreadable_pointers_by_dirname": {}}), encoding="utf-8")
+        write_twin_index(index, git_repo, [mirror])
         config.write_text(json.dumps({"twin_resolution": {
             "clone_roots": [str(tmp_path)], "index_path": str(index)}}), encoding="utf-8")
         assert _check_dir(git_repo / "bin", True, False, config) == 1
@@ -754,9 +858,7 @@ class TestExplicitProtectedPaths:
         (mirrors[1] / "bin").mkdir()
         # mirror-c deliberately has no bin directory; its root still counts.
         index = tmp_path / "twins-many.json"
-        index.write_text(json.dumps({"by_repo_name": {},
-            "by_clone_path": {lock_utils._path_key(git_repo): [str(m) for m in mirrors]},
-            "unreadable_pointers_by_dirname": {}}), encoding="utf-8")
+        write_twin_index(index, git_repo, mirrors)
         config = tmp_path / "roots-many.json"
         config.write_text(json.dumps({"twin_resolution": {
             "clone_roots": [str(tmp_path)], "index_path": str(index)}}), encoding="utf-8")
