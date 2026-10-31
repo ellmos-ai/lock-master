@@ -346,7 +346,7 @@ des Team-Locks dieses Hosts (`LOCK.team.<HOST>.txt`, geschrieben von `team-lock/
 `/ellmos-lock-master:message <Text>` hinterlässt dort eine Notiz für die anderen Agenten desselben Hosts.
 
 **Optionale Leases über Rechner hinweg:** `ELLMOS_LOCK_LEASES` auf einen Lease-Store von ellmos-roshambo setzen
-(`roshambo.lease_store`, noch nicht öffentlich): `sqlite:///pfad/leases.db` für einen Rechner, `postgresql://...` für
+(`roshambo.lease_store`, derzeit privates Repository): `sqlite:///pfad/leases.db` für einen Rechner, `postgresql://...` für
 eine selbst gehostete Datenbank, die mehrere Rechner teilen. Dann nimmt jede Bearbeitung zusätzlich eine Lease je
 Datei für die Sitzung (`ELLMOS_LOCK_LEASE_TTL`, Standard 900 s, jede Bearbeitung der Datei verlängert sie). Eine
 Bearbeitung einer Datei, deren Lease eine andere Sitzung hält, wird mit Halter, Host und Absicht abgelehnt; am
