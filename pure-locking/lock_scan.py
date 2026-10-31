@@ -114,12 +114,13 @@ def _query_redirect_or_error(target: Path, config: dict) -> str | None:
             try:
                 top = subprocess.run(
                     ["git", "-C", str(ancestor), "rev-parse", "--show-toplevel"],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True, timeout=10,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
-                if top.returncode == 0 and Path(top.stdout.strip()).resolve() == ancestor.resolve():
+                top_text = os.fsdecode(top.stdout.strip()) if top.returncode == 0 else ""
+                if top_text and Path(top_text).resolve() == ancestor.resolve():
                     boundaries.append(ancestor)
-            except (OSError, RuntimeError, subprocess.SubprocessError):
+            except (OSError, RuntimeError, UnicodeError, subprocess.SubprocessError):
                 return "target-unreadable"
     try:
         for component in redirects:
@@ -634,7 +635,9 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             anchor = next((p for p in (target, *target.parents)
                            if (p / lock_utils.REPO_POINTER_NAME).is_file()), None)
         if anchor is not None and anchor != target:
-            twins, twin_status = lock_utils.twin_dirs_for_path(anchor, twin_cfg)
+            anchor_twins, anchor_status = lock_utils.twin_dirs_for_path(anchor, twin_cfg)
+            if anchor_status != "not-applicable":
+                twins, twin_status = anchor_twins, anchor_status
             if twins:
                 try:
                     if main_root is not None:

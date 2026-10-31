@@ -453,7 +453,7 @@ class TestExplicitProtectedPaths:
         alias = tmp_path / "prefix"
         if sys.platform == "win32":
             result = subprocess.run(["cmd", "/c", "mklink", "/J", str(alias), str(real)],
-                                    capture_output=True, text=True, timeout=10)
+                                    capture_output=True, text=True, errors="replace", timeout=10)
             assert result.returncode == 0, result.stderr
         else:
             alias.symlink_to(real, target_is_directory=True)
@@ -505,7 +505,7 @@ class TestExplicitProtectedPaths:
         def make_link(link, target):
             if sys.platform == "win32":
                 result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
-                                        capture_output=True, text=True, timeout=10)
+                                        capture_output=True, text=True, errors="replace", timeout=10)
                 assert result.returncode == 0, result.stderr
             else:
                 link.symlink_to(target, target_is_directory=True)
@@ -568,7 +568,7 @@ class TestExplicitProtectedPaths:
         if sys.platform == "win32":
             result = subprocess.run(["cmd", "/c", "mklink", "/J", str(alias),
                                      str(repo / "other")], capture_output=True,
-                                    text=True, timeout=10)
+                                    text=True, errors="replace", timeout=10)
             assert result.returncode == 0, result.stderr
         else:
             alias.symlink_to(repo / "other", target_is_directory=True)
@@ -623,7 +623,7 @@ class TestExplicitProtectedPaths:
         capsys.readouterr()
         link = repo / "bin"
         result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
-                                capture_output=True, text=True, timeout=10)
+                                capture_output=True, text=True, errors="replace", timeout=10)
         assert result.returncode == 0, result.stderr
         try:
             for query in (link, link / "package"):
@@ -653,7 +653,7 @@ class TestExplicitProtectedPaths:
         capsys.readouterr()
         link = repo / "scope" / "alias"
         result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
-                                capture_output=True, text=True, timeout=10)
+                                capture_output=True, text=True, errors="replace", timeout=10)
         assert result.returncode == 0, result.stderr
         try:
             assert _check_dir(link / "child", True, False) == 1
@@ -699,7 +699,7 @@ class TestExplicitProtectedPaths:
         try:
             for link, target in ((repo / "cycle", repo), (links / "escape", outside)):
                 result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
-                                        capture_output=True, text=True, timeout=10)
+                                        capture_output=True, text=True, errors="replace", timeout=10)
                 assert result.returncode == 0, result.stderr
                 created_links.append(link)
             assert _check_dir(repo, True, False) == 1
@@ -870,3 +870,29 @@ class TestExplicitProtectedPaths:
             assert _check_dir(git_repo / "bin", True, False, config) == 1
             assert _check_dir(git_repo / "installer", True, False, config) == 0
             lock.unlink()
+
+    def test_unmapped_clone_root_inside_linked_worktree_stays_fail_closed(
+        self, git_repo, tmp_path
+    ):
+        wt = tmp_path / "wt-outer"
+        _git("worktree", "add", "-q", "--detach", str(wt), cwd=git_repo)
+        try:
+            nested_clone = wt / "nested-clone-root" / "project"
+            nested_clone.mkdir(parents=True)
+            index = tmp_path / "twins-empty.json"
+            index.write_text(json.dumps({"repos": {}}), encoding="utf-8")
+            config = tmp_path / "roots-nested-in-wt.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "twin_resolution": {
+                            "clone_roots": [str(wt / "nested-clone-root")],
+                            "index_path": str(index),
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            assert _check_dir(nested_clone, True, False, config) == 1
+        finally:
+            _git("worktree", "remove", "--force", str(wt), cwd=git_repo)

@@ -1189,15 +1189,16 @@ def git_hook_guards(path: Path) -> list[dict]:
     try:
         result = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-    except (OSError, subprocess.SubprocessError):
+        raw_hooks = os.fsdecode(result.stdout.strip()) if result.returncode == 0 else ""
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return []
-    if result.returncode != 0 or not result.stdout.strip():
+    if not raw_hooks:
         return []
 
-    hooks_dir = Path(result.stdout.strip())
+    hooks_dir = Path(raw_hooks)
     if not hooks_dir.is_dir():
         return [{
             "hook": None,
