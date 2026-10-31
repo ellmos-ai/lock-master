@@ -358,7 +358,7 @@ ausdrücklich: Es gibt **keinen automatischen Claim** bei der ersten Änderung, 
 die niemand freigibt (Claims haben keinen eigenen Ablauf). Ein normales Sitzungsende gibt Claims und Präsenz der Sitzung frei;
 nach einem Absturz werden die Zeilen von Hand entfernt oder verfallen mit dem Team-Lock. Ein nicht lesbarer Claim-Abschnitt
 blockiert nicht (der Team-Lock lässt die Agenten des Hosts weiterhin durch); der Hook meldet es. Claims sind ein kooperatives
-Signal zwischen Agenten, keine Sicherheitsgrenze: Agentennamen sind selbst gewählt, und Schreibzugriffe über `Bash` werden nicht erkannt.
+Signal zwischen Agenten, keine Sicherheitsgrenze: Agentennamen sind selbst gewählt, und Schreibzugriffe über `Bash` werden nicht erkannt. Der MCP-Server kennt die Session-ID nicht (Claude Code dokumentiert keine Session-Variable für MCP-Server); die Board-Werkzeuge handeln deshalb als der übergebene `agent` oder, ohne Angabe, als der gemeinsame `claude-code@<HOST>`; **die Durchsetzung liegt im Hook**, der die Session-ID erhält.
 
 **Fencing im Hook:** Jeder Lock trägt eine Fence-Nummer, eine Vergabenummer aus der Uhr, die `lock_create` vergibt. Der Hook
 prüft sie bei Locks, deren Besitzer ein *geteiltes* Präfix ist (`claude-code@<HOST>` oder `ELLMOS_LOCK_OWNER`), weil mehrere

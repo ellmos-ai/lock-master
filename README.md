@@ -357,7 +357,7 @@ explicit: there is **no automatic claim** at the first edit, because a session t
 releases (claims have no expiry of their own). A normal session end releases the session's claims and presence; after a
 crash the lines are removed by hand or lapse with the team lock. A claims section that cannot be parsed does not block
 (the team lock still lets the host's agents in); the hook says so. Claims are a cooperative signal between agents, not a
-security boundary: agent names are self-declared, and `Bash` writes are not recognised.
+security boundary: agent names are self-declared, and `Bash` writes are not recognised. The MCP server does not know the session id (Claude Code documents no session variable for MCP servers), so the board tools act as the `agent` you pass, or as the shared `claude-code@<HOST>` when you pass none; **enforcement lives in the hook**, which does receive the session id.
 
 **Fencing in the hook:** every lock carries a fence number, a grant number from the clock that `lock_create` hands out. The
 hook checks it for locks whose owner is a *shared* prefix (`claude-code@<HOST>` or `ELLMOS_LOCK_OWNER`), because several
