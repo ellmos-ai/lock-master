@@ -1473,8 +1473,16 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
             pointer = (read_repo_pointer(directory)
                        if directory.is_absolute() and directory.is_dir() else None)
             declared = _pointer_clone_path(pointer) if pointer else None
-            if (declared is None or not declared.is_absolute()
-                    or _path_key(declared) != _path_key(ancestor)):
+            repo_name = _pointer_repo_name(pointer) if pointer else None
+            if declared is None:
+                return [], "index-unresolved"
+            if declared.is_absolute():
+                if _path_key(declared) != _path_key(ancestor):
+                    return [], "index-unresolved"
+            elif os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", str(declared)):
+                if not repo_name or repo_name.lower() != ancestor.name.lower():
+                    return [], "index-unresolved"
+            else:
                 return [], "index-unresolved"
         # The twin of an ancestor covers this path through inheritance; the
         # matching subpath below the twin is checked too, so a scoped lock
