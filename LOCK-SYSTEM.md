@@ -910,3 +910,11 @@ User informieren. Bewusst außerhalb des `LOCK*.txt`-Scanmusters von
 `lock_scan.py` (Publikations-, keine Bearbeitungssperre). Anlass: ein
 internes Repository wurde ohne User-Freigabe public angelegt und am
 2026-07-18 auf privat zurückgestellt.
+
+## Explicit directory-creation inspection
+
+`lock_scan.py --check-create-dir /physical/anchor/missing/task-41 --creation-anchor /physical/anchor --json --strict` inspects exactly one intended absent directory suffix. The anchor must be its last existing physical parent; existing targets, redirect components, parent segments, unreadable authority and changed parent/twin identities fail closed. Normal `--check-dir MISSING` remains exit 2.
+
+The distinct `check-create-dir-v1` JSON binds `checked`, `creation_anchor`, its dev/inode/mode, and `missing_suffix`. It reports `target_exists=false`, `target_descendants_state=absent-confirmed` and `descendants_complete=null`; it does not claim to have scanned all descendants of the anchor. `checks_complete` and `twins_descendants_complete` must be true, alongside a known twin status and empty locks/hooks, before a caller may proceed. Applicable ancestor/main-clone/twin locks still apply to the logical target; existing mapped twin subtrees retain full descendant inspection. Disjoint sibling subtrees are not part of this query.
+
+This is a read-only observation, not an atomic filesystem grant. Callers recheck before creation and Git operations, validate their own task/source/lease authority, and fully inspect the resulting existing directory. An old scanner without this explicit mode is not a compatible fallback.

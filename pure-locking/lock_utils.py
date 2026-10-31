@@ -566,7 +566,12 @@ def lock_created_and_expiry(lock_path: Path,
         expires = timedelta(0)
     if created is not None:
         return created, expires, "header"
-    mtime = datetime.fromtimestamp(lock_path.stat().st_mtime, timezone.utc)
+    try:
+        mtime = datetime.fromtimestamp(lock_path.stat().st_mtime, timezone.utc)
+    except FileNotFoundError:
+        raise
+    except OSError:
+        return datetime.now(timezone.utc), expires, "invalid"
     return mtime, expires, "invalid" if has_created else "mtime"
 
 def is_expired(lock_path: Path, now: datetime | None = None,
@@ -814,12 +819,19 @@ def find_lock_files(project_dir: Path, include_legacy: bool = True):
     # Enumerate real entry names: literal globs on Windows Python 3.10/3.11
     # can construct the returned path from the pattern's case instead.
     for hit in sorted(project_dir.glob("*")):
-        if not hit.is_file():
-            continue
         scope = scope_from_name(hit.name)
+        is_legacy_name = include_legacy and hit.name in LEGACY_LOCK_NAMES
+        if scope is None and not is_legacy_name:
+            continue
+        try:
+            is_file = hit.is_file()
+        except OSError:
+            is_file = True
+        if not is_file:
+            continue
         if scope is not None:
             results.append((hit.name, scope, False))
-        elif include_legacy and hit.name in LEGACY_LOCK_NAMES:
+        elif is_legacy_name:
             results.append((hit.name, "project", True))
     return sorted(set(results))
 
@@ -1284,9 +1296,9 @@ def twin_index_path(twin_config: dict | None) -> Path | None:
 def read_repo_pointer(directory: Path) -> dict | None:
     """The REPO.pointer.json of a directory, or None if absent/unreadable."""
     f = Path(directory) / REPO_POINTER_NAME
-    if not f.is_file():
-        return None
     try:
+        if not f.is_file():
+            return None
         data = json.loads(f.read_text(encoding="utf-8"))
         return data if _pointer_fields_valid(data) else None
     except (OSError, ValueError):
@@ -1384,7 +1396,11 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
         return [], "not-applicable"
 
     # Direction A: the checked directory is itself the mirror twin.
-    if (path / REPO_POINTER_NAME).is_file():
+    try:
+        has_pointer = (path / REPO_POINTER_NAME).is_file()
+    except OSError:
+        return [], "pointer-unreadable"
+    if has_pointer:
         pointer = read_repo_pointer(path)
         if pointer is None:
             return [], "pointer-unreadable"
@@ -1489,7 +1505,13 @@ def build_twin_index(directories) -> dict:
     unreadable: dict[str, list[str]] = {}
     for d in directories:
         d = Path(d)
-        if not (d / REPO_POINTER_NAME).is_file():
+        try:
+            if not (d / REPO_POINTER_NAME).is_file():
+                continue
+        except OSError:
+            unreadable.setdefault(d.name, [])
+            if str(d) not in unreadable[d.name]:
+                unreadable[d.name].append(str(d))
             continue
         pointer = read_repo_pointer(d)
         # The clone folder on disk may be named differently from repo_name

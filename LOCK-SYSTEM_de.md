@@ -936,3 +936,11 @@ Projekt-/Repo-Root erklärt die Veröffentlichung als **FREIGEGEBEN**.
   ausdrückliche, dokumentierte User-Freigabe hin.
 - **gitignore-Pflicht:** Wie `PRIVATE.txt` wird auch `PUBLIC.txt` NICHT
   committet (Projekt-`.gitignore`).
+
+## Explizite Prüfung einer Verzeichnisanlage
+
+`lock_scan.py --check-create-dir /physischer/anker/fehlend/task-41 --creation-anchor /physischer/anker --json --strict` prüft genau einen beabsichtigten fehlenden Verzeichnissuffix. Der Anker muss dessen letzter vorhandener physischer Parent sein. Vorhandene Ziele, Redirect-Komponenten, Elternsegmente, unlesbare Autorität und geänderte Parent-/Twinidentitäten bleiben gesperrt. Normales `--check-dir FEHLEND` bleibt Exit 2.
+
+Der getrennte JSON-Modus `check-create-dir-v1` bindet `checked`, `creation_anchor`, dessen dev/inode/mode und `missing_suffix`. Er meldet `target_exists=false`, `target_descendants_state=absent-confirmed` und `descendants_complete=null`; er behauptet keinen vollständigen Nachfahrenscan des Ankers. Vor einer Anlage müssen zusätzlich `checks_complete` und `twins_descendants_complete` wahr, der Twinstatus bekannt sowie Locks und Hooks leer sein. Einschlägige Vorfahren-, Mainclone- und Twinsperren gelten weiter für das logische Ziel. Vorhandene abgebildete Twinbereiche behalten ihren vollständigen Nachfahrenscan. Disjunkte Geschwisterbäume gehören nicht zur Zielabfrage.
+
+Dies ist eine lesende Beobachtung, keine atomare Dateisystemfreigabe. Caller prüfen vor Anlage und Gitoperationen erneut, bestätigen ihre eigene Task-/Source-/Leaseautorität und prüfen das anschließend vorhandene Ziel vollständig. Ein alter Scanner ohne diesen expliziten Modus ist kein kompatibler Fallback.

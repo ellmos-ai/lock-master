@@ -107,9 +107,14 @@ def _query_redirect_or_error(target: Path, config: dict) -> str | None:
         if (root == lexical or root in lexical.parents) and root.is_dir():
             boundaries.append(root)
     for ancestor in (lexical, *lexical.parents):
-        if (ancestor / lock_utils.REPO_POINTER_NAME).is_file():
-            if lock_utils.read_repo_pointer(ancestor) is not None:
-                boundaries.append(ancestor)
+        try:
+            has_pointer = (ancestor / lock_utils.REPO_POINTER_NAME).is_file()
+        except OSError:
+            return "target-unreadable"
+        if has_pointer:
+            if lock_utils.read_repo_pointer(ancestor) is None:
+                return "target-unreadable"
+            boundaries.append(ancestor)
         if (ancestor / ".git").exists():
             try:
                 top = subprocess.run(
@@ -443,10 +448,11 @@ def render_cache(locks: list[dict], scanned_at: datetime, title: str) -> str:
         # Absolute expiry when the lock has one, else the static state text
         # (user-held, condition, legacy ...). Never a countdown: a countdown
         # changes every minute and forces a rewrite -> sync traffic.
+        created = r.get("created") or "unknown"
         expires = r.get("expires_at") or r["remaining"]
         lines.append(
             f"| {_md_escape(path)} | {_md_escape(r['scope'])} | {_md_escape(owner)} "
-            f"| {_md_escape(r['created'])} | {_md_escape(expires)} |"
+            f"| {_md_escape(created)} | {_md_escape(expires)} |"
         )
     if not locks:
         lines.append("| _(no active locks)_ |  |  |  |  |")
@@ -552,8 +558,85 @@ def write_twin_index(config: dict) -> tuple[Path, int] | None:
             json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
     return index_path, len(index["by_repo_name"])
 
+def _has_repo_pointer(path: Path) -> bool:
+    try:
+        return (path / lock_utils.REPO_POINTER_NAME).is_file()
+    except OSError:
+        return True
+
+
+def _creation_chain(target: Path, anchor: Path) -> dict:
+    """Attest one absent suffix, never the anchor's sibling subtree."""
+    if not target.is_absolute() or not anchor.is_absolute() or ".." in target.parts or ".." in anchor.parts:
+        raise ValueError("creation-path-not-absolute-or-parent-segment")
+    if target == anchor or anchor not in target.parents:
+        raise ValueError("creation-anchor-outside-target")
+    chain = []
+    for component in reversed((anchor, *anchor.parents)):
+        info = component.lstat()
+        if _is_directory_redirect(component) or not stat.S_ISDIR(info.st_mode):
+            raise ValueError("creation-anchor-redirect-or-not-directory")
+        chain.append((str(component), info.st_dev, info.st_ino, info.st_mode))
+    suffix = target.relative_to(anchor).parts
+    current = anchor
+    for part in suffix:
+        current /= part
+        try:
+            current.lstat()
+        except FileNotFoundError:
+            continue
+        raise ValueError("creation-suffix-already-exists")
+    info = anchor.lstat()
+    return {"creation_anchor": str(anchor),
+            "creation_anchor_identity": {"dev": info.st_dev, "ino": info.st_ino,
+                                         "mode": info.st_mode},
+            "missing_suffix": list(suffix), "chain": chain}
+
+
+def _creation_twin_state(paths: list[Path], config: dict | None = None) -> list:
+    """Bind twin components/absence without following unconfigured directory redirects."""
+    states = []
+    cfg = config or {}
+    for path in paths:
+        if _query_redirect_or_error(path, cfg) is not None:
+            raise ValueError("creation-twin-redirect-or-not-directory")
+        for component in reversed((path, *path.parents)):
+            try:
+                info = component.lstat()
+            except FileNotFoundError:
+                states.append((str(component), None))
+                continue
+            if _is_directory_redirect(component):
+                target_info = component.stat()
+                if not stat.S_ISDIR(target_info.st_mode):
+                    raise ValueError("creation-twin-redirect-or-not-directory")
+                states.append((str(component), "redirect", info.st_dev, info.st_ino,
+                               info.st_mode, target_info.st_dev, target_info.st_ino,
+                               target_info.st_mode))
+                continue
+            if not stat.S_ISDIR(info.st_mode):
+                raise ValueError("creation-twin-redirect-or-not-directory")
+            states.append((str(component), info.st_dev, info.st_ino, info.st_mode))
+    return states
+
+
+def _check_create_dir(target: Path, anchor: Path, as_json: bool, strict: bool,
+                      roots_file: Path | None = None) -> int:
+    try:
+        return _check_dir(target, as_json, strict, roots_file, creation_anchor=anchor)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        if as_json:
+            print(json.dumps({"checked": str(target), "check_mode": "check-create-dir-v1",
+                              "creation_anchor": str(anchor), "checks_complete": False,
+                              "error": type(exc).__name__, "locks": [],
+                              "descendants_complete": None}, ensure_ascii=False))
+        else:
+            print("lock_scan --check-create-dir: UNDETERMINED", file=sys.stderr)
+        return 1
+
+
 def _check_dir(target: Path, as_json: bool, strict: bool,
-               roots_file: Path | None = None) -> int:
+               roots_file: Path | None = None, *, creation_anchor: Path | None = None) -> int:
     """--check-dir: worktree-aware lock check for exactly ONE directory (no
     full scan). See lock_utils.active_locks_for_path().
 
@@ -570,7 +653,10 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     raising, so without this check a mistyped --check-dir call silently
     reported exit 0 "free" -- worse than any other failure mode, since it
     looks identical to a genuinely clear directory (T-20260922-626871087)."""
-    config = load_config(roots_file or DEFAULT_ROOTS_FILE)
+    config_path = roots_file or DEFAULT_ROOTS_FILE
+    config_bytes = config_path.read_bytes() if creation_anchor is not None else None
+    creation = _creation_chain(target, creation_anchor) if creation_anchor is not None else None
+    config = load_config(config_path)
     descendant_limit = config.get("check_dir_max_descendants", CHECK_DIR_MAX_DESCENDANTS)
     if (type(descendant_limit) is not int
             or not 1 <= descendant_limit <= CHECK_DIR_MAX_DESCENDANTS_CEILING):
@@ -593,7 +679,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
                   "a query-path redirect can hide lexical ancestor locks.")
         return 1
     target = target.resolve()
-    if not target.is_dir():
+    if not target.is_dir() and creation is None:
         msg = f"lock_scan --check-dir: {target} does not exist -- not 'free', a usage error."
         if as_json:
             print(json.dumps({"checked": str(target), "error": "target-not-found"},
@@ -613,7 +699,10 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         else:
             print(f"lock_scan --check-dir: {target} -- UNDETERMINED ({exc}).")
         return 1
-    nested_hits, descendants_complete = _descendant_locks(target, now, limit=descendant_limit)
+    if creation is None:
+        nested_hits, descendants_complete = _descendant_locks(target, now, limit=descendant_limit)
+    else:
+        nested_hits, descendants_complete = [], True  # no existing target descendants
     hits.extend(nested_hits)
 
     # Two-trees rule: the twin in the other tree counts as well
@@ -624,7 +713,8 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     # A worktree is not registered as a separate clone in the twin index.
     # Resolve its main clone first; likewise walk up from mirror subfolders to
     # the pointer. Keep the same relative path on the opposite tree.
-    twins, twin_status = lock_utils.twin_dirs_for_path(target, twin_cfg)
+    twin_query = target
+    twins, twin_status = lock_utils.twin_dirs_for_path(twin_query, twin_cfg)
     # twin_dirs_for_path returns all registered twins, and for a subpath also
     # its mapped child in EACH twin. Keep every terminal mapped path, not only
     # the last one: a lock in mirror A must not disappear because B is listed.
@@ -633,10 +723,11 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         anchor = main_root
         if anchor is None:
             anchor = next((p for p in (target, *target.parents)
-                           if (p / lock_utils.REPO_POINTER_NAME).is_file()), None)
+                           if _has_repo_pointer(p)), None)
         if anchor is not None and anchor != target:
             anchor_twins, anchor_status = lock_utils.twin_dirs_for_path(anchor, twin_cfg)
             if anchor_status != "not-applicable":
+                twin_query = anchor
                 twins, twin_status = anchor_twins, anchor_status
             if twins:
                 try:
@@ -651,6 +742,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
                 except (OSError, ValueError, subprocess.SubprocessError):
                     relative = Path(".")  # root query is conservative on uncertainty
                 mapped_twins = [t / relative for t in twins]
+    twin_state = _creation_twin_state(twins + mapped_twins, config) if creation is not None else None
     twin_hits = []
     for mapped in mapped_twins:
         twin_hits.extend(lock_utils.active_locks_for_path(mapped, now))
@@ -675,12 +767,25 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     ]
     guards = lock_utils.git_hook_guards(target)
 
+    creation_payload = {}
+    if creation is not None:
+        if (_creation_chain(target, creation_anchor) != creation
+                or config_path.read_bytes() != config_bytes
+                or lock_utils.twin_dirs_for_path(twin_query, twin_cfg) != (twins, twin_status)
+                or _creation_twin_state(twins + mapped_twins, config) != twin_state):
+            raise ValueError("creation-authority-changed")
+        creation_payload = {key: value for key, value in creation.items() if key != "chain"}
+        creation_payload.update({"check_mode": "check-create-dir-v1", "target_exists": False,
+                                 "target_descendants_state": "absent-confirmed",
+                                 "twins_descendants_complete": descendants_complete,
+                                 "checks_complete": True})
+
     if as_json:
         print(json.dumps(
             {"checked": str(target), "locks": rows, "hook_guards": guards,
              "twin_status": twin_status,
-             "descendants_complete": descendants_complete,
-             "twins_checked": [str(t) for t in twins]},
+             "descendants_complete": descendants_complete if creation is None else None,
+             "twins_checked": [str(t) for t in twins], **creation_payload},
             ensure_ascii=False, indent=2,
         ))
         if rows:
@@ -800,7 +905,17 @@ def main() -> int:
         help="With --verify-fence: the grant number recorded at acquisition "
         "(printed by lock_create.py).",
     )
+    parser.add_argument("--check-create-dir", metavar="PATH",
+                        help="Check one absent directory suffix under --creation-anchor; normal missing --check-dir remains an error.")
+    parser.add_argument("--creation-anchor", metavar="PATH",
+                        help="Explicit last existing physical parent of the missing directory suffix.")
     args = parser.parse_args()
+
+    if args.check_create_dir or args.creation_anchor:
+        if not args.check_create_dir or not args.creation_anchor or args.check_dir or args.verify_fence or args.write_cache:
+            parser.error("--check-create-dir requires --creation-anchor and no other operation")
+        return _check_create_dir(Path(args.check_create_dir), Path(args.creation_anchor),
+                                 args.json, args.strict, Path(args.roots_file))
 
     if args.verify_fence:
         if args.fence is None:
