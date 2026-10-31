@@ -59,7 +59,7 @@ def test_session_name_is_a_valid_team_agent_name():
 def test_session_name_normalises_dotted_host_names(monkeypatch):
     monkeypatch.setenv("COMPUTERNAME", "Lukas-MBP.local")  # macOS: the host name ends in .local
     name = lock_guard.session_name({"session_id": "ab12cd34"})
-    assert name == "claude-code@LUKAS-MBP-local.ab12cd34"
+    assert name == "claude-code@LUKAS-MBP-LOCAL.ab12cd34"
     assert team.normalize_agent_name(name) == name
 
 
