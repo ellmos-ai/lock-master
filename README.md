@@ -345,8 +345,9 @@ Install from the ellmos marketplace:
 host's team lock (`LOCK.team.<HOST>.txt`, written by `team-lock/team_lock.py`); `/ellmos-lock-master:message <text>`
 posts a note there for the other agents on the same host.
 
-**Optional leases across computers:** set `ELLMOS_LOCK_LEASES` to a lease store of ellmos-roshambo
-(`roshambo.lease_store`, a private repository for now): `sqlite:///path/leases.db` for one computer, `postgresql://...` for a
+**Optional leases across computers (preview, not yet available to the public):** they need the `roshambo` package,
+which is not published yet. Without `ELLMOS_LOCK_LEASES` nothing of this is active and the plugin works exactly as
+described above. Set `ELLMOS_LOCK_LEASES` to a lease store of ellmos-roshambo (`roshambo.lease_store`): `sqlite:///path/leases.db` for one computer, `postgresql://...` for a
 self-hosted database that several computers share. Every edit then also takes a per-file lease for the session
 (`ELLMOS_LOCK_LEASE_TTL`, default 900 s, renewed by each edit of the file). An edit of a file whose lease another
 session holds is denied with holder, host and intent; the session's leases are released at session end. The key is
