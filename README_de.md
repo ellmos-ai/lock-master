@@ -398,8 +398,10 @@ command = "python -X utf8 \"/pfad/zu/lock-master/plugin/lock_guard.py\" pretoolu
 timeout = 10
 ```
 
-für `~/.kimi-code/config.toml`. Kimis Shell-Werkzeug ist nicht gebunden (sein Werkzeugname ist im Provider-Modell von hook-master
-nicht belegt), daher ist Kimis `git push` nicht bewacht. **Antigravity (agy)** lässt sich nicht anbinden: Laut Provider-Modell von
+für `~/.kimi-code/config.toml`. Die Werkzeugnamen stammen aus dem Werkzeugschema von Kimi Code CLI 0.14.2 (aus dessen Sitzungsprotokollen gelesen: `Write` und `Edit`
+mit `path`, Shell-Werkzeug `Bash` mit `command`); `WriteFile` und die anderen älteren Namen bleiben für ältere Versionen gebunden. Der Baustein
+bindet Kimis `Bash` nicht, daher ist Kimis `git push` hier nicht bewacht; `Bash` im Matcher würde es abdecken (Vorschlag, nicht umgesetzt: der
+bestehende `lock_push_guard` deckt Pushes der anderen Hosts ab). **Antigravity (agy)** lässt sich nicht anbinden: Laut Provider-Modell von
 hook-master kennt es nur `PreInvocation` (vor dem Modellaufruf, ohne Werkzeugziel); es hält sich per Anweisung an die
 `LOCK*.txt`-Konvention (nicht an einer laufenden agy-Installation geprüft, dieser Host hat keine agy-Hook-Konfiguration).
 Warum hook-master `PreToolUse` aus seinen Standard-Bausteinen lässt, steht in dessen README.

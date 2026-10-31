@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -48,8 +47,7 @@ def plain(value, limit: int = 300) -> str:
 
 def default_agent() -> str:
     explicit = os.environ.get("ELLMOS_LOCK_AGENT", "").strip()
-    host = re.sub(r"[^A-Za-z0-9_-]", "-", lg.my_host()) or "HOST"
-    return explicit or f"{lg.actor()}@{host}"
+    return explicit or f"{lg.actor()}@{lg.host_token()}"
 
 
 def find_board(args: dict) -> Path:

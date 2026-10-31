@@ -91,6 +91,13 @@ def my_host() -> str:
     return (os.environ.get("COMPUTERNAME") or socket.gethostname() or "").upper()
 
 
+def host_token() -> str:
+    """The host as it appears in agent names and owner prefixes: letters, digits and `_ . -` (the team-lock agent
+    grammar), anything else replaced by `-`. One function for the hook, the commands' prefix and the MCP server, so they
+    agree on every host (macOS host names end in `.local`)."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "-", my_host()) or "HOST"
+
+
 def actor() -> str:
     """Which agent runs this hook: claude-code (default), codex or kimi. Names the session and the owner prefix."""
     value = os.environ.get("ELLMOS_LOCK_ACTOR", "").strip().lower()
@@ -100,7 +107,7 @@ def actor() -> str:
 def owner_prefixes() -> list[str]:
     raw = os.environ.get("ELLMOS_LOCK_OWNER", "")
     prefixes = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return prefixes or [f"{actor()}@{my_host().lower()}"]
+    return prefixes or [f"{actor()}@{host_token().lower()}"]
 
 
 def session_name(payload: dict) -> str | None:
@@ -109,8 +116,7 @@ def session_name(payload: dict) -> str | None:
     sid = re.sub(r"[^A-Za-z0-9]", "", str(payload.get("session_id") or ""))[:8].lower()
     if not sid:
         return None
-    host = re.sub(r"[^A-Za-z0-9_-]", "-", my_host()) or "HOST"
-    return f"{actor()}@{host}.{sid}"
+    return f"{actor()}@{host_token()}.{sid}"
 
 
 def state_dir() -> Path:

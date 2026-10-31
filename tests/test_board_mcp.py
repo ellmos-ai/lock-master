@@ -151,6 +151,15 @@ def test_team_lock_of_another_host_is_not_a_board_for_this_one(board, monkeypatc
     assert call("board_read")[1] is True
 
 
+def test_default_agent_matches_the_hooks_shared_owner_prefix_on_every_host_name(monkeypatch):
+    for host in ("TESTHOST", "Lukas-MBP.local", "odd host!"):
+        monkeypatch.setenv("COMPUTERNAME", host)
+        monkeypatch.delenv("ELLMOS_LOCK_AGENT", raising=False)
+        agent = board_mcp.default_agent()
+        assert team.normalize_agent_name(agent) == agent
+        assert agent.lower() in lock_guard.owner_prefixes(), host  # the hook then treats the claim as the session's own
+
+
 def test_default_agent_is_the_shared_host_name_or_the_env_override(board, monkeypatch):
     assert call("board_read")[0]["your_agent"] == "claude-code@TESTHOST"
     monkeypatch.setenv("ELLMOS_LOCK_AGENT", "kimi@TESTHOST.cccc3333")

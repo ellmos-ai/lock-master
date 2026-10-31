@@ -15,6 +15,8 @@ Set a lock before non-trivial work so other agents (Claude, Codex, Gemini, Kimi)
      mistake a newer grant of the same area for yours. If the context named none, build it:
      `claude-code@<HOST>.` plus the first 8 letters/digits of `${CLAUDE_SESSION_ID}`, lowercase (the same rule the hook uses).
      Only when neither is available, use `claude-code@<HOST>`.
+     (`<HOST>` is the host name with anything but letters, digits, `_`, `.` and `-` replaced by `-`; the hook, the commands and
+     the board tools all use that one form.)
    - `<project>` is the project root (the git top level when inside a repository).
    - `--team <HOST>` creates a team lock: agents of the same host share it, other hosts are blocked.
    - Keep the scope narrow: lock what you will actually edit, not the whole project.

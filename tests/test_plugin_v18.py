@@ -1,6 +1,5 @@
 """lock-master 1.8: session names, fencing in the hook, team-board file claims, Codex / Kimi tool shapes."""
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -50,8 +49,7 @@ def fenced(project, name="LOCK.txt", owner="claude-code@testhost", fence=100, **
 
 def test_session_name_is_a_valid_team_agent_name():
     name = lock_guard.session_name({"session_id": "AB12cd34-eeee-ffff"})
-    host = re.sub(r"[^A-Za-z0-9_-]", "-", lock_guard.my_host())  # macOS host names end in .local
-    assert name == f"claude-code@{host}.ab12cd34"
+    assert name == f"claude-code@{lock_guard.host_token()}.ab12cd34"
     assert team.normalize_agent_name(name) == name  # no ':' and inside the team-lock agent grammar
     assert lock_guard.session_name({}) is None
 
@@ -59,8 +57,11 @@ def test_session_name_is_a_valid_team_agent_name():
 def test_session_name_normalises_dotted_host_names(monkeypatch):
     monkeypatch.setenv("COMPUTERNAME", "Lukas-MBP.local")  # macOS: the host name ends in .local
     name = lock_guard.session_name({"session_id": "ab12cd34"})
-    assert name == "claude-code@LUKAS-MBP-LOCAL.ab12cd34"
+    assert name == "claude-code@LUKAS-MBP.LOCAL.ab12cd34"  # dots are valid in agent names and stay
     assert team.normalize_agent_name(name) == name
+    assert lock_guard.owner_prefixes() == ["claude-code@lukas-mbp.local"]
+    monkeypatch.setenv("COMPUTERNAME", "odd host!")
+    assert lock_guard.host_token() == "ODD-HOST-" and team.normalize_agent_name(lock_guard.session_name({"session_id": "ab12cd34"}))
 
 
 def test_session_start_names_the_session_even_without_locks(project):
