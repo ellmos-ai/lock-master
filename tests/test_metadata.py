@@ -14,15 +14,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_version_consistency():
     """Verify version consistency across VERSION, pyproject.toml, and ellmos-module.v2.json."""
     version_file = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    assert version_file == "1.6.3"
+    assert version_file == "1.6.4"
 
     with (ROOT / "pyproject.toml").open("rb") as handle:
         pyproject = tomllib.load(handle)
-    assert pyproject["project"]["version"] == "1.6.3"
+    assert pyproject["project"]["version"] == "1.6.4"
 
     with (ROOT / "ellmos-module.v2.json").open(encoding="utf-8") as handle:
         manifest = json.load(handle)
-    assert manifest["version"] == "1.6.3"
+    assert manifest["version"] == "1.6.4"
 
 
 def test_manifest_parity():
@@ -74,7 +74,7 @@ def test_llms_txt_integrity():
         or "Last-checked: 2026-09-20" in content
         or "Last-checked: 2026-09-16" in content
     )
-    assert "Version: 1.6.3" in content or "1.6.3" in content
+    assert "Version: 1.6.4" in content or "1.6.4" in content
     assert "isolated wheel install/import/CLI smoke" in content
     assert "ellmos-ai" in content
     assert "open-bricks" in content
@@ -101,7 +101,7 @@ def test_readme_badges_and_ecosystem_parity():
             or "tests-212%20passed" in content
             or "pytest-passing" in content
         )
-        assert "1.6.3" in content
+        assert "1.6.4" in content
         assert "ellmos--ai" in content
         assert "open--bricks" in content
         assert "llms.txt" in content
