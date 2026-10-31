@@ -13,7 +13,9 @@
     "coordination.locking"
   ],
   "requires": [],
-  "optional": [],
+  "optional": [
+    "coordination.leases"
+  ],
   "conflicts": [],
   "surfaces": [
     "library",
