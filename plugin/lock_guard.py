@@ -383,12 +383,13 @@ def main(argv: list[str]) -> int:
         payload = json.loads(sys.stdin.read() or "{}")
         result = MODES[mode](payload) if mode in MODES else None
     except Exception as exc:  # fail closed, with an explicit escape hatch
+        why = clean(_without_dsn(exc), 300)  # every error text, whatever its type: no lease-store URL/password
         if mode == "pretooluse" and os.environ.get("ELLMOS_LOCK_FAIL_OPEN") != "1":
             result = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                             "permissionDecisionReason": f"lock-master: lock check failed ({exc}); "
+                                             "permissionDecisionReason": f"lock-master: lock check failed ({why}); "
                                              "set ELLMOS_LOCK_FAIL_OPEN=1 to allow on errors."}}
         else:
-            print(f"lock-master: lock check failed ({exc})", file=sys.stderr)
+            print(f"lock-master: lock check failed ({why})", file=sys.stderr)
             return 0
     if result:
         print(json.dumps(result))

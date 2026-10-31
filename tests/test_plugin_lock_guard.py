@@ -370,3 +370,14 @@ def test_psycopg_serialization_failure_fails_closed_but_lost_connection_warns(pr
                         lambda: RaisingStore(psycopg.OperationalError("server closed the connection")))
     out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
     assert "lease store unreachable" in out["systemMessage"]
+
+
+def test_fail_closed_message_never_shows_the_lease_store_url(project, monkeypatch, capsys):
+    url = "postgresql://u:secretpw@db.example:5432/x"
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", url)
+    monkeypatch.setattr(lock_guard, "lease_store",
+                        lambda: RaisingStore(RuntimeError(f"cannot use {url}: permission denied")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "secretpw" not in reason and "<lease store>" in reason
