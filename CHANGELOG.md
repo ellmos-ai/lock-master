@@ -7,6 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (Claude plugin directory fields - 2026-10-31, version 1.6.4)
+
+- `.claude-plugin/plugin.json`: `icon` (`assets/icon.png`), `documentationUrl`, `supportUrl`,
+  `privacyPolicyUrl`; README examples for the plugin (EN/DE).
+
 ### Added (Claude Code plugin `ellmos-lock-master` - 2026-10-25)
 
 - The repository is now also a Claude Code plugin (`.claude-plugin/plugin.json`). Hooks deny `Edit`, `Write`,

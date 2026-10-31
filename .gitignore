@@ -143,3 +143,6 @@ mobile_icons/
 
 # Auftrags- und Reviewzettel der Pflegerunden (Laufmaterial, kein Repo-Inhalt)
 _review/
+
+# claude plugin eval run results
+evals/results/

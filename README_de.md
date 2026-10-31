@@ -15,7 +15,7 @@
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Auditiert](https://img.shields.io/badge/Third--Party-Auditiert%20%7C%20100%25%20Permissiv-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-aktiv-blue.svg)](MARKETING-LOG.txt)
-[![Version 1.6.3](https://img.shields.io/badge/Version-1.6.3-informational.svg)](VERSION)
+[![Version 1.6.4](https://img.shields.io/badge/Version-1.6.4-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![Mitwirken: Willkommen](https://img.shields.io/badge/Mitwirken-Willkommen-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
@@ -347,7 +347,17 @@ Team-Locks desselben Hosts werden geteilt. Interne Fehler lehnen den Aufruf ab; 
 stattdessen. Voraussetzung ist Python 3.10+ (`py -3` unter Windows oder `ELLMOS_PYTHON` setzen).
 
 **Kompatibilität:** Claude Code (Hooks, Befehle, Skill). Die `LOCK*.txt`-Konvention ist für Codex, Gemini, Kimi und
-Menschen lesbar; diese Agenten bekommen den sperrenden Hook nicht.
+Menschen lesbar; diese Agenten bekommen den sperrenden Hook nicht. Datenschutz und Support:
+<https://ellmos-ai.github.io/plugins.html>.
+
+**Beispiele:**
+
+1. Ein anderer Agent hält `LOCK.txt` in `docs/`. Claude soll `docs/anleitung.md` ändern: Die Änderung wird mit
+   Halter, Rechner und Zweck des Locks abgelehnt, und Claude meldet das, statt es zu umgehen.
+2. `/ellmos-lock-master:lock parser src "Parser umbauen"` vor einer größeren Änderung,
+   `/ellmos-lock-master:unlock` danach; andere Agenten sehen den Lock und lassen `src/` so lange in Ruhe.
+3. `git push` aus einem Repository mit aktivem `LOCK.user.txt` (etwa einem eingefrorenen Wettbewerbsbeitrag) wird
+   abgelehnt, Änderungen und Pushes in ungesperrten Repositories laufen wie gewohnt.
 
 ## <a id="sec-09"></a><a id="schnellstart"></a>9. Schnellstart & Typische CLI-Workflows
 
