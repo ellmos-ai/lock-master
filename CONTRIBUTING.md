@@ -21,11 +21,8 @@ Welcome! We welcome contributions to `lock-master` (Portable, zero-dependency mu
 12. **Bilingual Parity**: Maintain synchronized structural and navigational parity across `README.md` and `README_de.md` (18-point dual anchors `sec-01` through `sec-18`).
 
 ### 2. Local Development Workflow (Plan D)
+Clone this repository into a local working directory outside any cloud-synced folder (Plan D, for example `C:\_Local_DEV\repos\lock-master`), then run the following from the repository root:
 ```bash
-# Clone the repository (canonical Plan D location)
-git clone https://github.com/ellmos-ai/lock-master.git "C:\_Local_DEV\repos\lock-master"
-cd "C:\_Local_DEV\repos\lock-master"
-
 # Install package in editable mode with development dependencies
 pip install -e ".[dev]"
 
@@ -70,11 +67,8 @@ By contributing to `lock-master`, you agree that your contributions will be lice
 12. **Bilinguale Parität**: Strukturelle und navigatorische Parität zwischen `README.md` und `README_de.md` (18-Punkte Dual-Anker `sec-01` bis `sec-18`) ist zwingend einzuhalten.
 
 ### 2. Lokaler Entwicklungs-Workflow (Plan D)
+Das Repository in ein lokales Arbeitsverzeichnis außerhalb jedes Cloud-Sync-Ordners klonen (Plan D, zum Beispiel `C:\_Local_DEV\repos\lock-master`) und dann im Repository-Wurzelverzeichnis ausführen:
 ```bash
-# Klonen des Repositories (kanonischer Plan D Pfad)
-git clone https://github.com/ellmos-ai/lock-master.git "C:\_Local_DEV\repos\lock-master"
-cd "C:\_Local_DEV\repos\lock-master"
-
 # Paket im Entwicklungsmodus mit Testabhängigkeiten installieren
 pip install -e ".[dev]"
 
