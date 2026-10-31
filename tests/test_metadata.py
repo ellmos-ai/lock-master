@@ -88,7 +88,8 @@ def test_readme_badges_and_ecosystem_parity():
     for filename in ("README.md", "README_de.md"):
         content = (ROOT / filename).read_text(encoding="utf-8")
         assert (
-            "tests-282%20passed" in content
+            "tests-466%20passed" in content
+            or "tests-282%20passed" in content
             or "tests-276%20passed" in content
             or "tests-274%20passed" in content
             or "tests-270%20passed" in content
