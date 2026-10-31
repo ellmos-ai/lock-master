@@ -1,9 +1,11 @@
 #!/bin/sh
-# Starts plugin/lock_guard.py with a real Python 3 interpreter.
+# Starts plugin/lock_guard.py (modes pretooluse|session|sessionend) or, for mode `mcp`, the team-board MCP server
+# plugin/board_mcp.py, with a real Python 3 interpreter.
 # On Windows, `python3` can be the Microsoft Store placeholder, so `py -3` is tried first
 # and every candidate must actually run before it is used.
 mode="$1"
 script="${CLAUDE_PLUGIN_ROOT}/plugin/lock_guard.py"
+[ "$mode" = "mcp" ] && script="${CLAUDE_PLUGIN_ROOT}/plugin/board_mcp.py"
 if [ -n "$ELLMOS_PYTHON" ]; then
   exec "$ELLMOS_PYTHON" "$script" "$mode"
 fi

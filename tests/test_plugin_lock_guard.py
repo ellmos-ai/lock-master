@@ -26,6 +26,8 @@ def write_lock(directory: Path, name: str, **fields):
 def project(tmp_path, monkeypatch):
     monkeypatch.setenv("COMPUTERNAME", "TESTHOST")
     monkeypatch.delenv("ELLMOS_LOCK_OWNER", raising=False)
+    monkeypatch.delenv("ELLMOS_LOCK_ACTOR", raising=False)
+    monkeypatch.setenv("ELLMOS_LOCK_STATE_DIR", str(tmp_path / "_state"))
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
     return tmp_path

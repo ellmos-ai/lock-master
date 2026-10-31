@@ -13,8 +13,8 @@ no agent or automation should modify it while a valid, non-expired lock exists.
 
 ## Status & Test Verification
 
-- **Version**: 1.7.1
-- **Verification**: 466 passed tests (pytest 100% green), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
+- **Version**: 1.8.0
+- **Verification**: 512 passed tests (pytest 100% green), clean bytecode compilation gate, and an isolated wheel install/import/CLI smoke run in CI
 - **Ecosystem**: ellmos-ai / dev-bricks / open-bricks
 - **Runtime**: Python 3.10+ (zero external dependencies)
 - **Governance Invariants**: INV-LOCAL-01 through INV-SLA-10 codified and verified

@@ -3,7 +3,7 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Tests](https://img.shields.io/badge/tests-466%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
+[![Tests](https://img.shields.io/badge/tests-512%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -15,7 +15,7 @@
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Audited](https://img.shields.io/badge/Third--Party-Audited%20%7C%20100%25%20Permissive-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-active-blue.svg)](MARKETING-LOG.txt)
-[![Version 1.7.1](https://img.shields.io/badge/version-1.7.1-informational.svg)](VERSION)
+[![Version 1.8.0](https://img.shields.io/badge/version-1.8.0-informational.svg)](VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Contributing: Welcome](https://img.shields.io/badge/Contributing-Welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexing](https://img.shields.io/badge/llms.txt-indexed-purple.svg)](llms.txt)
@@ -328,8 +328,10 @@ operations: git-push, deploy
 This repository is also a Claude Code plugin. It makes Claude respect the locks of other agents automatically:
 
 - **Hooks:** before every `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, and before `git push`, the plugin checks
-  the target with `active_locks_for_path()` and denies the call when a foreign active lock covers it. At session start
-  it lists the locks that affect the working directory.
+  the target with `active_locks_for_path()` and denies the call when a foreign active lock covers it, or when another
+  agent has claimed the file on the team board. At session start it lists the locks that affect the working directory
+  and names the session.
+- **MCP server `lock-board`:** read the team board, post notes, claim and release files (see below).
 - **Commands:** `/ellmos-lock-master:lock`, `/ellmos-lock-master:unlock`, `/ellmos-lock-master:locks`,
   `/ellmos-lock-master:message`.
 - **Skill:** `lock-protocol` (when to lock, lock types, fencing, release).
@@ -341,9 +343,67 @@ Install from the ellmos marketplace:
 /plugin install ellmos-lock-master@ellmos
 ```
 
-**Team board:** at session start the plugin also shows the presence entries and the latest five messages of this
-host's team lock (`LOCK.team.<HOST>.txt`, written by `team-lock/team_lock.py`); `/ellmos-lock-master:message <text>`
-posts a note there for the other agents on the same host.
+**Team board and file claims:** at session start the plugin shows the presence entries and the latest five messages of
+this host's team lock (`LOCK.team.<HOST>.txt`, written by `team-lock/team_lock.py`) and names the session:
+`claude-code@<HOST>.<sid8>`. That name is the session's lock owner (`/ellmos-lock-master:lock` uses it) and its agent
+name on the board; `/ellmos-lock-master:message <text>` posts a note for the other agents on the same host. The bundled MCP
+server `lock-board` (`.mcp.json`, started by `hooks/run.sh mcp`, Python standard library only, every write goes through
+`team-lock/`) offers five tools: `board_read` (presence, claims, queue, latest messages), `board_post`, `board_claim`
+(with `queue=true` you wait in line, first come first served), `board_release` and `board_presence`. Pass your session
+name as `agent`. If another agent holds an `EDITING` claim on a file or folder, the PreToolUse hook denies edits below it,
+names the holder and your place in the queue, and points to `/ellmos-lock-master:message` and `board_claim`; a claim of
+your own session (or of the shared `claude-code@<HOST>`) passes, and so does every path nobody claimed. Claims are
+explicit: there is **no automatic claim** at the first edit, because a session that crashes would leave claims nobody
+releases (claims have no expiry of their own). A normal session end releases the session's claims and presence; after a
+crash the lines are removed by hand or lapse with the team lock. A claims section that cannot be parsed does not block
+(the team lock still lets the host's agents in); the hook says so. Claims are a cooperative signal between agents, not a
+security boundary: agent names are self-declared, and `Bash` writes are not recognised. The MCP server does not know the session id (Claude Code documents no session variable for MCP servers), so the board tools act as the `agent` you pass, or as the shared `claude-code@<HOST>` when you pass none; **enforcement lives in the hook**, which does receive the session id.
+
+**Fencing in the hook:** every lock carries a fence number, a grant number from the clock that `lock_create` hands out. The
+hook checks it for locks whose owner is a *shared* prefix (`claude-code@<HOST>` or `ELLMOS_LOCK_OWNER`), because several
+sessions of one host can hold such a lock without noticing each other. The first time a session relies on one, it
+remembers the fence (a small JSON file in the temp directory, `ELLMOS_LOCK_STATE_DIR`, removed at session end). If the
+lock later carries another fence, an earlier one or none at all, it was granted anew (after expiry, `--force`, or by a
+parallel session with the same owner string) and the hook stops treating it as the session's own: edits are denied
+with the reason of `fence_status()` and the advice to release it and set it again with `/lock` under the session name.
+A lock named after the session needs no check, no other session carries that name. What this is **not**: it is
+cooperative detection, not enforcement. It happens before each tool call, so a lock lost between the check and the write
+goes unnoticed (see the note in `pure-locking/lock_utils.py`); a session that first looks at the lock after the takeover
+trusts what it finds; team locks are shared by design and are not fence-checked; fence numbers are clock based. If the
+state file cannot be written, the hook falls back to trusting the lock, as before 1.8.
+
+**Codex and Kimi Code:** `python plugin/lock_guard.py pretooluse --actor codex|kimi` is the same guard for the two other
+agents here that run PreToolUse hooks. It reads Codex's `apply_patch` (paths from the `*** Add File:`, `*** Update File:`,
+`*** Delete File:` and `*** Move to:` header lines; a patch whose targets cannot be read is denied), Kimi's `Write` and `Edit` (the names in
+the tool schema of Kimi Code CLI 0.14.2, field `path`) and `WriteFile`, `StrReplaceFile`, `DeleteFile` and `MoveFile`, and `git push` through `Bash` (Codex); it denies with exit code 2 and the
+reason on stderr, the contract both hosts honour. Owner prefix and session name follow the actor
+(`codex@<HOST>`, `kimi@<HOST>.<sid8>`). The payload shapes are those of the documented hook contracts as implemented and
+tested in workflowhooker's action guard; this release tests them with those payloads, not inside a live Codex or Kimi
+session. `hook-master install-snippet --id lock_edit_guard --provider codex|kimi|claude`
+prints the configuration fragment (it never edits a host configuration; the fragment goes through hook-master's `library/lock_edit_guard.py`, a connector that runs this `lock_guard.py`, and binds the edit tools only, `git push` stays with the existing `lock_push_guard`); calling this repository's guard directly, with `git push` through Bash as well, it is
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "^(apply_patch|Bash)$", "hooks": [{"type": "command",
+  "command": "python -X utf8 \"/path/to/lock-master/plugin/lock_guard.py\" pretooluse --actor codex", "timeout": 10}]}]}}
+```
+
+for `~/.codex/hooks.json` and
+
+```toml
+[[hooks]]
+event = "PreToolUse"
+matcher = "Write|Edit|WriteFile|StrReplaceFile|DeleteFile|MoveFile"
+command = "python -X utf8 \"/path/to/lock-master/plugin/lock_guard.py\" pretooluse --actor kimi"
+timeout = 10
+```
+
+for `~/.kimi-code/config.toml`. The tool names are those in the tool schema of Kimi Code CLI 0.14.2 (read from its session logs: `Write` and `Edit`
+with `path`, shell tool `Bash` with `command`); `WriteFile` and the other older names stay bound for older versions. The fragment does
+not bind Kimi's `Bash`, so Kimi's `git push` is not guarded here; adding `Bash` to the matcher would cover it (proposal, not done: the
+existing `lock_push_guard` covers pushes for the other hosts). **Antigravity (agy)** cannot be bound: according to hook-master's provider
+model it only has `PreInvocation` (before the model call, without a tool target); it keeps to the `LOCK*.txt`
+convention by instruction (not verified against a live agy installation, this host has no agy hook configuration).
+Why hook-master leaves `PreToolUse` out of its default snippets is explained in its README.
 
 **Optional leases across computers (preview, not yet available to the public):** they need the `roshambo` package,
 which is not published yet. Without `ELLMOS_LOCK_LEASES` nothing of this is active and the plugin works exactly as
@@ -359,12 +419,12 @@ warning, and file locks are still checked.
 **Data flow:** local files only. The hooks read `LOCK*.txt` files in the target directory, its parents and a
 worktree's main clone, and call `git` to resolve worktrees. Nothing is sent over the network unless you switch leases on; then lease key
 (repository origin and file path), host, session id and tool name go to the lease store you configured. **Ownership:** a lock is
-the session's own when its `owner` starts with `claude-code@<HOST>` or a prefix in `ELLMOS_LOCK_OWNER`; team locks of
-the same host are shared. Internal errors deny the call; `ELLMOS_LOCK_FAIL_OPEN=1` allows instead. Python 3.10+ is
+the session's own when its `owner` is the session name `claude-code@<HOST>.<sid8>` or starts with `claude-code@<HOST>` or a
+prefix in `ELLMOS_LOCK_OWNER` (then fence-checked, see above); team locks of the same host are shared. Internal errors deny the call; `ELLMOS_LOCK_FAIL_OPEN=1` allows instead. Python 3.10+ is
 required (`py -3` on Windows, or set `ELLMOS_PYTHON`).
 
-**Compatibility:** Claude Code (hooks, commands, skill). The `LOCK*.txt` convention is readable by Codex, Gemini, Kimi
-and humans; those agents do not get the blocking hook. Privacy and support: <https://ellmos-ai.github.io/plugins.html>.
+**Compatibility:** Claude Code (hooks, commands, skill, MCP server). The `LOCK*.txt` convention is readable by Codex,
+Gemini, Kimi and humans; Codex and Kimi Code can run the same guard as a hook (above), Gemini/agy cannot. Privacy and support: <https://ellmos-ai.github.io/plugins.html>.
 
 **Examples:**
 

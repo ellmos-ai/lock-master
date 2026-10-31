@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: board-claim
+tags: [mcp, team-board]
+context:
+  scaffold_script: fixture.sh

@@ -9,10 +9,19 @@ Set a lock before non-trivial work so other agents (Claude, Codex, Gemini, Kimi)
    (use `python3` instead of `py -3` outside Windows). Exit 0 = free, 1 = locked. If a foreign lock covers the
    area, stop and tell the user instead of locking around it.
 2. Create the lock with the arguments from `$ARGUMENTS`:
-   `py -3 "${CLAUDE_PLUGIN_ROOT}/pure-locking/lock_create.py" "<project>" --scope <scope> --path <relative-path> --owner "claude-code@<HOST>" --purpose "<purpose>"`
+   `py -3 "${CLAUDE_PLUGIN_ROOT}/pure-locking/lock_create.py" "<project>" --scope <scope> --path <relative-path> --owner "<session name>" --purpose "<purpose>"`
+   - `<session name>` is the name the SessionStart context gave this session (`claude-code@<HOST>.<sid8>`). A lock
+     named after the session is unmistakably yours: parallel sessions of the same host are held off, and nobody can
+     mistake a newer grant of the same area for yours. If the context named none, build it:
+     `claude-code@<HOST>.` plus the first 8 letters/digits of `${CLAUDE_SESSION_ID}`, lowercase (the same rule the hook uses).
+     Only when neither is available, use `claude-code@<HOST>`.
+     (`<HOST>` is the host name with anything but letters, digits, `_`, `.` and `-` replaced by `-`; the hook, the commands and
+     the board tools all use that one form.)
    - `<project>` is the project root (the git top level when inside a repository).
    - `--team <HOST>` creates a team lock: agents of the same host share it, other hosts are blocked.
    - Keep the scope narrow: lock what you will actually edit, not the whole project.
 3. Report the lock file path and the fence number the command printed.
+4. With `--team`, also announce yourself and claim what you will edit through the board tools (`board_presence`,
+   `board_claim`; pass your session name as `agent`), so the other sessions on this host are held off those files.
 
 Never write a lock file by hand and never change or delete a foreign lock.
