@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -300,3 +301,83 @@ def test_presence_is_capped(project):
         team.update_team_lock(project / name, "presence", "claim", f"loop-{i} | agent{i} | writer | t", project_dir=project)
     text = lock_guard.session({"cwd": str(project)})["hookSpecificOutput"]["additionalContext"]
     assert text.count("present:") == lock_guard.BOARD_PRESENCE and "(+3 more present)" in text
+
+
+class DownStore(FakeLeaseStore):
+    def acquire(self, *args, **kwargs):
+        raise ConnectionError("server closed the connection unexpectedly")
+
+
+def test_unreachable_lease_store_allows_with_warning(project, monkeypatch):
+    store = DownStore()
+    monkeypatch.setattr(lock_guard, "lease_store", lambda: store)
+    out = lock_guard.pretooluse(edit_as(project / "src" / "a.py", "s1"))
+    assert "permissionDecision" not in json.dumps(out)
+    assert "lease store unreachable" in out["systemMessage"] and store.closed == 1
+
+
+def test_file_lock_still_denies_when_lease_store_is_down(project, monkeypatch):
+    write_lock(project, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
+    monkeypatch.setattr(lock_guard, "lease_store", lambda: DownStore())
+    assert denied(edit_as(project / "src" / "a.py", "s1"))
+
+
+def test_unreachable_postgres_is_quick_and_hides_the_password(project, monkeypatch):
+    pytest.importorskip("roshambo.lease_store")
+    pytest.importorskip("psycopg")
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", "postgresql://u:secretpw@127.0.0.1:1/x")
+    start = time.monotonic()
+    out = lock_guard.pretooluse(edit_as(project / "src" / "a.py", "s1"))
+    assert time.monotonic() - start < lock_guard.LEASE_CONNECT_TIMEOUT + 5
+    assert "lease store unreachable" in out["systemMessage"] and "secretpw" not in out["systemMessage"]
+
+
+class RaisingStore(FakeLeaseStore):
+    def __init__(self, exc):
+        super().__init__()
+        self.exc = exc
+
+    def acquire(self, *args, **kwargs):
+        raise self.exc
+
+
+def run_main(monkeypatch, capsys, payload) -> dict:
+    monkeypatch.setattr(sys, "stdin", type("S", (), {"read": staticmethod(lambda: json.dumps(payload))})())
+    monkeypatch.delenv("ELLMOS_LOCK_FAIL_OPEN", raising=False)
+    lock_guard.main(["x", "pretooluse"])
+    return json.loads(capsys.readouterr().out or "{}")
+
+
+def test_store_error_that_is_no_outage_fails_closed(project, monkeypatch, capsys):
+    monkeypatch.setattr(lock_guard, "lease_store", lambda: RaisingStore(RuntimeError("deadlock detected")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_bad_ttl_fails_closed(project, leases, monkeypatch, capsys):
+    monkeypatch.setenv("ELLMOS_LOCK_LEASE_TTL", "fifteen minutes")
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_psycopg_serialization_failure_fails_closed_but_lost_connection_warns(project, monkeypatch, capsys):
+    psycopg = pytest.importorskip("psycopg")
+    monkeypatch.setattr(lock_guard, "lease_store",
+                        lambda: RaisingStore(psycopg.errors.SerializationFailure("restart transaction")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    monkeypatch.setattr(lock_guard, "lease_store",
+                        lambda: RaisingStore(psycopg.OperationalError("server closed the connection")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    assert "lease store unreachable" in out["systemMessage"]
+
+
+def test_fail_closed_message_never_shows_the_lease_store_url(project, monkeypatch, capsys):
+    url = "postgresql://u:secretpw@db.example:5432/x"
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", url)
+    monkeypatch.setattr(lock_guard, "lease_store",
+                        lambda: RaisingStore(RuntimeError(f"cannot use {url}: permission denied")))
+    out = run_main(monkeypatch, capsys, edit_as(project / "src" / "a.py", "s1"))
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "secretpw" not in reason and "<lease store>" in reason

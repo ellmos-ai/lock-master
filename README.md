@@ -351,7 +351,9 @@ self-hosted database that several computers share. Every edit then also takes a 
 (`ELLMOS_LOCK_LEASE_TTL`, default 900 s, renewed by each edit of the file). An edit of a file whose lease another
 session holds is denied with holder, host and intent; the session's leases are released at session end. The key is
 the repository origin plus the path inside it, so clones on different computers, worktrees and branches share it.
-With the variable set and the `roshambo` package missing, edits are denied (fail closed).
+With the variable set and the `roshambo` package missing, edits are denied (fail closed). A lease store that
+cannot be reached (reboot, VPN down; connect timeout 5 s) does not stop work: the edit goes through with a
+warning, and file locks are still checked.
 
 **Data flow:** local files only. The hooks read `LOCK*.txt` files in the target directory, its parents and a
 worktree's main clone, and call `git` to resolve worktrees. Nothing is sent over the network unless you switch leases on; then lease key

@@ -18,7 +18,9 @@ default 900 s). A file whose lease another session holds is denied. The key is
 `git:<origin>:<path in repo>`, so clones of the same repository on different
 computers -- and its worktrees and branches -- share it. Requires the
 `roshambo` package; when the URL is set and it cannot be loaded, edits fail
-closed like any other lock-check error.
+closed like any other lock-check error. A store that cannot be reached (reboot,
+VPN down; connect timeout 5 s) does not stop work: the edit goes through with a
+warning, file locks were checked as usual.
 
 Ownership: a lock is the session's own when its `owner` field starts with one
 of the prefixes in ELLMOS_LOCK_OWNER (comma-separated), default
@@ -60,6 +62,7 @@ SCP_URL = re.compile(r"^[\w.-]+@([^:/]+):(.+)$")  # git@github.com:owner/repo.gi
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 BOARD_MESSAGES = 5
 BOARD_PRESENCE = 20
+LEASE_CONNECT_TIMEOUT = 5  # seconds; the hook itself times out after 20
 
 
 def my_host() -> str:
@@ -182,14 +185,56 @@ def describe(lock_path: Path) -> str:
             f"purpose: {clean(data.get('purpose', '?'))})")
 
 
+class LeaseStoreUnavailable(Exception):
+    """The configured lease store cannot be reached. Edits continue with a warning: file locks still apply,
+    and an outage of the shared database (reboot, VPN down) must not stop every agent on the host."""
+
+
 def lease_store():
-    """The roshambo lease store named by ELLMOS_LOCK_LEASES, or None while leases are off."""
+    """The roshambo lease store named by ELLMOS_LOCK_LEASES, or None while leases are off.
+
+    A missing roshambo package or an unknown URL scheme is a local configuration error and fails closed;
+    a store that cannot be reached raises LeaseStoreUnavailable."""
     url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
     if not url:
         return None
     from roshambo.lease_store import open_lease_store  # optional dependency, only with leases on
 
-    return open_lease_store(url, os.environ.get("ELLMOS_LOCK_LEASE_SWARM", "default"))
+    if url.startswith(("postgresql://", "postgres://", "cockroachdb://")) and "connect_timeout=" not in url:
+        url += ("&" if "?" in url else "?") + f"connect_timeout={LEASE_CONNECT_TIMEOUT}"
+    try:
+        return open_lease_store(url, os.environ.get("ELLMOS_LOCK_LEASE_SWARM", "default"))
+    except Exception as exc:
+        if _store_unreachable(exc):
+            raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
+        raise
+
+
+# SQLSTATE of a lost connection: class 08, or the server shutting down / starting up (57P01-57P03).
+UNREACHABLE_SQLSTATES = ("57P01", "57P02", "57P03")
+
+
+def _store_unreachable(exc: BaseException) -> bool:
+    """Only connection-level failures count as an outage. Serialization (40001), integrity, SQL and every
+    other error mean the store answered -- treating those as 'unreachable' would let two sessions edit the
+    same file -- so they fail closed."""
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    if not isinstance(exc, psycopg.OperationalError):
+        return False
+    state = getattr(exc, "sqlstate", None)
+    return state is None or state.startswith("08") or state in UNREACHABLE_SQLSTATES
+
+
+def _without_dsn(exc: Exception) -> str:
+    """Error text without the configured URL (it may carry a password)."""
+    text = f"{type(exc).__name__}: {exc}"
+    url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
+    return text.replace(url, "<lease store>") if url else text
 
 
 def lease_agent(payload: dict) -> str:
@@ -233,8 +278,16 @@ def lease_denial(payload: dict, path: Path) -> str | None:
     if store is None:
         return None
     try:
-        got = store.acquire(lease_key(path), lease_agent(payload), f"{payload.get('tool_name', 'edit')} {path.name}",
-                            int(os.environ.get("ELLMOS_LOCK_LEASE_TTL", "900")), host=my_host())
+        # Their errors stay fail-closed: only the acquire call itself can hit an outage.
+        agent, key, host = lease_agent(payload), lease_key(path), my_host()
+        ttl = int(os.environ.get("ELLMOS_LOCK_LEASE_TTL", "900"))
+        intent = f"{payload.get('tool_name', 'edit')} {path.name}"
+        try:
+            got = store.acquire(key, agent, intent, ttl, host=host)
+        except Exception as exc:
+            if _store_unreachable(exc):
+                raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
+            raise
     finally:
         store.close()
     if hasattr(got, "claim_id"):
@@ -261,7 +314,11 @@ def pretooluse(payload: dict) -> dict | None:
             return deny(f"lock-master: a foreign active lock covers this {what} {path}. "
                         "Do not work around it; coordinate with the holder or the user. "
                         + " | ".join(describe(h) for h in hits))
-        reason = lease_denial(payload, path) if op == "edit" else None
+        try:
+            reason = lease_denial(payload, path) if op == "edit" else None
+        except LeaseStoreUnavailable as exc:
+            return {"systemMessage": f"lock-master: lease store unreachable ({clean(exc, 200)}); edit allowed "
+                                     "without a lease, file locks were checked."}
         if reason:
             return deny(reason)
     return None
@@ -326,12 +383,13 @@ def main(argv: list[str]) -> int:
         payload = json.loads(sys.stdin.read() or "{}")
         result = MODES[mode](payload) if mode in MODES else None
     except Exception as exc:  # fail closed, with an explicit escape hatch
+        why = clean(_without_dsn(exc), 300)  # every error text, whatever its type: no lease-store URL/password
         if mode == "pretooluse" and os.environ.get("ELLMOS_LOCK_FAIL_OPEN") != "1":
             result = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                             "permissionDecisionReason": f"lock-master: lock check failed ({exc}); "
+                                             "permissionDecisionReason": f"lock-master: lock check failed ({why}); "
                                              "set ELLMOS_LOCK_FAIL_OPEN=1 to allow on errors."}}
         else:
-            print(f"lock-master: lock check failed ({exc})", file=sys.stderr)
+            print(f"lock-master: lock check failed ({why})", file=sys.stderr)
             return 0
     if result:
         print(json.dumps(result))

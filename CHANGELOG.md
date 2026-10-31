@@ -7,6 +7,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (plugin leases: outage does not block - 2026-10-31)
+
+- A lease store that cannot be reached no longer denies every edit: the edit goes through with a
+  `systemMessage`, file locks are still checked, Postgres connections time out after 5 s, and the configured
+  URL (it may carry a password) is removed from the message. A missing `roshambo` package or an unknown URL
+  scheme still fails closed, and so does every store error that is not a lost connection (serialization
+  40001, integrity, SQL): only `ConnectionError`, `TimeoutError` and psycopg `OperationalError` without SQLSTATE
+  or with class 08 / 57P01-57P03 count as an outage. Reason: an outage of the shared database (reboot, VPN down) would otherwise stop
+  every agent on the host.
+
 ### Fixed (plugin team board - 2026-10-31)
 
 - An unreadable team lock (I/O error, invalid UTF-8) no longer drops the whole session-start context; the lock
