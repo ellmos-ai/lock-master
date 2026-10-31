@@ -376,7 +376,7 @@ Nummern hängen an der Uhr. Lässt sich die Zustandsdatei nicht schreiben, vertr
 **Codex und Kimi Code:** `python plugin/lock_guard.py pretooluse --actor codex|kimi` ist derselbe Guard für die beiden anderen
 Agenten hier, die PreToolUse-Hooks ausführen. Er liest Codex' `apply_patch` (Pfade aus den Kopfzeilen `*** Add File:`,
 `*** Update File:`, `*** Delete File:` und `*** Move to:`; ein Patch, dessen Ziele sich nicht lesen lassen, wird abgelehnt), Kimis
-`WriteFile`, `StrReplaceFile`, `DeleteFile` und `MoveFile` sowie `git push` über `Bash` (Codex) und lehnt mit Exit-Code 2 und der
+`Write` und `Edit` (die Namen im Werkzeugschema von Kimi Code CLI 0.14.2, Feld `path`) sowie `WriteFile`, `StrReplaceFile`, `DeleteFile` und `MoveFile` sowie `git push` über `Bash` (Codex) und lehnt mit Exit-Code 2 und der
 Begründung auf stderr ab, dem Vertrag, den beide Hosts einhalten. Besitzerpräfix und Sitzungsname folgen dem Akteur
 (`codex@<HOST>`, `kimi@<HOST>.<sid8>`). Die Payload-Formen sind die der dokumentierten Hook-Verträge, wie sie der Aktionsguard von
 workflowhooker umsetzt und testet; diese Version testet mit solchen Payloads, nicht in einer laufenden Codex- oder Kimi-Sitzung.
@@ -393,7 +393,7 @@ für `~/.codex/hooks.json` und
 ```toml
 [[hooks]]
 event = "PreToolUse"
-matcher = "WriteFile|StrReplaceFile|DeleteFile|MoveFile"
+matcher = "Write|Edit|WriteFile|StrReplaceFile|DeleteFile|MoveFile"
 command = "python -X utf8 \"/pfad/zu/lock-master/plugin/lock_guard.py\" pretooluse --actor kimi"
 timeout = 10
 ```

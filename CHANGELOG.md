@@ -21,8 +21,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   claimed path (holder, queue position, pointer to `/message` and `board_claim`). Own session name, shared owner prefix
   and unclaimed paths pass; an unparsable claims section warns instead of blocking. SessionEnd releases the session's
   claims and presence. No automatic claim at the first edit (a crash would leave claims behind; claims never expire).
-- **Codex and Kimi Code.** `lock_guard.py pretooluse --actor codex|kimi` reads `apply_patch` headers and Kimi's `WriteFile`,
-  `StrReplaceFile`, `DeleteFile`, `MoveFile` (unreadable targets are denied) and denies with exit code 2 and stderr. Snippets:
+- **Codex and Kimi Code.** `lock_guard.py pretooluse --actor codex|kimi` reads `apply_patch` headers and Kimi's `Write`/`Edit` (`path`, Kimi Code CLI 0.14.2) and `WriteFile`,
+  `StrReplaceFile`, `DeleteFile`, `MoveFile` (a known file tool without a readable path is denied) and denies with exit code 2 and stderr. Snippets:
   `hook-master install-snippet --id lock_edit_guard` (ellmos-ai/hook-master#19) or by hand from the README. Antigravity cannot be bound.
 
 ### Changed (1.8.0)

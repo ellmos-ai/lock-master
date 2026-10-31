@@ -63,11 +63,15 @@ sys.path.insert(0, str(ROOT / "team-lock"))
 import _lock_master_team as team  # noqa: E402
 import lock_utils as lu  # noqa: E402
 
-# Path fields per tool: Claude Code's file tools and Kimi Code's WriteFile/StrReplaceFile/DeleteFile/MoveFile
-# (documented tool_input fields, as used by workflowhooker's action guard). Codex's apply_patch carries a patch text.
-EDIT_TOOLS = {"Edit": ("file_path",), "Write": ("file_path",), "MultiEdit": ("file_path",),
-              "NotebookEdit": ("notebook_path",), "WriteFile": ("file_path",), "StrReplaceFile": ("path",),
-              "DeleteFile": ("path",), "MoveFile": ("source", "destination")}
+# Path fields per tool, as groups of alternatives (the first non-empty field of a group is the path; every group
+# must yield one). Claude Code's Edit/Write/MultiEdit/NotebookEdit use file_path/notebook_path; Kimi Code's tool
+# schema (CLI 0.14.2) names Write/Edit with `path`, its documented WriteFile/StrReplaceFile/DeleteFile/MoveFile use
+# file_path/path/source+destination (as in workflowhooker's action guard). Codex's apply_patch carries a patch text.
+_FILE_OR_PATH = (("file_path", "path"),)
+EDIT_TOOLS = {"Edit": _FILE_OR_PATH, "Write": _FILE_OR_PATH, "MultiEdit": _FILE_OR_PATH,
+              "NotebookEdit": (("notebook_path", "path"),), "WriteFile": _FILE_OR_PATH,
+              "StrReplaceFile": _FILE_OR_PATH, "DeleteFile": _FILE_OR_PATH,
+              "MoveFile": (("source",), ("destination",))}
 PATCH_HEADERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: ")
 ACTOR = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 GIT_PUSH = re.compile(r"\bgit\b[^\n;&|]*\bpush\b")
@@ -200,10 +204,9 @@ def targets(payload: dict) -> list[tuple[str, Path]]:
     cwd = Path(payload.get("cwd") or os.getcwd())
     raws = None
     if tool in EDIT_TOOLS:
-        raws = [tool_input.get(field) for field in EDIT_TOOLS[tool]]
-        if not any(raws):
-            return []
-        if not all(isinstance(r, str) and r for r in raws):
+        raws = [next((tool_input[f] for f in group if isinstance(tool_input.get(f), str) and tool_input[f]), None)
+                for group in EDIT_TOOLS[tool]]
+        if not all(raws):  # a known file tool whose path cannot be read is not waved through
             return [("edit", UNRESOLVED)]
     elif tool == "apply_patch":
         command = tool_input.get("command")

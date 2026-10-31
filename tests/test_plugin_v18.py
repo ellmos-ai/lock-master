@@ -1,5 +1,6 @@
 """lock-master 1.8: session names, fencing in the hook, team-board file claims, Codex / Kimi tool shapes."""
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -49,7 +50,8 @@ def fenced(project, name="LOCK.txt", owner="claude-code@testhost", fence=100, **
 
 def test_session_name_is_a_valid_team_agent_name():
     name = lock_guard.session_name({"session_id": "AB12cd34-eeee-ffff"})
-    assert name == "claude-code@" + lock_guard.my_host() + ".ab12cd34"
+    host = re.sub(r"[^A-Za-z0-9_-]", "-", lock_guard.my_host())  # macOS host names end in .local
+    assert name == f"claude-code@{host}.ab12cd34"
     assert team.normalize_agent_name(name) == name  # no ':' and inside the team-lock agent grammar
     assert lock_guard.session_name({}) is None
 
@@ -273,9 +275,24 @@ def test_unreadable_edit_targets_are_denied_not_waved_through(project):
         assert denied({**payload, "cwd": str(project)}), payload
 
 
-def test_tools_without_paths_are_not_lock_relevant(project):
-    assert lock_guard.targets({"tool_name": "Edit", "cwd": str(project), "tool_input": {}}) == []
+def test_known_file_tools_without_a_readable_path_are_denied_other_tools_are_not_relevant(project):
+    for tool in ("Edit", "Write", "MultiEdit", "NotebookEdit", "WriteFile", "StrReplaceFile", "DeleteFile"):
+        assert denied({"tool_name": tool, "cwd": str(project), "tool_input": {}}), tool
+        assert denied({"tool_name": tool, "cwd": str(project), "tool_input": {"other": "x.py"}}), tool
     assert lock_guard.targets({"tool_name": "Read", "cwd": str(project), "tool_input": {"file_path": "x"}}) == []
+
+
+def test_kimi_0_14_2_write_and_edit_use_the_path_field(project):
+    """Kimi Code CLI 0.14.2 names Write and Edit with `path` (no file_path); a foreign lock must stop them."""
+    write_lock(project, "LOCK.txt", owner="gemini@OTHERHOST", host="OTHERHOST")
+    for tool in ("Write", "Edit"):
+        payload = {"tool_name": tool, "cwd": str(project), "tool_input": {"path": "src/a.py"}}
+        assert denied(payload), tool
+        assert lock_guard.targets(payload) == [("edit", project / "src" / "a.py")]
+        assert denied({**payload, "tool_input": {"file_path": "src/a.py"}}), tool  # Claude's form still works
+    (project / "LOCK.txt").unlink()
+    for tool in ("Write", "Edit"):  # negative control: without the lock the same calls pass
+        assert not denied({"tool_name": tool, "cwd": str(project), "tool_input": {"path": "src/a.py"}})
 
 
 @pytest.mark.parametrize("actor, exit_code", [("kimi", 2), ("codex", 2), ("claude-code", 0)])
