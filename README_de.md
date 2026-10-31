@@ -15,7 +15,7 @@
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Auditiert](https://img.shields.io/badge/Third--Party-Auditiert%20%7C%20100%25%20Permissiv-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-aktiv-blue.svg)](MARKETING-LOG.txt)
-[![Version 1.6.4](https://img.shields.io/badge/Version-1.6.4-informational.svg)](VERSION)
+[![Version 1.7.0](https://img.shields.io/badge/Version-1.7.0-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![Mitwirken: Willkommen](https://img.shields.io/badge/Mitwirken-Willkommen-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)

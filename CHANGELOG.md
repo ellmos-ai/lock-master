@@ -7,7 +7,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added (plugin: team board and optional leases - 2026-10-31)
+### Added (plugin: team board and optional leases - 2026-10-31, version 1.7.0)
 
 - Session start shows presence and the latest five messages of this host's team lock; new command
   `/ellmos-lock-master:message` posts to it via `team-lock/team_lock.py add-message`.
