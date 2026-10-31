@@ -11,7 +11,9 @@ this host see the latest messages at session start.
    If there is none, say so and stop; create one with `/ellmos-lock-master:lock <scope> <path> <purpose> --team <HOST>`
    only when the user asks for it.
 2. Post the message:
-   `py -3 "${CLAUDE_PLUGIN_ROOT}/team-lock/team_lock.py" add-message "<directory of the team lock>" --lock-name <file name> --agent "claude-code@<HOST>" --msg "<message>"`
+   `py -3 "${CLAUDE_PLUGIN_ROOT}/team-lock/team_lock.py" add-message "<directory of the team lock>" --lock-name <file name> --agent "<session name>" --msg "<message>"`
+   (`<session name>` as given by the SessionStart context, `claude-code@<HOST>.<sid8>`; without one, `claude-code@<HOST>`).
+   The `board_post` tool does the same without a shell.
 3. Report what the command printed. Exit 0 means posted; on any other exit code show the error and do not edit the
    team lock by hand.
 

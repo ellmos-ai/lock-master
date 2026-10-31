@@ -7,6 +7,28 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (1.8.0 - 2026-10-31)
+
+- **Fencing in the plugin hook.** For a lock whose owner is a shared prefix (`claude-code@<HOST>`, `ELLMOS_LOCK_OWNER`)
+  the hook remembers the fence the first time a session relies on it (JSON file in `ELLMOS_LOCK_STATE_DIR`, default
+  temp dir, removed at SessionEnd) and denies edits once the lock carries another fence, an earlier one or none
+  (`fence_status()`). Cooperative detection, not enforcement; documented limits in the README.
+- **Session names.** Each session is `<actor>@<HOST>.<sid8>`, announced at SessionStart (also when no lock exists). A lock
+  owned by that name is the session's own and nobody else's; `/lock`, `/unlock` and `/message` use it.
+- **Team-board MCP server `lock-board`** (`.mcp.json`, `plugin/board_mcp.py`, standard library only): `board_read`,
+  `board_post`, `board_claim` (with queue), `board_release`, `board_presence`, all through `update_team_lock`.
+- **Team file claims enforced.** An `EDITING` claim of another agent in a team lock of this host denies edits below the
+  claimed path (holder, queue position, pointer to `/message` and `board_claim`). Own session name, shared owner prefix
+  and unclaimed paths pass; an unparsable claims section warns instead of blocking. SessionEnd releases the session's
+  claims and presence. No automatic claim at the first edit (a crash would leave claims behind; claims never expire).
+- **Codex and Kimi Code.** `lock_guard.py pretooluse --actor codex|kimi` reads `apply_patch` headers and Kimi's `WriteFile`,
+  `StrReplaceFile`, `DeleteFile`, `MoveFile` (unreadable targets are denied) and denies with exit code 2 and stderr. Snippets:
+  `hook-master install-snippet --id lock_guard` (hook-master PR) or by hand from the README. Antigravity cannot be bound.
+
+### Changed (1.8.0)
+
+- The owner prefix and session name follow `ELLMOS_LOCK_ACTOR` / `--actor` (default `claude-code`).
+
 ### Fixed (1.7.1 - 2026-10-31)
 
 - Release of #30 (team board robust) and #31 (lease-store outage warns; only lost connections count as outage;
