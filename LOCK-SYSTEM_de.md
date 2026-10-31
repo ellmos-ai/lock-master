@@ -808,7 +808,11 @@ auffrischen. Der Befehl schreibt auch die konfigurierten Status-Caches. Danach
 Datei, Hostfeld, deklarierte Klon-/Spiegelpfade und `--check-dir` direkt
 zurücklesen. Die alte gemeinsame Datei kann für einen Rückweg erhalten bleiben,
 wird aber von der neuen Konfiguration nicht gelesen. Ein Klon ohne Zuordnung
-unter einem konfigurierten `clone_root` bleibt unbestimmt; Hosts ohne Spiegel
+unter einem konfigurierten `clone_root` bleibt unbestimmt, sofern keine
+ausdrückliche **Kein-Spiegel-Deklaration** (`no_mirror` in `TWIN-INDEX.<HOST>.json`,
+gefüllt aus `twin_resolution.no_mirror`, `twin_resolution.no_mirror_manifests`
+wie `.SYNC/<slot>/repos.json` mit `"no_mirror": true` / `"mirror_mode": "no-mirror"`,
+oder `REPO.pointer.json` mit `"no_mirror": true`) vorliegt; Hosts ganz ohne Spiegel
 lassen `twin_resolution` weg. Der Index ist eine Momentaufnahme deklarierter
 Pointer, kein Beweis dafür, dass seit dem Scan kein neuer Spiegel entstanden ist.
 Nach Änderungen der Zuordnung auffrischen; ein bloßes Zeitlimit könnte die

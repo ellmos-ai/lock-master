@@ -305,6 +305,14 @@ def load_config(roots_file: Path) -> dict:
         if entry.get("filter_prefix"):
             entry["filter_prefix"] = _expand_path(entry["filter_prefix"])
 
+    twin_cfg = config.get("twin_resolution")
+    if isinstance(twin_cfg, dict):
+        if isinstance(twin_cfg.get("no_mirror_manifests"), list):
+            twin_cfg["no_mirror_manifests"] = [
+                _expand_path(p) if isinstance(p, str) else p
+                for p in twin_cfg["no_mirror_manifests"]
+            ]
+
     return config
 
 
@@ -330,14 +338,19 @@ def _walk(current: Path, root: Path, max_depth: int, skip_dirs: set):
     if depth >= max_depth:
         return
     try:
-        children = list(current.iterdir())
+        with os.scandir(current) as it:
+            child_dirs = []
+            for entry in it:
+                if entry.name.lower() in skip_dirs:
+                    continue
+                try:
+                    if entry.is_dir():
+                        child_dirs.append(Path(entry.path))
+                except OSError:
+                    continue
     except OSError:
         return
-    for child in children:
-        if not child.is_dir():
-            continue
-        if child.name.lower() in skip_dirs:
-            continue
+    for child in child_dirs:
         yield from _walk(child, root, max_depth, skip_dirs)
 
 
@@ -350,12 +363,14 @@ def _format_remaining(delta: timedelta) -> str:
     return f"{h}h{m:02d}m"
 
 
-def collect_locks(config: dict, now: datetime | None = None) -> list[dict]:
+def collect_locks(config: dict, now: datetime | None = None,
+                  directories=None) -> list[dict]:
     now = datetime.now(timezone.utc) if now is None else now
     now_utc = lock_utils._as_utc(now)
     seen: set[Path] = set()
     out: list[dict] = []
-    for d in iter_lock_dirs(config):
+    source_dirs = directories if directories is not None else iter_lock_dirs(config)
+    for d in source_dirs:
         if d in seen:
             continue
         seen.add(d)
@@ -529,7 +544,7 @@ def write_caches(locks: list[dict], scanned_at: datetime, config: dict) -> list[
 
 
 
-def write_twin_index(config: dict) -> tuple[Path, int] | None:
+def write_twin_index(config: dict, directories=None) -> tuple[Path, int] | None:
     """Write the host's twin index (repo_name -> twin directories) from the
     REPO.pointer.json files of the directories the scan walks anyway.
 
@@ -543,7 +558,8 @@ def write_twin_index(config: dict) -> tuple[Path, int] | None:
     index_path = lock_utils.twin_index_path(twin_cfg)
     if index_path is None:
         raise ValueError("twin index requires a known host and index path")
-    index = lock_utils.build_twin_index(iter_lock_dirs(config))
+    source_dirs = directories if directories is not None else iter_lock_dirs(config)
+    index = lock_utils.build_twin_index(source_dirs, twin_cfg)
     index_path.parent.mkdir(parents=True, exist_ok=True)
     # Preserve the host file when only `generated_at` differs, avoiding sync
     # traffic on every scan. The path itself is resolved for this host above.
@@ -943,13 +959,14 @@ def main() -> int:
               file=sys.stderr)
         return 1
     scanned_at = datetime.now(timezone.utc)
-    locks = collect_locks(config, scanned_at)
+    walked_dirs = list(dict.fromkeys(iter_lock_dirs(config))) if args.write_cache else None
+    locks = collect_locks(config, scanned_at, directories=walked_dirs)
 
     if args.write_cache:
         written = write_caches(locks, scanned_at, config)
         for path, count in written:
             print(f"lock_scan --write-cache: {path} ({count} active lock(s))")
-        twin = write_twin_index(config)
+        twin = write_twin_index(config, directories=walked_dirs)
         if twin is not None:
             print(f"lock_scan --write-cache: {twin[0]} ({twin[1]} repo twin(s))")
         return 0

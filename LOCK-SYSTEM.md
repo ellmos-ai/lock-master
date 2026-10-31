@@ -863,7 +863,11 @@ configured status caches. Verify the generated file, host field, declared
 clone/mirror paths, and a direct `--check-dir` readback before relying on it.
 The old shared file can be retained for rollback but is never read by the new
 configuration. A clone without a mapping under a configured `clone_root`
-remains undetermined; for a host with no mirrors, omit `twin_resolution`.
+remains undetermined unless it carries an explicit **no-mirror declaration**
+(`no_mirror` in `TWIN-INDEX.<HOST>.json`, populated from `twin_resolution.no_mirror`,
+`twin_resolution.no_mirror_manifests` such as `.SYNC/<slot>/repos.json` entries
+with `"no_mirror": true` / `"mirror_mode": "no-mirror"`, or a `REPO.pointer.json`
+with `"no_mirror": true`); for a host with no mirrors at all, omit `twin_resolution`.
 The index is a snapshot of declared pointers, not proof that no new mirror was
 created after its scan. Refresh after topology changes; no time-to-live value
 can by itself prove the absence of a new mirror.

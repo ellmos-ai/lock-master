@@ -313,6 +313,93 @@ def test_check_dir_exitcodes_end_to_end():
         assert run(clone) == 0, "ohne Lock muss der Klon frei sein"
 
 
+def test_klon_ohne_spiegel_mit_und_ohne_deklaration():
+    """T-20261031-777535853: Ein Klon unter clone_root ohne OneDrive-Zwilling
+    bleibt ohne Deklaration fail-closed UNDETERMINED (Exit 1), wird aber mit
+    ausdruecklicher no_mirror-Deklaration (im Slot-Manifest repos.json, in
+    twin_resolution.no_mirror oder im Index) als 'ok' / frei (Exit 0) aufgeloest.
+    Ein echter Spiegel-Lock hat weiterhin Vorrang vor einer no_mirror-Deklaration."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repos_root = tmp / "repos"
+        unmapped_clone = repos_root / "unmapped-repo"
+        declared_clone = repos_root / "declared-no-mirror"
+        manifest_clone = repos_root / "manifest-no-mirror"
+        mirrored_clone = repos_root / "mirrored-repo"
+        mirror_dir = tmp / "onedrive" / "mirrored-repo"
+        for d in (unmapped_clone, declared_clone / "src", manifest_clone, mirrored_clone, mirror_dir):
+            d.mkdir(parents=True, exist_ok=True)
+
+        (mirror_dir / lock_utils.REPO_POINTER_NAME).write_text(
+            _pointer("mirrored-repo", mirrored_clone), encoding="utf-8")
+        (mirror_dir / "LOCK.user.txt").write_text("user lock on mirror\n", encoding="utf-8")
+
+        manifest_path = tmp / "repos.json"
+        manifest_path.write_text(json.dumps({
+            "schema": "repos-manifest-v1",
+            "repos": [
+                {"name": "manifest-no-mirror", "path": str(manifest_clone), "no_mirror": True},
+                {"name": "unmapped-repo", "path": str(unmapped_clone)},
+                {"name": "mirrored-repo", "path": str(mirrored_clone), "no_mirror": True},
+            ],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        index_path = tmp / "TWIN-INDEX.json"
+        cfg = {
+            "clone_roots": [str(repos_root)],
+            "index_path": str(index_path),
+            "no_mirror": ["declared-no-mirror"],
+            "no_mirror_manifests": [str(manifest_path)],
+        }
+        index = lock_utils.build_twin_index([mirror_dir], cfg)
+        index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # 1. Ohne Deklaration -> weiter fail-closed index-unmapped
+        assert lock_utils.twin_dirs_for_path(unmapped_clone, cfg) == ([], "index-unmapped")
+
+        # 2. Mit Deklaration (via no_mirror bzw. repos.json) -> ([], 'ok'), auch aus Unterordner
+        assert lock_utils.twin_dirs_for_path(declared_clone, cfg) == ([], "ok")
+        assert lock_utils.twin_dirs_for_path(declared_clone / "src", cfg) == ([], "ok")
+        assert lock_utils.twin_dirs_for_path(manifest_clone, cfg) == ([], "ok")
+
+        # 3. Echter Spiegel gewinnt trotz no_mirror-Eintrag
+        dirs, status = lock_utils.twin_dirs_for_path(mirrored_clone, cfg)
+        assert status == "ok"
+        assert [Path(d).resolve() for d in dirs] == [mirror_dir.resolve()]
+
+        # 4. End-to-End ueber lock_scan.py --check-dir
+        roots = tmp / "lock_roots.json"
+        roots.write_text(json.dumps({
+            "default_max_depth": 4, "shallow_depth": 2, "skip_dirs": [],
+            "roots": [{"path": str(repos_root)}, {"path": str(tmp / "onedrive")}],
+            "twin_resolution": cfg,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        def check_dir(target: Path) -> tuple[int, dict]:
+            res = subprocess.run(
+                [sys.executable, str(CODE_DIR / "lock_scan.py"),
+                 "--check-dir", str(target), "--roots-file", str(roots), "--json"],
+                capture_output=True, text=True)
+            return res.returncode, json.loads(res.stdout)
+
+        rc_unmapped, p_unmapped = check_dir(unmapped_clone)
+        assert rc_unmapped == 1 and p_unmapped["twin_status"] == "index-unmapped"
+
+        rc_declared, p_declared = check_dir(declared_clone)
+        assert rc_declared == 0 and p_declared["twin_status"] == "ok"
+
+        rc_manifest, p_manifest = check_dir(manifest_clone)
+        assert rc_manifest == 0 and p_manifest["twin_status"] == "ok"
+
+        rc_mirrored, p_mirrored = check_dir(mirrored_clone)
+        assert rc_mirrored == 1 and len(p_mirrored["locks"]) == 1
+
+        # 5. Korruptes no_mirror-Feld im Index ist fail-closed index-unresolved
+        bad_index = dict(index, no_mirror="invalid-not-a-list")
+        index_path.write_text(json.dumps(bad_index), encoding="utf-8")
+        assert lock_utils.twin_dirs_for_path(declared_clone, cfg) == ([], "index-unresolved")
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

@@ -1322,6 +1322,11 @@ def _pointer_fields_valid(pointer: object) -> bool:
     """Reject malformed known locator fields without rejecting legacy shapes."""
     if not isinstance(pointer, dict):
         return False
+    if "no_mirror" in pointer and not isinstance(pointer["no_mirror"], bool):
+        return False
+    if ("mirror_mode" in pointer and pointer["mirror_mode"] is not None
+            and not isinstance(pointer["mirror_mode"], str)):
+        return False
     locator = pointer.get("local_locator")
     if locator is not None and not isinstance(locator, dict):
         return False
@@ -1331,6 +1336,16 @@ def _pointer_fields_valid(pointer: object) -> bool:
                and not isinstance(source[key], str) for key in fields):
             return False
     return True
+
+
+def _pointer_is_no_mirror(pointer: dict | None) -> bool:
+    """True when a REPO.pointer.json explicitly declares that no cloud mirror exists."""
+    if not isinstance(pointer, dict):
+        return False
+    if pointer.get("no_mirror") is True:
+        return True
+    mode = str(pointer.get("mirror_mode") or "").strip().lower()
+    return mode in ("no-mirror", "no_mirror", "none")
 
 
 def _pointer_clone_path(pointer: dict) -> Path | None:
@@ -1404,11 +1419,12 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
         pointer = read_repo_pointer(path)
         if pointer is None:
             return [], "pointer-unreadable"
-        clone = _pointer_clone_path(pointer)
-        if clone is None:
-            return [], "pointer-unreadable"
-        return ([clone], "ok") if clone.is_absolute() and clone.is_dir() else (
-            [], "pointer-unresolved")
+        if not _pointer_is_no_mirror(pointer):
+            clone = _pointer_clone_path(pointer)
+            if clone is None:
+                return [], "pointer-unreadable"
+            return ([clone], "ok") if clone.is_absolute() and clone.is_dir() else (
+                [], "pointer-unresolved")
 
     # Direction B: does the path live under a clone root?
     clone_roots = []
@@ -1422,7 +1438,7 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
     except OSError:
         resolved = path
     if not any(resolved == r or r in resolved.parents for r in clone_roots):
-        return [], "not-applicable"
+        return ([], "ok") if has_pointer else ([], "not-applicable")
 
     index_path = twin_index_path(twin_config)
     if index_path is None:
@@ -1438,12 +1454,31 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
                         and all(isinstance(item, str) for item in paths)
                         for key, paths in value.items()))
 
+    def valid_str_list(value):
+        return (value is None
+                or (isinstance(value, list)
+                    and all(isinstance(item, str) and bool(item.strip()) for item in value)))
+
     if (not isinstance(index, dict)
             or index.get("schema") != TWIN_INDEX_SCHEMA
             or index.get("producer_host") != twin_index_host()
             or not all(valid_map(index.get(key)) for key in (
-                "by_repo_name", "by_clone_path", "unreadable_pointers_by_dirname"))):
+                "by_repo_name", "by_clone_path", "unreadable_pointers_by_dirname"))
+            or not valid_str_list(index.get("no_mirror"))
+            or not valid_str_list(twin_config.get("no_mirror"))):
         return [], "index-unresolved"
+
+    no_mirror_paths: set[str] = set()
+    no_mirror_names: set[str] = set()
+    for raw_item in [*(index.get("no_mirror") or []), *(twin_config.get("no_mirror") or [])]:
+        item = raw_item.strip()
+        if not item:
+            continue
+        if "/" in item or "\\" in item or ":" in item:
+            no_mirror_paths.add(_path_key(Path(item)))
+        else:
+            no_mirror_names.add(item.lower())
+            no_mirror_paths.add(_path_key(Path(item)))
 
     # Walk UP to the clone root, not just the given directory. A lock at the
     # repository root binds everything below it, so asking about
@@ -1467,6 +1502,10 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
             *(by_name.get(ancestor.name) or []),
         ]))
         if not hits:
+            if (_path_key(ancestor) in no_mirror_paths
+                    or (ancestor.parent in clone_roots
+                        and ancestor.name.lower() in no_mirror_names)):
+                return [], "ok"
             continue
         dirs = [Path(h) for h in hits]
         for directory in dirs:
@@ -1498,9 +1537,70 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
     return [], "index-unmapped"
 
 
-def build_twin_index(directories) -> dict:
+def _expand_manifest_path(raw: str, host: str) -> Path:
+    text = str(raw).replace("{host}", host)
+    text = re.sub(r"%COMPUTERNAME%", lambda _m: host, text, flags=re.IGNORECASE)
+    return Path(os.path.expanduser(os.path.expandvars(text)))
+
+
+def collect_declared_no_mirror(twin_config: dict | None) -> list[str]:
+    """Collect explicit no-mirror declarations from `twin_config` (`no_mirror`
+    entries and `no_mirror_manifests` such as `.SYNC/<slot>/repos.json` entries
+    carrying `"no_mirror": true` or `"mirror_mode": "no-mirror"`)."""
+    if not isinstance(twin_config, dict):
+        return []
+    host = twin_index_host() or "unknown-host"
+    out: list[str] = []
+
+    def add(val: object) -> None:
+        if isinstance(val, str) and val.strip():
+            s = val.strip()
+            if s not in out:
+                out.append(s)
+
+    raw_list = twin_config.get("no_mirror")
+    if isinstance(raw_list, list):
+        for item in raw_list:
+            if isinstance(item, str) and item.strip():
+                expanded = _expand_manifest_path(item.strip(), host)
+                if "/" in item or "\\" in item or ":" in item:
+                    add(_path_key(expanded))
+                else:
+                    add(item.strip())
+
+    manifests = twin_config.get("no_mirror_manifests")
+    if isinstance(manifests, list):
+        for raw_manifest in manifests:
+            if not isinstance(raw_manifest, str) or not raw_manifest.strip():
+                continue
+            mpath = _expand_manifest_path(raw_manifest.strip(), host)
+            try:
+                data = json.loads(mpath.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            for entry in data.get("repos") or []:
+                if not isinstance(entry, dict):
+                    continue
+                is_no_mirror = (
+                    entry.get("no_mirror") is True
+                    or entry.get("mirror") is False
+                    or str(entry.get("mirror_mode") or "").strip().lower()
+                    in ("no-mirror", "no_mirror", "none")
+                )
+                if not is_no_mirror:
+                    continue
+                if isinstance(entry.get("path"), str) and entry["path"].strip():
+                    add(_path_key(_expand_manifest_path(entry["path"].strip(), host)))
+                if isinstance(entry.get("name"), str) and entry["name"].strip():
+                    add(entry["name"].strip())
+    return out
+
+
+def build_twin_index(directories, twin_config: dict | None = None) -> dict:
     """Collect every REPO.pointer.json in `directories` into an index
-    repo_name -> [twin directories].
+    repo_name -> [twin directories], plus explicit `no_mirror` declarations.
 
     Written by lock_scan.py during the full scan (--write-cache): that scan
     already walks exactly these directories, so the index costs no second pass.
@@ -1511,6 +1611,12 @@ def build_twin_index(directories) -> dict:
     by_name: dict[str, list[str]] = {}
     by_clone_path: dict[str, list[str]] = {}
     unreadable: dict[str, list[str]] = {}
+    no_mirror: list[str] = collect_declared_no_mirror(twin_config)
+
+    def add_no_mirror(val: str) -> None:
+        if val and val not in no_mirror:
+            no_mirror.append(val)
+
     for d in directories:
         d = Path(d)
         try:
@@ -1522,6 +1628,15 @@ def build_twin_index(directories) -> dict:
                 unreadable[d.name].append(str(d))
             continue
         pointer = read_repo_pointer(d)
+        if pointer is not None and _pointer_is_no_mirror(pointer):
+            clone = _pointer_clone_path(pointer)
+            if clone is not None:
+                add_no_mirror(_path_key(clone))
+            name = _pointer_repo_name(pointer)
+            if name:
+                add_no_mirror(name)
+            add_no_mirror(_path_key(d))
+            continue
         # The clone folder on disk may be named differently from repo_name
         # (checked out under another name, or a second working copy). Looking up
         # by name alone then finds nothing and the check reports "free" while the
@@ -1546,7 +1661,7 @@ def build_twin_index(directories) -> dict:
         by_name.setdefault(name, [])
         if str(d) not in by_name[name]:
             by_name[name].append(str(d))
-    return {
+    result = {
         "schema": TWIN_INDEX_SCHEMA,
         "producer_host": host,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -1554,3 +1669,6 @@ def build_twin_index(directories) -> dict:
         "by_clone_path": by_clone_path,
         "unreadable_pointers_by_dirname": unreadable,
     }
+    if no_mirror:
+        result["no_mirror"] = no_mirror
+    return result
