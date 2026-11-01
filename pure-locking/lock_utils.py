@@ -1491,15 +1491,24 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
     for ancestor in (resolved, *resolved.parents):
         if not any(ancestor == r or r in ancestor.parents for r in clone_roots):
             break
-        if ancestor.name in unreadable:
+        is_wt_container = (
+            ancestor.name.endswith("-worktrees")
+            and len(ancestor.name) > len("-worktrees")
+            and (ancestor.parent / ancestor.name[:-len("-worktrees")]).is_dir()
+        )
+        lookup_ancestor = (
+            ancestor.parent / ancestor.name[:-len("-worktrees")]
+            if is_wt_container else ancestor
+        )
+        if lookup_ancestor.name in unreadable or ancestor.name in unreadable:
             return [], "pointer-unreadable"
         # The declared clone path wins over the name: it is unambiguous even
         # when the folder on disk carries a different name than repo_name.
         # Both maps can name mirrors of this clone. Ignoring extra name hits
         # could hide a lock when one cached list is incomplete.
         hits = list(dict.fromkeys([
-            *(by_path.get(_path_key(ancestor)) or []),
-            *(by_name.get(ancestor.name) or []),
+            *(by_path.get(_path_key(lookup_ancestor)) or []),
+            *(by_name.get(lookup_ancestor.name) or []),
         ]))
         if not hits:
             if (_path_key(ancestor) in no_mirror_paths
@@ -1516,17 +1525,17 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
             if declared is None:
                 return [], "index-unresolved"
             if declared.is_absolute():
-                if _path_key(declared) != _path_key(ancestor):
+                if _path_key(declared) != _path_key(lookup_ancestor):
                     return [], "index-unresolved"
             elif os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", str(declared)):
-                if not repo_name or repo_name.lower() != ancestor.name.lower():
+                if not repo_name or repo_name.lower() != lookup_ancestor.name.lower():
                     return [], "index-unresolved"
             else:
                 return [], "index-unresolved"
         # The twin of an ancestor covers this path through inheritance; the
         # matching subpath below the twin is checked too, so a scoped lock
         # sitting deeper on the mirror side is not missed either.
-        rel = resolved.relative_to(ancestor)
+        rel = Path(".") if is_wt_container else resolved.relative_to(ancestor)
         out = list(dirs)
         if rel != Path("."):
             # A counterpart subdirectory may not exist yet. Keep its logical
