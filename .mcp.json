@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "lock-board": {
-      "command": "sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run.sh", "mcp"]
+      "command": "git",
+      "args": ["-c", "alias.lock-board=!sh", "lock-board", "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh", "mcp"]
     }
   }
 }

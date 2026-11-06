@@ -7,6 +7,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (1.8.1 - 2026-11-06)
+
+- **`lock-board` MCP server failed to connect on Windows** (`CONNECTION_CLOSED`) when Claude Code was started outside
+  Git Bash: `.mcp.json` called `sh`, which is usually not on the Windows PATH (only `Git\cmd` is). Hooks were not
+  affected because Claude Code runs hook commands through Git Bash; MCP servers it spawns directly. The server now
+  starts as `git -c alias.lock-board=!sh lock-board ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh mcp`: git is required by
+  Claude Code on Windows and runs `!` aliases in its own sh, elsewhere in the system sh (checked on macOS). Test
+  `test_mcp_json_starts_the_server_without_sh_on_path` starts the configured command with a PATH that holds no sh.
+
 ### Added (1.8.0 - 2026-10-31)
 
 - **Fencing in the plugin hook.** For a lock whose owner is a shared prefix (`claude-code@<HOST>`, `ELLMOS_LOCK_OWNER`)

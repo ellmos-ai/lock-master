@@ -1,6 +1,7 @@
 """The team-board MCP server (plugin/board_mcp.py): protocol handshake over real stdio and the five tools."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -66,6 +67,34 @@ def test_handshake_over_real_stdio(board):
     assert json.loads(replies[2]["result"]["content"][0]["text"])["ok"] is True
     assert replies[3]["result"] == {}
     assert "EDITING" in (board / "LOCK.team.TESTHOST.txt").read_text(encoding="utf-8")
+
+
+def test_mcp_json_starts_the_server_without_sh_on_path(board):
+    """Claude Code spawns MCP servers directly, not through Git Bash. On Windows `sh` is usually not on PATH (only
+    Git\\cmd is), so `"command": "sh"` failed to connect (1.8.0). The launcher goes through a git alias: git is required
+    by Claude Code on Windows, and `!` aliases run in git's own sh there and in the system sh elsewhere."""
+    server = json.loads((ROOT / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["lock-board"]
+    assert server["command"] != "sh"
+    path = os.environ.get("PATH", "")
+    if os.name == "nt":
+        # Reproduce a process started outside Git Bash: no directory holding sh.exe, and git only as the Git\cmd
+        # wrapper (the default Git for Windows PATH entry; Git's internal bin dirs are on PATH only inside Git Bash).
+        path = os.pathsep.join(d for d in path.split(os.pathsep) if d and not (Path(d) / "sh.exe").exists()
+                               and not ((Path(d) / "git.exe").exists() and Path(d).name.lower() != "cmd"))
+    command = shutil.which(server["command"], path=path)
+    if command is None:
+        pytest.skip(f"{server['command']} not on PATH")
+    root = ROOT.as_posix()
+    argv = [command] + [a.replace("${CLAUDE_PLUGIN_ROOT}", root) for a in server["args"]]
+    env = {**os.environ, "PATH": path, "CLAUDE_PLUGIN_ROOT": root, "ELLMOS_PYTHON": Path(sys.executable).as_posix(),
+           "COMPUTERNAME": "TESTHOST", "CLAUDE_PROJECT_DIR": str(board), "PYTHONIOENCODING": "utf-8"}
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18",
+            "capabilities": {}, "clientInfo": {"name": "pytest", "version": "0"}}}
+    proc = subprocess.run(argv, input=json.dumps(init) + "\n", capture_output=True, text=True, encoding="utf-8",
+                          env=env, timeout=60, cwd=str(board))
+    assert proc.returncode == 0, proc.stderr
+    info = json.loads(proc.stdout.splitlines()[0])["result"]["serverInfo"]
+    assert info == {"name": "lock-master-board", "version": (ROOT / "VERSION").read_text(encoding="utf-8").strip()}
 
 
 def test_every_tool_declares_a_schema_with_its_required_fields():

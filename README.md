@@ -3,7 +3,7 @@
 # lock-master
 
 [![CI](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml/badge.svg)](https://github.com/ellmos-ai/lock-master/actions/workflows/tests.yml)
-[![Tests](https://img.shields.io/badge/tests-512%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
+[![Tests](https://img.shields.io/badge/tests-513%20passed%20%7C%20100%25%20green-brightgreen.svg)](#running-tests)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/ellmos-ai/lock-master)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -15,7 +15,7 @@
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Audited](https://img.shields.io/badge/Third--Party-Audited%20%7C%20100%25%20Permissive-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-active-blue.svg)](MARKETING-LOG.txt)
-[![Version 1.8.0](https://img.shields.io/badge/version-1.8.0-informational.svg)](VERSION)
+[![Version 1.8.1](https://img.shields.io/badge/version-1.8.1-informational.svg)](VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Contributing: Welcome](https://img.shields.io/badge/Contributing-Welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexing](https://img.shields.io/badge/llms.txt-indexed-purple.svg)](llms.txt)
@@ -347,7 +347,7 @@ Install from the ellmos marketplace:
 this host's team lock (`LOCK.team.<HOST>.txt`, written by `team-lock/team_lock.py`) and names the session:
 `claude-code@<HOST>.<sid8>`. That name is the session's lock owner (`/ellmos-lock-master:lock` uses it) and its agent
 name on the board; `/ellmos-lock-master:message <text>` posts a note for the other agents on the same host. The bundled MCP
-server `lock-board` (`.mcp.json`, started by `hooks/run.sh mcp`, Python standard library only, every write goes through
+server `lock-board` (`.mcp.json`, started as `git -c alias.lock-board=!sh lock-board hooks/run.sh mcp`: Claude Code starts MCP servers directly, not through Git Bash, and on Windows `sh` is usually not on PATH, while git, which Claude Code requires there, runs `!` aliases in its own sh; Python standard library only, every write goes through
 `team-lock/`) offers five tools: `board_read` (presence, claims, queue, latest messages), `board_post`, `board_claim`
 (with `queue=true` you wait in line, first come first served), `board_release` and `board_presence`. Pass your session
 name as `agent`. If another agent holds an `EDITING` claim on a file or folder, the PreToolUse hook denies edits below it,
