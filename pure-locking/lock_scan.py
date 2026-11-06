@@ -820,6 +820,14 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
                 "cannot be read, so its locks are invisible. Repair the pointer, "
                 "then run lock_scan.py --write-cache."
             )
+        elif twin_status == "pointer-dataless":
+            print(
+                f"lock_scan --check-dir: {target} -- UNDETERMINED, not 'free'. "
+                f"The mirror twin's {lock_utils.REPO_POINTER_NAME} is a cloud placeholder "
+                "(dataless: its content is not downloaded on this device), so its locks "
+                "cannot be verified. Keep the mirror folder's pointer on this device "
+                "(OneDrive/Finder: 'Always keep on this device'), then retry."
+            )
         elif twin_status == "index-missing":
             print(
                 f"lock_scan --check-dir: {target} -- UNDETERMINED, not 'free'. "
