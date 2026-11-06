@@ -1293,6 +1293,24 @@ def twin_index_path(twin_config: dict | None) -> Path | None:
     return path if path.is_absolute() else None
 
 
+# Cloud placeholders: the file exists, but its content is only in the cloud.
+# macOS File Provider (OneDrive, iCloud) sets SF_DATALESS and answers a read
+# from a background process with EDEADLK; Windows Cloud Files sets
+# RECALL_ON_DATA_ACCESS / RECALL_ON_OPEN / OFFLINE.
+_SF_DATALESS = 0x40000000
+_WINDOWS_PLACEHOLDER_ATTRIBUTES = 0x00400000 | 0x00040000 | 0x00001000
+
+
+def pointer_is_dataless(directory: Path) -> bool:
+    """True if the directory's REPO.pointer.json is a cloud placeholder without local content."""
+    try:
+        info = os.stat(Path(directory) / REPO_POINTER_NAME)
+    except OSError:
+        return False
+    return bool(getattr(info, "st_flags", 0) & _SF_DATALESS
+                or getattr(info, "st_file_attributes", 0) & _WINDOWS_PLACEHOLDER_ATTRIBUTES)
+
+
 def read_repo_pointer(directory: Path) -> dict | None:
     """The REPO.pointer.json of a directory, or None if absent/unreadable."""
     f = Path(directory) / REPO_POINTER_NAME
@@ -1402,6 +1420,8 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
       "index-missing"      - path is under a clone_root but no readable index
                              -> FAIL-CLOSED, the caller must not report "free"
       "pointer-unreadable" - a pointer cannot be read or verified
+      "pointer-dataless"   - a pointer is a cloud placeholder whose content is
+                             not on this device (fail-closed like unreadable)
       "pointer-unresolved" - a pointer declares an absent clone
       "index-unresolved"  - stale, foreign or invalid index data
       "index-unmapped"    - no declared twin or explicit no-mirror fact
@@ -1418,7 +1438,7 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
     if has_pointer:
         pointer = read_repo_pointer(path)
         if pointer is None:
-            return [], "pointer-unreadable"
+            return [], "pointer-dataless" if pointer_is_dataless(path) else "pointer-unreadable"
         if not _pointer_is_no_mirror(pointer):
             clone = _pointer_clone_path(pointer)
             if clone is None:
@@ -1523,7 +1543,8 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
             declared = _pointer_clone_path(pointer) if pointer else None
             repo_name = _pointer_repo_name(pointer) if pointer else None
             if declared is None:
-                return [], "index-unresolved"
+                return [], ("pointer-dataless" if pointer is None and pointer_is_dataless(directory)
+                            else "index-unresolved")
             if declared.is_absolute():
                 if _path_key(declared) != _path_key(lookup_ancestor):
                     return [], "index-unresolved"

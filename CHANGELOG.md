@@ -7,6 +7,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Twin status `pointer-dataless`.** A mirror `REPO.pointer.json` that is a cloud placeholder (macOS `SF_DATALESS`,
+  read fails with `EDEADLK`; Windows recall/offline attributes) no longer hides behind the generic `index-unresolved`
+  / `pointer-unreadable`. It stays fail-closed (exit 1, never "free"); `--check-dir` now names the repair: keep the
+  pointer on this device. Found 06.11.2026 on the Mac Studio, where 20 of 50 mirror pointers were dehydrated and two
+  BACH workers returned every task (PB-1, BACH #3985).
+
 ### Fixed (1.8.1 - 2026-11-06)
 
 - **`lock-board` MCP server failed to connect on Windows** (`CONNECTION_CLOSED`) when Claude Code was started outside
