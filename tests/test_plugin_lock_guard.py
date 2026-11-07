@@ -141,7 +141,7 @@ def test_unresolvable_push_targets_fail_closed(project, cmd):
     assert denied({"tool_name": "Bash", "cwd": str(project), "tool_input": {"command": cmd}}), cmd
 
 
-@pytest.mark.parametrize("cmd", ['sh -c "git push"', "git push | cat", "(cd /x && git push)", "git -c a=b push",
+@pytest.mark.parametrize("cmd", ['sh -c "git push"', "(cd /x && git push)", "git -c a=b push",
                                  "git --git-dir=/x push", "pushd /x && git push", "export GIT_DIR=/x; git push",
                                  "declare -x GIT_DIR=/x; git push", "npm test && git push"])
 def test_push_allowlist_denies_other_shapes(project, cmd):
@@ -196,10 +196,20 @@ def bash(cmd: str, cwd: Path) -> dict:
 
 
 def push_commands(wt: Path) -> list[str]:
-    cmds = ["git push", "git push -u origin HEAD", "git push origin side 2>&1"]
+    cmds = ["git push", "git push -u origin HEAD", "git push origin side 2>&1", "git push origin side:side 2>&1 | tail -3"]
     for form in spellings(wt):
-        cmds += [f"cd {form} && git push", f"git -C {form} push origin side", f"cd {form} && git push -u origin side 2>&1"]
+        cmds += [f"cd {form} && git push", f"git -C {form} push origin side", f"cd {form} && git push -u origin side 2>&1",
+                 f"cd {form} && git push origin side:side 2>&1 | tail -3",  # measured 07.11., blocked by the old hook
+                 f"git -C {form} push origin side:side 2>&1 | tail -3"]
     return cmds
+
+
+def test_pipe_after_a_push_keeps_the_target_but_a_cd_in_a_pipeline_does_not(project):
+    (project / "x").mkdir()
+    assert lock_guard.push_dirs("git push | cat", project) == [project.resolve()]
+    assert lock_guard.push_dirs("cd x && git push origin a:b 2>&1 | tail -3", project) == [(project / "x").resolve()]
+    assert lock_guard.push_dirs("cd x | git push", project) == [lock_guard.UNRESOLVED]  # the cd runs in a subshell
+    assert lock_guard.push_dirs("git push || echo failed", project) == [lock_guard.UNRESOLVED]
 
 
 def test_worktree_push_of_a_free_repository_is_allowed(project, clone_and_worktree):

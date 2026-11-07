@@ -306,8 +306,8 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
 
     A push is a `git [options] push` in the command position of a shell word list (so the words inside a quoted
     argument, a heredoc or a `git commit -m` message are not one). Resolved are only plain forms: segments joined by
-    `&&`, `;` or newlines, an optional `cd <existing dir>`, a `2>&1`, and `git [-C <dir>]... push ...`. Everything
-    else that could move the target -- pipes, subshells, other redirections, variables, `~`, backticks, env
+    `&&`, `;` or newlines, an optional `cd <existing dir>`, a `2>&1`, a pipe into a filter (`| tail -3`) and `git [-C <dir>]... push ...`. Everything
+    else that could move the target -- subshells, other redirections, variables, `~`, backticks, env
     assignments, other git global options, wrappers (env, sudo, xargs, find -exec, sh -c ...), and every segment that
     is neither `cd <dir>` nor a `git` call -- turns a found push into UNRESOLVED, which the hook denies. Paths may be
     written as Windows paths or as Git Bash `/c/...` paths. A command without a push returns []."""
@@ -315,7 +315,7 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
         tokens = _words(command)
     except ValueError:
         return [UNRESOLVED] if "push" in command else []
-    segments, odd, i = [[]], "`" in command, 0
+    segments, piped, odd, i = [[]], set(), "`" in command, 0
     while i < len(tokens):
         tok, i = tokens[i], i + 1
         separator = tok.replace("\n", "")
@@ -324,12 +324,18 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
             i += 1
         elif separator in ("", "&&", ";"):
             segments.append([])
+        elif separator == "|":  # pipeline stages run side by side in subshells: none of them moves the others' target
+            piped.update((len(segments) - 1, len(segments)))
+            segments.append([])
         elif set(separator) <= set(";&|()<>"):
-            odd = True  # a pipe, subshell or redirection: the words around it stay in the segment, never resolved
+            odd = True  # a subshell or redirection: the words around it stay in the segment, never resolved
         else:
             segments[-1].append(tok)
     here, found = cwd, []
-    for seg in filter(None, segments):
+    for index, seg in enumerate(segments):
+        if not seg:
+            continue
+        stage = index in piped
         j = 0
         while j < len(seg) and (ASSIGN.match(seg[j]) or _name(seg[j]) in WRAPPERS or (j and seg[j].startswith("-"))):
             j, odd = j + 1, True
@@ -338,12 +344,12 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
         head = _name(seg[j])
         if head == "cd":
             nxt = Path(_native(seg[1])) if len(seg) == 2 else None
-            if nxt is None or seg[1].startswith("-") or not SAFE_TOKEN.match(seg[1]):
-                odd = True
+            if stage or nxt is None or seg[1].startswith("-") or not SAFE_TOKEN.match(seg[1]):
+                odd = True  # a cd inside a pipeline only changes its own subshell
             else:
                 here = (nxt if nxt.is_absolute() else here / nxt).resolve()
                 odd = odd or not here.is_dir()
-        elif head != "git":
+        elif head != "git" and not stage:
             odd = True  # any other command (declare, export, npm ...) could change the target
         for k, tok in enumerate(seg):
             if k >= j and _name(tok) == "git":  # also behind xargs, find -exec, timeout ...

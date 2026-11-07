@@ -25,7 +25,9 @@ Now: a push is a `git [options] push` among the words of the shell command line 
 are data). Git Bash `/c/...` and Windows paths are understood, a newline separates commands, `2>&1` is allowed, and a
 `-C` directory that does not exist fails closed. Wrapped or nested forms (`xargs git push`, `find -exec`, `timeout`,
 `sudo`, `sh -c`, `cmd /c`, `powershell -c`, `eval`, `$(...)`, backticks, heredocs fed to a shell) are still found and
-still denied as unresolvable. A pipe, subshell or other redirection next to a real push still denies. Deliberate
+still denied as unresolvable. A pipe is allowed (`git push 2>&1 | tail -3`, the usual way to shorten the output;
+the stages of a pipeline run in subshells, so a `cd` inside a pipeline is not honoured and denies), a subshell, `||`
+or another redirection next to a real push still denies. Deliberate
 trade-off: a push hidden inside the string of an interpreter (`python -c "...git push..."`) is not detected any more -
 that is the text case the ticket asked to stop blocking; the hook never was a sandbox. Takes effect with the next
 plugin release. Question left open: the hook does not match the PowerShell tool (see the pull request).
