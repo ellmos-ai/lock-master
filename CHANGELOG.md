@@ -47,6 +47,49 @@ spelled without the letters (a variable, a git alias in the config, a script fil
 effect with the next plugin release. Question left open: the hook does not match the PowerShell tool (see the pull
 request).
 
+## [1.9.0] - 2026-11-07
+
+Everything merged after the tag `v1.8.3`. Releases 1.6.4 to 1.8.3 are listed below under their own version
+sub-headings; they are not regrouped here.
+
+### Added (1.9.0 - 2026-11-07)
+
+- **Own locks for delegated workers** (T-20261107-958032576; replaces #39, reverted in #40 as fail-open):
+  - Claude Code documents `agent_id` as the unique id of the subagent or teammate a hook fires in. The hook now
+    counts a lock owned by exactly `<session name>:<agent_id>` as that worker's own. There is no prefix, no trust on
+    first use, and the owner must be ASCII.
+  - The lead, sibling workers, other sessions, a re-spawned worker and any payload without `agent_id` stay blocked.
+  - The `agent_id` must match `[A-Za-z0-9_-]{1,128}`.
+  - A new SubagentStart hook (mode `subagent`) tells the worker its owner in one line, without files or network. A
+    denial names it as a fallback.
+  - Tests: `tests/test_plugin_worker_agent_id.py`, 40 tests, 17 of them fail on `faefe3f`. Among them: r1's
+    collision probes, Unicode lookalikes and a round trip through `lock_create.py`.
+- **CI gate `guard-proof`** (#43, T-20261107-441069325). A pull request that changes a guard file (`plugin/`, `hooks/`,
+  `.claude-plugin/`, `pure-locking/`, `team-lock/`, `.mcp.json`, `.github/scripts/` and the gate workflow itself) fails
+  unless its description carries non-empty `Adversarial-Probe:` and `Probe-Ausgefuehrt-von:` lines. Files:
+  `.github/scripts/check_guard_proof.py`, `.github/workflows/guard-proof.yml`, the pull request template and the section
+  "Guard files" in `CONTRIBUTING.md`. Tests: `tests/test_check_guard_proof.py`.
+
+### Changed (1.9.0)
+
+- Release preparation: version 1.9.0 in `VERSION`, `pyproject.toml`, `.claude-plugin/plugin.json`,
+  `ellmos-module.v2.json`, `llms.txt`, both README badges and `tests/test_metadata.py`. No code change compared with
+  the merged state `700c643`.
+
+### Upgrade note (1.9.0)
+
+- **Why a minor release.** The merged work adds functionality in a backward-compatible way (a second accepted owner
+  form and the new SubagentStart hook event), so under Semantic Versioning it is 1.9.0, not a patch.
+- **Existing locks keep their meaning.** A lock whose owner is the session name, an owner under a shared prefix
+  (`claude-code@<HOST>`, `claude-code@<HOST>:<name>`, `ELLMOS_LOCK_OWNER`), and team, user, until and condition locks are
+  decided exactly as in 1.8.3. The only new path in the decision is the exact worker owner
+  `<session name>:<agent_id>`; no lock that was "own" or "team" before turns into a block. The form `<agent>@<HOST>`
+  for a worker is still not accepted (it is foreign, as in 1.8.3).
+- **One more hook after the plugin update.** `SubagentStart` runs `hooks/run.sh subagent`; it reads only the payload
+  (no files, no network, 20 s timeout).
+- **Live check still due after the update.** The `agent_id` in the PreToolUse payload must equal the one at
+  SubagentStart (protocol in the description of #41).
+
 ### Added (1.8.3 - 2026-11-07)
 
 - **Plugin option `lease_store` (`userConfig`, `sensitive: true`).** The lease-store URL can hold a database password,
@@ -76,16 +119,6 @@ request).
   / `pointer-unreadable`. It stays fail-closed (exit 1, never "free"); `--check-dir` now names the repair: keep the
   pointer on this device. Found 06.11.2026 on the Mac Studio, where 20 of 50 mirror pointers were dehydrated and two
   BACH workers returned every task (PB-1, BACH #3985).
-- **Own locks for delegated workers** (T-20261107-958032576; replaces #39, reverted in #40 as fail-open):
-  - Claude Code documents `agent_id` as the unique id of the subagent or teammate a hook fires in. The hook now
-    counts a lock owned by exactly `<session name>:<agent_id>` as that worker's own. There is no prefix, no trust on
-    first use, and the owner must be ASCII.
-  - The lead, sibling workers, other sessions, a re-spawned worker and any payload without `agent_id` stay blocked.
-  - The `agent_id` must match `[A-Za-z0-9_-]{1,128}`.
-  - A new SubagentStart hook (mode `subagent`) tells the worker its owner in one line, without files or network. A
-    denial names it as a fallback.
-  - Tests: `tests/test_plugin_worker_agent_id.py`, 40 tests, 17 of them fail on `faefe3f`. Among them: r1's
-    collision probes, Unicode lookalikes and a round trip through `lock_create.py`.
 
 ### Fixed (1.8.1 - 2026-11-06)
 
