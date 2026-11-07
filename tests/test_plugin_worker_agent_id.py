@@ -42,13 +42,22 @@ def lock(project, owner=OWN, name="LOCK.txt", fence=100, **fields):
 
 # --- the one positive case ------------------------------------------------------------------------------------
 
-def test_worker_owns_its_exact_owner_also_on_resume_and_case_folded(project):
+def test_worker_owns_its_exact_owner_also_on_resume(project):
     target = project / "src" / "a.py"
     lock(project)
     assert not denied(edit_as(target, WORKER))
     assert not denied(edit_as(target, WORKER))  # resume / next message: same agent_id, still its own
-    lock(project, owner=OWN.upper())
-    assert not denied(edit_as(target, WORKER))  # compared case-folded
+
+
+def test_session_part_is_case_folded_but_the_agent_id_must_match_exactly(project):
+    target = project / "src" / "a.py"
+    lock(project, owner=f"CLAUDE-CODE@testhost.20EAE07E:{AID}")
+    assert not denied(edit_as(target, WORKER))  # the session name part compares case-folded, as everywhere
+    for agent_id in (AID.upper(), AID.capitalize(), AID.replace("worker", "WORKER")):
+        lock(project, owner=f"claude-code@TESTHOST.20eae07e:{agent_id}")
+        assert denied(edit_as(target, WORKER)), agent_id  # harness-issued id: no case variants
+    lock(project, owner=f"claude-code@TESTHOST.20eae07e:{AID}")
+    assert not denied(edit_as(target, WORKER))  # exact id: own
 
 
 # --- everybody else stays out -----------------------------------------------------------------------------------

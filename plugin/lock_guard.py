@@ -39,8 +39,8 @@ session with the same owner string -- and the lock is no longer treated as the
 session's own (lu.fence_status, fail-closed). Subagents and in-process teammates
 share the lead's session id and so its session name; a delegated worker's own lock
 is owned by exactly `<session name>:<agent_id>` (worker_owner(): the documented
-unique `agent_id` of the payload, narrow ASCII charset, exact case-folded match, no
-prefix, no fence trust). Without `agent_id` no worker owner exists. Team locks of the same host are shared
+unique `agent_id` of the payload, narrow ASCII charset; session name part
+case-folded, agent_id exact; no prefix, no fence trust). Without `agent_id` no worker owner exists. Team locks of the same host are shared
 by that host's agents; inside them a file claim (`EDITING`) held by another agent
 name denies edits to the claimed path. User and until locks block always; condition
 locks block only the operations they name.
@@ -324,8 +324,12 @@ def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Se
         # No other session carries this name: nothing to fence. Its subagents and teammates do, though (they share
         # the lead's session id); a worker's lock of its own is owned by `<session name>:<agent_id>`, below.
         return "own"
-    if session is not None and session.worker and raw_owner.isascii() and owner == session.worker.lower():
-        return "own"  # exactly this worker of this session; isascii: no Unicode case folding onto ASCII (K -> k)
+    if session is not None and session.worker and raw_owner.isascii():
+        # Exactly this worker of this session. isascii: no Unicode case folding onto ASCII (K -> k). The session
+        # name part compares case-folded as everywhere; the harness-issued agent_id must match exactly.
+        name_part, _, id_part = raw_owner.partition(":")
+        if name_part.lower() == session.name.lower() and id_part == session.worker.partition(":")[2]:
+            return "own"
     is_team = lu.is_team_lock(lock_path.name) and (lu.lock_host(lock_path) or "").upper() == host
     if any(owner == p or owner.startswith(p + ":") for p in prefixes):
         if is_team:

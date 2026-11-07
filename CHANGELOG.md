@@ -22,7 +22,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - The `agent_id` must match `[A-Za-z0-9_-]{1,128}`.
   - A new SubagentStart hook (mode `subagent`) tells the worker its owner in one line, without files or network. A
     denial names it as a fallback.
-  - Tests: `tests/test_plugin_worker_agent_id.py`, 39 tests, 16 of them failed on `faefe3f`. Among them: r1's
+  - Tests: `tests/test_plugin_worker_agent_id.py`, 40 tests, 17 of them fail on `faefe3f`. Among them: r1's
     collision probes, Unicode lookalikes and a round trip through `lock_create.py`.
 
 ### Fixed (1.8.1 - 2026-11-06)
