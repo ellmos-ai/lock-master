@@ -81,7 +81,13 @@ EDIT_TOOLS = {"Edit": _FILE_OR_PATH, "Write": _FILE_OR_PATH, "MultiEdit": _FILE_
               "MoveFile": (("source",), ("destination",))}
 PATCH_HEADERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: ")
 ACTOR = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-GIT_PUSH = re.compile(r"\bgit\b[^\n;&|]*\bpush\b")
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "eval", "cmd", "powershell", "pwsh"}  # run their string arguments
+WRAPPERS = {"env", "command", "exec", "nohup", "time", "sudo", "builtin"}  # run the command word that follows
+GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix",
+                     "--config-env"}  # git global options whose value is the next word
+ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+MSYS_DRIVE = re.compile(r"/([A-Za-z])(/.*)?")  # Git Bash spelling of a drive: /c/Users/x
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.DOTALL)
 EDIT_OPS = {"edit", "write", "modify", "all", "*"}
 PUSH_OPS = {"push", "git-push", "publish", "all", "*"}
 UNRESOLVED = Path("<unresolved>")
@@ -247,63 +253,113 @@ def targets(payload: dict) -> list[tuple[str, Path]]:
     if raws is not None:
         return [("edit", Path(r) if Path(r).is_absolute() else cwd / r) for r in raws]
     command = tool_input.get("command", "")
-    if tool == "Bash" and GIT_PUSH.search(command):
+    if tool == "Bash":
         return [("push", d) for d in push_dirs(command, cwd)]
     return []
+
+
+def _name(token: str) -> str:
+    """The program a command word names: `/usr/bin/git`, `C:\\Program Files\\Git\\bin\\git.exe` and `\\git` all read `git`."""
+    return token.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
+
+
+def _native(token: str) -> str:
+    """A Git Bash path (`/c/Users/x`) as the Windows path Python can open; every other token unchanged."""
+    match = MSYS_DRIVE.fullmatch(token) if os.name == "nt" else None
+    return f"{match[1].upper()}:{match[2] or '/'}" if match else token
+
+
+def _drop_heredocs(command: str) -> str:
+    """Heredoc bodies are data (a script or a text written to a file), not commands -- unless a shell reads them."""
+    def body(match: re.Match) -> str:
+        first_line = match[0].split("\n", 1)[0]
+        line = match.string[:match.start()].rsplit("\n", 1)[-1] + first_line  # the command line the heredoc feeds
+        return match[0] if any(_name(w) in SHELLS for w in re.findall(r"[^\s<>|&;()]+", line)) else first_line
+    return HEREDOC.sub(body, command)
+
+
+def _words(command: str) -> list[str]:
+    """Shell words. A newline separates commands (it is a token of its own); a backslash is a character, because
+    the paths are Windows paths (`cd C:\\work\\repo`) and the command words are matched through _name()."""
+    lex = shlex.shlex(_drop_heredocs(command).replace("`", " "), posix=True, punctuation_chars=";&|()<>\n")
+    lex.whitespace_split, lex.whitespace, lex.escape, lex.commenters = True, " \t\r", "", ""
+    return list(lex)
+
+
+def _git_call(seg: list[str], k: int, here: Path) -> tuple[str | None, Path, bool]:
+    """`git [global options] <subcommand>` at seg[k]: the subcommand, the directory `-C` options lead to
+    (cumulative, as git applies them) and whether those were the only options (False: another option may move the
+    target, e.g. -c, --git-dir, --work-tree)."""
+    target, plain, i = here, True, k + 1
+    while i < len(seg) and seg[i].startswith("-"):
+        if seg[i] == "-C" and i + 1 < len(seg) and SAFE_TOKEN.match(seg[i + 1]):
+            nxt = Path(_native(seg[i + 1]))
+            target = nxt if nxt.is_absolute() else target / nxt
+        else:
+            plain = False
+        i += 2 if seg[i] in GIT_VALUE_OPTIONS else 1
+    return (seg[i] if i < len(seg) else None), target, plain
 
 
 def push_dirs(command: str, cwd: Path) -> list[Path]:
     """Repositories a shell command pushes from -- by allow-list, not by deny-list.
 
-    Resolved are only plain forms: segments joined by `&&` or `;`, an optional `cd <existing dir>`, and
-    `git [-C <dir>]... push ...` (each -C applied cumulatively, as git does). Everything else that could move the
-    target -- newlines, pipes, subshells, redirections, variables, `~`, backticks, env assignments, other git
-    global options, and every segment that is neither `cd <dir>` nor a `git` call -- yields UNRESOLVED, which the
-    hook denies. A command without any `git ... push` subcommand returns []."""
-    if "\n" in command or "\r" in command:
-        return [UNRESOLVED]
+    A push is a `git [options] push` in the command position of a shell word list (so the words inside a quoted
+    argument, a heredoc or a `git commit -m` message are not one). Resolved are only plain forms: segments joined by
+    `&&`, `;` or newlines, an optional `cd <existing dir>`, a `2>&1`, a pipe into a filter (`| tail -3`) and `git [-C <dir>]... push ...`. Everything
+    else that could move the target -- subshells, other redirections, variables, `~`, backticks, env
+    assignments, other git global options, wrappers (env, sudo, xargs, find -exec, sh -c ...), and every segment that
+    is neither `cd <dir>` nor a `git` call -- turns a found push into UNRESOLVED, which the hook denies. Paths may be
+    written as Windows paths or as Git Bash `/c/...` paths. A command without a push returns []."""
     try:
-        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        tokens = list(lex)
+        tokens = _words(command)
     except ValueError:
-        return [UNRESOLVED]
-    segments, current = [], []
-    for tok in tokens:
-        if tok in ("&&", ";"):
-            segments.append(current)
-            current = []
-        elif set(tok) <= set(";&|()<>"):
-            return [UNRESOLVED]
+        return [UNRESOLVED] if "push" in command else []
+    segments, piped, odd, i = [[]], set(), "`" in command, 0
+    while i < len(tokens):
+        tok, i = tokens[i], i + 1
+        separator = tok.replace("\n", "")
+        if tok == ">&" and segments[-1][-1:] in (["1"], ["2"]) and tokens[i:i + 1] in (["1"], ["2"], ["-"]):
+            segments[-1].pop()  # 2>&1 moves nothing
+            i += 1
+        elif separator in ("", "&&", ";"):
+            segments.append([])
+        elif separator == "|":  # pipeline stages run side by side in subshells: none of them moves the others' target
+            piped.update((len(segments) - 1, len(segments)))
+            segments.append([])
+        elif set(separator) <= set(";&|()<>"):
+            odd = True  # a subshell or redirection: the words around it stay in the segment, never resolved
         else:
-            current.append(tok)
-    segments.append(current)
-    here, dirs = cwd, []
-    for seg in filter(None, segments):
-        head = seg[0]
+            segments[-1].append(tok)
+    here, found = cwd, []
+    for index, seg in enumerate(segments):
+        if not seg:
+            continue
+        stage = index in piped
+        j = 0
+        while j < len(seg) and (ASSIGN.match(seg[j]) or _name(seg[j]) in WRAPPERS or (j and seg[j].startswith("-"))):
+            j, odd = j + 1, True
+        if j == len(seg):
+            continue
+        head = _name(seg[j])
         if head == "cd":
-            if len(seg) != 2 or seg[1].startswith("-") or not SAFE_TOKEN.match(seg[1]):
-                return [UNRESOLVED]
-            nxt = Path(seg[1])
-            here = (nxt if nxt.is_absolute() else here / nxt).resolve()
-            if not here.is_dir():
-                return [UNRESOLVED]
-        elif head == "git":
-            target, i = here, 1
-            while i < len(seg) and seg[i].startswith("-"):
-                if seg[i] == "-C" and i + 1 < len(seg) and SAFE_TOKEN.match(seg[i + 1]):
-                    nxt = Path(seg[i + 1])
-                    target = nxt if nxt.is_absolute() else target / nxt
-                    i += 2
-                else:
-                    return [UNRESOLVED]
-            if i < len(seg) and seg[i] == "push":
-                if not all(SAFE_TOKEN.match(t) for t in seg):
-                    return [UNRESOLVED]
-                dirs.append(target.resolve())
-        else:
-            return [UNRESOLVED]  # any other segment (declare, export, sh -c, npm ...) could change the target
-    return dirs
+            nxt = Path(_native(seg[1])) if len(seg) == 2 else None
+            if stage or nxt is None or seg[1].startswith("-") or not SAFE_TOKEN.match(seg[1]):
+                odd = True  # a cd inside a pipeline only changes its own subshell
+            else:
+                here = (nxt if nxt.is_absolute() else here / nxt).resolve()
+                odd = odd or not here.is_dir()
+        elif head != "git" and not stage:
+            odd = True  # any other command (declare, export, npm ...) could change the target
+        for k, tok in enumerate(seg):
+            if k >= j and _name(tok) == "git":  # also behind xargs, find -exec, timeout ...
+                sub, target, plain = _git_call(seg, k, here)
+                if sub == "push":
+                    ok = k == j and plain and all(SAFE_TOKEN.match(t) for t in seg) and target.resolve().is_dir()
+                    found.append(target.resolve() if ok else UNRESOLVED)
+            elif k > j and (head in SHELLS or "$(" in tok) and push_dirs(tok, here):
+                found.append(UNRESOLVED)  # sh -c "...", eval "...", "$(...)": a push inside a string that runs
+    return [UNRESOLVED] if found and odd else found
 
 
 def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Session | None = None) -> str:
