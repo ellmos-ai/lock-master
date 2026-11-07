@@ -15,22 +15,37 @@ worktrees and for commands that only contained the words. Root causes, measured 
 - **The worktree was not the problem, the command parsing was.** A plain `git push` from a linked worktree resolved
   and checked the main clone's locks correctly. What failed: `cd /c/_Local_DEV/worktrees/x && git push` and
   `git -C /c/... push` (Git Bash drive paths do not exist for Windows Python; `-C` even led to a made-up
-  `C:\c\...` directory that no lock covers), unquoted Windows paths (`cd C:\...`, the shell lexer ate the
-  backslashes), a trailing `2>&1`, and a command spanning several lines.
+  `C:\c\...` directory that no lock covers), a trailing `2>&1`, and a command spanning several lines.
 - **A push was found by text search** (`\bgit\b[^\n;&|]*\bpush\b`), so `echo "git push"`, a commit message, a heredoc
   body, `git checkout -b fix/worktree-push-detection` or `git status | grep push` counted as a push and then failed
   the allow-list.
 
-Now: a push is a `git [options] push` among the words of the shell command line (quoted arguments and heredoc bodies
-are data). Git Bash `/c/...` and Windows paths are understood, a newline separates commands, `2>&1` is allowed, and a
-`-C` directory that does not exist fails closed. Wrapped or nested forms (`xargs git push`, `find -exec`, `timeout`,
-`sudo`, `sh -c`, `cmd /c`, `powershell -c`, `eval`, `$(...)`, backticks, heredocs fed to a shell) are still found and
-still denied as unresolvable. A pipe is allowed (`git push 2>&1 | tail -3`, the usual way to shorten the output;
-the stages of a pipeline run in subshells, so a `cd` inside a pipeline is not honoured and denies), a subshell, `||`
-or another redirection next to a real push still denies. Deliberate
-trade-off: a push hidden inside the string of an interpreter (`python -c "...git push..."`) is not detected any more -
-that is the text case the ticket asked to stop blocking; the hook never was a sandbox. Takes effect with the next
-plugin release. Question left open: the hook does not match the PowerShell tool (see the pull request).
+Now the check splits the command the way bash does and accounts for every mention of `push` (`push_dirs()`, new
+`_Lexer` and `_check()`; no `shlex`, no heredoc regex). A mention counts only as one of: a plain
+`git [-C <dir>]... push` in command position, resolved through `cd <dir>` segments joined by `&&`, `;` or newlines (a
+pipe into a filter and `2>&1` are fine); the path of a `cd`; the name of a file written to; or data of a command that
+runs nothing (`echo`, `printf`, `cat`, `grep`, `head`, `tail`, `wc`, `tee`, `git commit/log/checkout/branch/stash ...`,
+`gh issue/pr/api`) whose output no later pipeline stage runs - including its quoted heredoc bodies and
+`$(cat <<'EOF' ...)` arguments. Every other mention denies as unresolvable. Comments are data, as for bash.
+
+The first version of this change (fdf5b74, e956301) decided "this is data" in the parser and was wrong in places; the
+adversarial probe on the pull request found 13 commands that `main` denied and it let through, each confirmed with a
+real bash and a bare remote (a heredoc marker inside quotes or a comment, `\"`, a heredoc fed to `source`, `.` or
+`fish`, `git -c alias.x=push x`, `echo ... | sh`, `printf ... | bash`, `| xargs sh -c`, `python -c` with subprocess),
+plus three gaps `main` has as well (backslash-newline before `push`, `$G push`, `git subtree push`). Three more were
+found while closing them: a continuation inside the word (`pu\<newline>sh`), `echo "git push" > x.sh; sh x.sh` (a
+text written to a file is fine only when nothing in the command can run a file), and unquoted Windows paths: bash
+removes unquoted backslashes, so `cd C:\x\repo ; git push` runs `cd C:xrepo`, fails, and pushes from the old directory
+(measured with Git Bash 5.3) - the first version read the Windows path and allowed it. All 47 are regression tests
+(`test_probe_case`); a differential run of 62 further commands against Git Bash found no push the hook allows.
+
+Known false alarms, kept on purpose (rewrite the command, or write files with the Write tool): text an interpreter
+or shell may run (`python -c "print('git push')"`, `python - <<PY ... PY`, `python t.py "git push"`), unquoted
+backslash paths (quote them or use `/`), `$(...)` or variables in a push command, `git push --dry-run`, an assignment
+before `cd`, `||`, `&` and subshells next to a push, `git grep -O` (runs its value). Out of reach, as before: a push
+spelled without the letters (a variable, a git alias in the config, a script file run in a later command). Takes
+effect with the next plugin release. Question left open: the hook does not match the PowerShell tool (see the pull
+request).
 
 ### Added (1.8.3 - 2026-11-07)
 

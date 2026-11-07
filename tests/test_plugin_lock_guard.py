@@ -184,11 +184,22 @@ def clone_and_worktree(project):
 
 
 def spellings(path: Path) -> list[str]:
-    """The ways an agent writes a directory in a Bash command: native, forward slashes, Git Bash `/c/...`."""
+    """The ways an agent writes a directory in a Bash command that bash understands: native in quotes, forward
+    slashes, Git Bash `/c/...`. Unquoted backslashes are not among them, see test_unquoted_backslash_path_is_denied."""
     forms = [f'"{path}"', path.as_posix()]
     if os.name == "nt":
-        forms += [f"/{path.drive[0].lower()}{path.as_posix()[2:]}", str(path)]  # unquoted backslashes
+        forms.append(f"/{path.drive[0].lower()}{path.as_posix()[2:]}")
     return forms
+
+
+def test_unquoted_backslash_path_is_denied(project, clone_and_worktree):
+    """Bash removes unquoted backslashes: `cd C:\\x\\wt` runs as `cd C:xwt` and fails (measured with Git Bash 5.3), so
+    the hook cannot take the Windows reading. Followed by `;`, the push would run in the old directory."""
+    clone, wt = clone_and_worktree
+    backslashed = str(wt) if os.name == "nt" else wt.as_posix().replace("/", "\\")
+    for cmd in (f"cd {backslashed} && git push", f"git -C {backslashed} push origin side",
+                f"cd {backslashed} ; git push"):
+        assert lock_guard.push_dirs(cmd, project) == [lock_guard.UNRESOLVED], cmd
 
 
 def bash(cmd: str, cwd: Path) -> dict:
@@ -245,7 +256,6 @@ def test_stderr_to_stdout_redirect_keeps_the_target(project):
 
 @pytest.mark.parametrize("cmd", [
     'echo "git push"',
-    "python -c \"print('git push')\"",
     "echo 'The hook blocks git push from worktrees' >> notes.md",
     'gh issue create --title "t" --body "after git push the hook fails"',
     'git commit -m "docs: explain git push in worktrees"',
@@ -253,13 +263,37 @@ def test_stderr_to_stdout_redirect_keeps_the_target(project):
     "git log --grep=push",
     "git status | grep push",
     "cat <<'EOF' > ticket.md\nafter git push the hook fails\nEOF",
-    'python - <<PY\nopen("t.md", "w").write("git push")\nPY',
-    "python -c 'open(\"t.md\", \"w\").write(\"x\")'\npython t.py \"git push\"",
+    "# push the branch later\ngit status",
+    "git commit -m \"$(cat <<'EOF'\nfix(hook): allow a pipe after a push\nEOF\n)\"",
+    "gh pr create --title t --body \"$(cat <<'EOF'\nafter `git push` the hook fails (it said so)\nEOF\n)\"",
+    "git stash push -m wip",
+    "grep -n push plugin/lock_guard.py | head -5",
 ])
 def test_text_that_mentions_a_push_is_not_a_push(project, cmd):
     write_lock(project, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
     assert lock_guard.push_dirs(cmd, project) == [], cmd
     assert not denied(bash(cmd, project)), cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "python -c \"print('git push')\"",
+    'python - <<PY\nopen("t.md", "w").write("git push")\nPY',
+    "python -c 'open(\"t.md\", \"w\").write(\"x\")'\npython t.py \"git push\"",
+    'echo "git push" | sh',
+    "echo 'git push' > x.sh; X=$(sh x.sh)",
+    "cat <<EOF\n$(git push)\nEOF",
+    "./cat 'git push'",
+])
+def test_text_a_program_may_run_is_not_proven_data(project, cmd):
+    """Deliberate false alarms: an interpreter, a shell or a later command may run the text, so it is denied (as on
+    main). Rewrite the command, e.g. write the file with the Write tool."""
+    assert lock_guard.push_dirs(cmd, project) == [lock_guard.UNRESOLVED], cmd
+
+
+def test_a_commented_commit_and_push_chain_resolves(project):
+    cmd = ("# push the fix\ngit add . && git commit -m \"$(cat <<'EOF'\nfix push detection\nEOF\n)\"\n"
+           "echo done; git push 2>&1 | tail -3")
+    assert lock_guard.push_dirs(cmd, project) == [project.resolve()]
 
 
 @pytest.mark.parametrize("cmd", [
@@ -275,11 +309,101 @@ def test_text_that_mentions_a_push_is_not_a_push(project, cmd):
     "git push\r\n", "echo a\r\ngit push", "echo a &&\ngit push", "cmd /c \"git push\"", "powershell -c 'git push'",
     "pwsh -Command \"cd x; git push\"", "sh -c 'echo a; git push'", 'bash -c "bash -c \'git push\'"',
     "echo x | git push", "git push > out.txt", "git push >&2", "git push 2>err.txt", "echo ok;;git push",
+    # bash-faithful splitting (#45 probe): continuations, escaped quotes, files written and run, receive-pack
+    "git pu\\\nsh", 'echo \\" ; git push ; echo \\"', "cd C:\\x ; git push", "git push --receive-pack='git push' .",
+    "cat <<'EOF'\r\nx\r\nEOF\r\ngit push", "printf 'git push' > p.sh && bash p.sh", "git grep -O'git push' x",
+    "cat <<'EOF' |\ngit push\nEOF\nsh",
 ])
 def test_real_push_commands_are_still_found(project, cmd):
     assert lock_guard.push_dirs(cmd, project), cmd
     write_lock(project, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
     assert denied(bash(cmd, project)), cmd
+
+
+# --- adversarial probe of #45 (issue comment 6711837634), end to end through pretooluse() -------------------------
+# {L} = a repository with a foreign LOCK.txt, {F} = a free repository and the working directory. "deny": bash really
+# pushes from {L} (checked with a real bash and a bare remote) or the hook cannot tell; "allow": no push from {L}.
+# The 44 cases of the probe keep its names; the three at the end were found while closing it.
+PROBE = [
+    ("control: plain push into locked", "git -C {L} push", "deny"),
+    ("control: cd locked && push", "cd {L} && git push", "deny"),
+    ("control: free push", "git push", "allow"),
+    ("control: free push piped to tail", "git push 2>&1 | tail -3", "allow"),
+    ("control: GIT_DIR env prefix", "GIT_DIR={L}/.git git push", "deny"),
+    ("control: --git-dir", "git --git-dir={L}/.git push", "deny"),
+    ("control: -c option then -C", "git -c x=y -C {L} push", "deny"),
+    ("control: cumulative -C", "git -C {F} -C ../locked push", "deny"),
+    ("control: commit message mentions push", 'git commit -m "then git push later"', "allow"),
+    ("control: echo with quoted push text", 'echo "git push"', "allow"),
+    ("heredoc marker inside double quotes hides next line", 'echo "<<EOF"\ngit -C {L} push\nEOF', "deny"),
+    ("heredoc marker inside a comment hides next line", "# <<EOF\ngit -C {L} push\nEOF", "deny"),
+    ("heredoc marker inside single quotes", "echo '<<X'\ngit -C {L} push\nX", "deny"),
+    ("escaped double quote flips quote state", 'echo \\" ; git -C {L} push ; echo \\"', "deny"),
+    ("line continuation before push", "git -C {L} \\\npush", "deny"),
+    ("line continuation after git", "git \\\n  -C {L} push", "deny"),
+    ("line continuation between git and push, cwd locked", "cd {L} && git \\\npush", "deny"),
+    ("heredoc fed to source", "source /dev/stdin <<EOF\ngit -C {L} push\nEOF", "deny"),
+    ("heredoc fed to dot", ". /dev/stdin <<EOF\ngit -C {L} push\nEOF", "deny"),
+    ("heredoc fed to fish", "fish <<EOF\ngit -C {L} push\nEOF", "deny"),
+    ("alias via -c then -C", "git -c alias.x=push -C {L} x", "deny"),
+    ("alias via -c, free dir", "git -c alias.x=push x", "deny"),
+    ("echo piped into sh", 'echo "git -C {L} push" | sh', "deny"),
+    ("printf piped into bash", "printf 'git -C {L} push' | bash", "deny"),
+    ("echo piped into xargs sh -c", 'echo "git -C {L} push" | xargs -I{{}} sh -c "{{}}"', "deny"),
+    ("python -c subprocess push (author's accepted trade-off)",
+     "python3 -c \"import subprocess; subprocess.run(['git','-C','{L}','push'])\"", "deny"),
+    ("variable as command word", "G=git; $G -C {L} push", "deny"),
+    ("git subtree push (pre-existing)", "git -C {L} subtree push --prefix=x origin main", "deny"),
+    ("git with leading wrapper env", "env git -C {L} push", "deny"),
+    ("backslash-git", "\\git -C {L} push", "deny"),
+    ("/usr/bin/git", "/usr/bin/git -C {L} push", "deny"),
+    ("quoted command word", '"git" -C {L} push', "deny"),
+    ("subshell cd", "(cd {L} && git push)", "deny"),
+    ("background push", "git -C {L} push &", "deny"),
+    ("brace group", "{{ git -C {L} push; }}", "deny"),
+    ("if-then", "if true; then git -C {L} push; fi", "deny"),
+    ("for loop", "for d in {L}; do git -C $d push; done", "deny"),
+    ("tab separated", "git\t-C\t{L}\tpush", "deny"),
+    ("push via here-string to sh", 'sh <<< "git -C {L} push"', "deny"),
+    ("process substitution", "bash <(echo git -C {L} push)", "deny"),
+    ("cd to unquoted path with spaces via quotes", 'cd "{L}" && git push', "deny"),
+    ("comment after push", "git -C {L} push # harmless", "deny"),
+    ("commented-out text must not count", "# git -C {L} push", "allow"),
+    ("symlink to locked repo", "git -C {LINK} push", "deny"),
+    # found while closing the probe: the old head lets all three through, main the first (no `push` in its text)
+    ("line continuation inside the subcommand word", "git -C {L} pu\\\nsh", "deny"),
+    ("unquoted backslash path: bash drops the backslashes, the cd fails, the push runs in {L}",
+     "cd {L} && cd {Fbs} ; git push", "deny"),
+    ("a script written and run in the same command", 'echo "git -C {L} push" > x.sh; sh x.sh', "deny"),
+]
+
+
+@pytest.fixture
+def probe_repos(project):
+    locked, free, link = project / "locked", project / "free", project / "link_to_locked"
+    for repo in (locked, free):
+        repo.mkdir()
+        git_run(repo, "init", "-q")
+    write_lock(locked, "LOCK.txt", owner="kimi@TESTHOST", host="TESTHOST", fence="5")
+    try:
+        os.symlink(locked, link, target_is_directory=True)
+    except OSError:  # Windows without the symlink privilege
+        link = None
+    return locked, free, link
+
+
+@pytest.mark.parametrize("name,template,expected", PROBE, ids=[case[0] for case in PROBE])
+def test_probe_case(probe_repos, name, template, expected):
+    locked, free, link = probe_repos
+    if "{LINK}" in template and link is None:
+        pytest.skip("no symlink privilege")
+    backslashed = str(free) if os.name == "nt" else free.as_posix().replace("/", "\\")
+    cmd = template.format(L=locked.as_posix(), F=free.as_posix(), LINK=link.as_posix() if link else "",
+                          Fbs=backslashed)
+    out = lock_guard.pretooluse({"tool_name": "Bash", "cwd": str(free), "session_id": "probe-session",
+                                 "tool_input": {"command": cmd}})
+    got = "deny" if out and out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny" else "allow"
+    assert got == expected, cmd
 
 
 # --- optional leases (roshambo) and the team board -------------------------------------------------------------

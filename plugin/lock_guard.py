@@ -54,7 +54,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import socket
 import subprocess
 import sys
@@ -81,13 +80,23 @@ EDIT_TOOLS = {"Edit": _FILE_OR_PATH, "Write": _FILE_OR_PATH, "MultiEdit": _FILE_
               "MoveFile": (("source",), ("destination",))}
 PATCH_HEADERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: ")
 ACTOR = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "eval", "cmd", "powershell", "pwsh"}  # run their string arguments
-WRAPPERS = {"env", "command", "exec", "nohup", "time", "sudo", "builtin"}  # run the command word that follows
 GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix",
                      "--config-env"}  # git global options whose value is the next word
-ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 MSYS_DRIVE = re.compile(r"/([A-Za-z])(/.*)?")  # Git Bash spelling of a drive: /c/Users/x
-HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.DOTALL)
+DRIVE_RELATIVE = re.compile(r"[A-Za-z]:(?![/\\])")  # C:x, what bash leaves of an unquoted C:\x
+# The push check (push_dirs): bash operators, and the commands that only read their arguments and their input.
+OPERATORS = sorted(("&&", "||", ";;&", ";;", ";&", "|&", "<<<", "<<-", "<<", ">>", "<&", ">&", "<>", ">|", "&>>", "&>",
+                    ";", "&", "|", "<", ">", "(", ")", "\n"), key=len, reverse=True)
+REDIRECTS = {"<", ">", ">>", ">|", "<>", "<&", ">&", "&>", "&>>", "<<", "<<-", "<<<"}
+FILE_WRITES = {">", ">>", ">|", "<>", "&>", "&>>"}  # and `>&` followed by a file name
+SEPARATORS = {";", "\n", "&&", "|", "|&"}  # ||, &, ;;, ( and ) leave a found push unresolved
+DATA_COMMANDS = {"echo", "printf", "cat", "grep", "egrep", "fgrep", "head", "tail", "wc", "tee"}  # run nothing they read
+GIT_DATA = {"add", "branch", "checkout", "commit", "diff", "log", "show", "stash", "status", "switch", "tag"}  # not
+# grep: `git grep -O<pager>` runs its value through the shell
+GH_DATA = {"api", "issue", "pr"}
+LIVE = ("$(", "`", "${")  # expansions that run commands inside an unquoted heredoc body
+MENTION_NOISE = re.compile(r"\\\n|\$?['\"]|[\\`]")  # what bash removes inside a word: pu''sh, p\ush, pu\<newline>sh
 EDIT_OPS = {"edit", "write", "modify", "all", "*"}
 PUSH_OPS = {"push", "git-push", "publish", "all", "*"}
 UNRESOLVED = Path("<unresolved>")
@@ -263,103 +272,326 @@ def _name(token: str) -> str:
     return token.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
 
 
-def _native(token: str) -> str:
-    """A Git Bash path (`/c/Users/x`) as the Windows path Python can open; every other token unchanged."""
-    match = MSYS_DRIVE.fullmatch(token) if os.name == "nt" else None
-    return f"{match[1].upper()}:{match[2] or '/'}" if match else token
+def _mentions(text: str) -> bool:
+    """Does the text say `push`, also spelled across quotes or escapes? Only such commands are checked for a push
+    (a push spelled without the letters -- a variable, an alias in the git config, a script file -- is out of reach,
+    as it always was; the hook guards against accidental pushes, it is no sandbox)."""
+    return "push" in MENTION_NOISE.sub("", text).lower()
 
 
-def _drop_heredocs(command: str) -> str:
-    """Heredoc bodies are data (a script or a text written to a file), not commands -- unless a shell reads them."""
-    def body(match: re.Match) -> str:
-        first_line = match[0].split("\n", 1)[0]
-        line = match.string[:match.start()].rsplit("\n", 1)[-1] + first_line  # the command line the heredoc feeds
-        return match[0] if any(_name(w) in SHELLS for w in re.findall(r"[^\s<>|&;()]+", line)) else first_line
-    return HEREDOC.sub(body, command)
+class _Unsupported(ValueError):
+    """A shell construct the push check does not model; with a push mentioned, the hook denies."""
 
 
-def _words(command: str) -> list[str]:
-    """Shell words. A newline separates commands (it is a token of its own); a backslash is a character, because
-    the paths are Windows paths (`cd C:\\work\\repo`) and the command words are matched through _name()."""
-    lex = shlex.shlex(_drop_heredocs(command).replace("`", " "), posix=True, punctuation_chars=";&|()<>\n")
-    lex.whitespace_split, lex.whitespace, lex.escape, lex.commenters = True, " \t\r", "", ""
-    return list(lex)
+class _Cmd:
+    """One simple command: its word values, whether each is literal (no expansion), the command substitutions inside
+    each word, its redirections (operator, target), heredoc bodies (text, expands) and the operator after it."""
+
+    def __init__(self):
+        self.words, self.literal, self.subs, self.redirects, self.bodies, self.sep = [], [], [], [], [], ""
 
 
-def _git_call(seg: list[str], k: int, here: Path) -> tuple[str | None, Path, bool]:
-    """`git [global options] <subcommand>` at seg[k]: the subcommand, the directory `-C` options lead to
-    (cumulative, as git applies them) and whether those were the only options (False: another option may move the
-    target, e.g. -c, --git-dir, --work-tree)."""
-    target, plain, i = here, True, k + 1
-    while i < len(seg) and seg[i].startswith("-"):
-        if seg[i] == "-C" and i + 1 < len(seg) and SAFE_TOKEN.match(seg[i + 1]):
-            nxt = Path(_native(seg[i + 1]))
-            target = nxt if nxt.is_absolute() else target / nxt
+class _Lexer:
+    """Splits a command line the way bash does, for the part of bash the push check needs: quotes and escapes, line
+    continuations, comments, operators, redirections, heredocs (read after their line, as bash does) and `$(...)`
+    (parsed recursively). It follows bash, not Windows: an unquoted backslash escapes the next character, so
+    `cd C:\\x` reaches bash as `cd C:x` (measured with Git Bash 5.3). Whatever it does not model raises
+    _Unsupported; `odd` records operators that leave a found push unresolved."""
+
+    def __init__(self, text: str):
+        self.s, self.i, self.odd, self.comments = text, 0, False, 0  # comments: how many mention a push
+
+    def script(self, closer: bool = False) -> list[_Cmd]:
+        s, cmds, cmd, pending = self.s, [], _Cmd(), []
+        while self.i < len(s):
+            c = s[self.i]
+            if c in " \t":
+                self.i += 1
+            elif s.startswith("\\\n", self.i):
+                self.i += 2
+            elif c == "#":  # reached only where a word would start
+                end = s.find("\n", self.i)
+                end = len(s) if end < 0 else end
+                self.comments += _mentions(s[self.i:end])
+                self.i = end
+            elif closer and c == ")":
+                self.i += 1
+                if pending:
+                    raise _Unsupported("heredoc without a body inside $(...)")
+                return cmds + [cmd]
+            elif (op := next((o for o in OPERATORS if s.startswith(o, self.i)), None)) is not None:
+                self.i += len(op)
+                if op in REDIRECTS:
+                    self.redirect(op, cmd, pending)
+                    continue
+                if closer and op == "(":
+                    raise _Unsupported("subshell inside $(...)")
+                cmd.sep, self.odd = op, self.odd or op not in SEPARATORS
+                cmds.append(cmd)
+                cmd = _Cmd()
+                if op == "\n":
+                    self.heredocs(pending)
+                    pending = []
+            else:
+                value, literal, subs = self.word()
+                if value.isdigit() and literal and s[self.i:self.i + 1] in ("<", ">"):
+                    continue  # a file descriptor: 2>&1, 2>file
+                if closer and value == "case":
+                    raise _Unsupported("case inside $(...)")  # its patterns end in an unbalanced )
+                cmd.words.append(value)
+                cmd.literal.append(literal)
+                cmd.subs.append(subs)
+        if closer or pending:
+            raise _Unsupported("unterminated $(...) or heredoc")
+        return cmds + [cmd]
+
+    def redirect(self, op: str, cmd: _Cmd, pending: list) -> None:
+        s = self.s
+        if s.startswith("(", self.i):
+            raise _Unsupported("process substitution")
+        while self.i < len(s) and s[self.i] in " \t":
+            self.i += 1
+        start = self.i
+        value, literal, subs = self.word()
+        if self.i == start or subs or (not literal and op in ("<<", "<<-")):
+            raise _Unsupported("redirection without a plain target")
+        if op in ("<<", "<<-"):
+            pending.append((value, not any(q in s[start:self.i] for q in "'\"\\"), cmd))
         else:
-            plain = False
-        i += 2 if seg[i] in GIT_VALUE_OPTIONS else 1
-    return (seg[i] if i < len(seg) else None), target, plain
+            cmd.redirects.append((op, value))
+
+    def heredocs(self, pending: list) -> None:
+        """Read the bodies of the heredocs started on the line just ended. A body ends at the first line that is the
+        delimiter once blanks and a carriage return are stripped -- never later than bash ends it, so nothing bash
+        runs as a command is taken for data."""
+        s = self.s
+        for delimiter, expands, cmd in pending:
+            lines, delimiter = [], delimiter.strip(" \t\r")
+            while True:
+                if self.i >= len(s):
+                    raise _Unsupported("unterminated heredoc")
+                end = s.find("\n", self.i)
+                end = len(s) if end < 0 else end
+                line, self.i = s[self.i:end], end + 1
+                if line.strip(" \t\r") == delimiter:
+                    break
+                if expands and line.endswith("\\"):
+                    raise _Unsupported("line continuation in a heredoc")  # bash joins it, the end line may move
+                lines.append(line)
+            cmd.bodies.append(("\n".join(lines), expands))
+
+    def word(self) -> tuple[str, bool, list]:
+        s, out, literal, subs = self.s, [], True, []
+        while self.i < len(s) and s[self.i] not in " \t\n;&|()<>":
+            c = s[self.i]
+            if c == "\\":
+                out.append(s[self.i + 1:self.i + 2].replace("\n", ""))  # backslash-newline: a line continuation
+                self.i += 2
+            elif c == "'":
+                end = s.find("'", self.i + 1)
+                if end < 0:
+                    raise _Unsupported("unterminated quote")
+                out.append(s[self.i + 1:end])
+                self.i = end + 1
+            elif c == '"':
+                self.i += 1
+                while s[self.i:self.i + 1] != '"':
+                    if self.i >= len(s):
+                        raise _Unsupported("unterminated quote")
+                    c = s[self.i]
+                    if c == "\\" and s[self.i + 1:self.i + 2] in ("$", "`", '"', "\\", "\n"):
+                        out.append(s[self.i + 1].replace("\n", ""))
+                        self.i += 2
+                    elif c in "$`":
+                        literal = self.expansion(out, subs, quoted=True) and literal
+                    else:
+                        out.append(c)
+                        self.i += 1
+                self.i += 1
+            elif c in "$`":
+                literal = self.expansion(out, subs, quoted=False) and literal
+            else:
+                literal = literal and c not in "*?[]{}~"  # globs, brace and tilde expansion
+                out.append(c)
+                self.i += 1
+        return "".join(out), literal, subs
+
+    def expansion(self, out: list, subs: list, quoted: bool) -> bool:
+        """At `$` or a backtick. True only for a `$` that stays a literal character."""
+        s, i = self.s, self.i
+        nxt = s[i + 1:i + 2]
+        if s[i] == "`" or s.startswith("$((", i) or (not quoted and nxt in ("'", '"')):
+            raise _Unsupported("backticks, arithmetic or $'...' quoting")
+        if nxt == "(":
+            self.i += 2
+            subs.append(self.script(closer=True))
+            out.append("$(...)")
+        elif nxt == "{":
+            end = s.find("}", i)
+            if end < 0 or any(ch in s[i + 2:end] for ch in "$`'\"\\{("):
+                raise _Unsupported("nested parameter expansion")
+            out.append(s[i:end + 1])
+            self.i = end + 1
+        else:
+            out.append("$")
+            self.i += 1
+            return not (nxt and (nxt.isalnum() or nxt in "_@*#?$!-"))  # else a variable: its name follows
+        return False
+
+
+def _directory(base: Path, value: str) -> Path | None:
+    """Where `cd <value>` or `git -C <value>` leads from `base`, as bash on this system goes there; None when that is
+    not certain: a missing directory, `-`, control characters, and on Windows an MSYS root path (`/tmp`) or a
+    drive-relative one (`C:x`). Git Bash drive paths (`/c/Users/x`) are understood."""
+    if not value or value.startswith("-") or CONTROL.search(value):
+        return None
+    if os.name == "nt":
+        match = MSYS_DRIVE.fullmatch(value)
+        if match:
+            value = f"{match[1].upper()}:{match[2] or '/'}"
+        elif value[:1] in ("/", "\\") or DRIVE_RELATIVE.match(value):
+            return None
+    path = Path(value)
+    path = (path if path.is_absolute() else base / path).resolve()
+    return path if path.is_dir() else None
+
+
+def _kind(cmd: _Cmd) -> tuple[int, str | None, int | None, list[str] | None, str]:
+    """(index of the command word after leading assignments, the program it names, git: the subcommand's index and
+    the `-C` values in order -- None when another global option is used --, and the kind: push, data (prints or
+    stores what it reads, runs nothing), cd, git, other or empty)."""
+    words, h = cmd.words, 0
+    while h < len(words) and ASSIGN.match(words[h]):
+        h += 1
+    if h == len(words):
+        return h, None, None, None, "empty"
+    name = _name(words[h]) if cmd.literal[h] else None
+    sub, chain, i = None, None, h + 1
+    if name == "git":
+        chain = []
+        while i < len(words) and words[i].startswith("-"):
+            plain = words[i] == "-C" and i + 1 < len(words) and cmd.literal[i + 1]
+            chain = chain + [words[i + 1]] if plain and chain is not None else None
+            i += 2 if words[i] in GIT_VALUE_OPTIONS else 1
+        sub = i if i < len(words) else None
+        if sub is not None and words[sub].lower() == "push":
+            return h, name, sub, chain, "push"
+    bare = not any(ch in words[h] for ch in "/\\")  # ./cat or /tmp/x/cat can be any script
+    if bare and (name in DATA_COMMANDS
+                 or (name == "git" and chain is not None and sub is not None and cmd.literal[sub]
+                     and words[sub] in GIT_DATA)
+                 or (name == "gh" and h + 1 < len(words) and cmd.literal[h + 1] and words[h + 1] in GH_DATA)):
+        return h, name, sub, chain, "data"
+    return h, name, sub, chain, name if name in ("cd", "git") else "other"
+
+
+def _tree_mentions(cmds: list[_Cmd]) -> bool:
+    return any(any(map(_mentions, c.words)) or any(_mentions(t) for _, t in c.redirects)
+               or any(_mentions(b) for b, _ in c.bodies) or any(_tree_mentions(s) for subs in c.subs for s in subs)
+               for c in cmds)
+
+
+def _inert(cmds: list[_Cmd]) -> bool:
+    """Runs nothing but data commands and cd, also inside `$(...)` and heredoc bodies -- so a file written earlier in
+    the same command line cannot run."""
+    return all((kind[4] in ("empty", "cd") or (kind[4] == "data" and kind[1] in DATA_COMMANDS))
+               and not any(live and any(x in body for x in LIVE) for body, live in c.bodies)
+               and all(_inert(s) for subs in c.subs for s in subs)
+               for c in cmds for kind in [_kind(c)])
+
+
+def _push_target(cmd: _Cmd, h: int, sub: int, chain: list[str] | None, here: Path, top: bool) -> Path:
+    """The repository a `git ... push` pushes from, or UNRESOLVED unless it is the plain form: no assignment before
+    it, only `-C` global options, literal words, no substitution or heredoc, and no further word that could run a
+    command (`--receive-pack`, `--exec`, an option or text mentioning push)."""
+    rest = cmd.words[sub + 1:]
+    if (not top or h or chain is None or cmd.bodies or not all(cmd.literal) or any(cmd.subs)
+            or any(w.startswith(("--receive-pack", "--exec")) for w in rest)
+            or any(_mentions(w) and (w.startswith("-") or not SAFE_TOKEN.match(w)) for w in rest)):
+        return UNRESOLVED
+    target = here.resolve()
+    for value in chain:
+        target = _directory(target, value)
+        if target is None:
+            return UNRESOLVED
+    return target if target.is_dir() else UNRESOLVED
+
+
+def _check(cmds: list[_Cmd], cwd: Path, top: bool, f: dict) -> None:
+    """Account for every mention of push in `cmds`. A mention is accounted for as a `git ... push` (resolved or
+    UNRESOLVED), as the path of a `cd`, as the name of a file written to, or as data: an argument, here-string,
+    heredoc or `$(...)` of a data command whose output no later pipeline stage runs. Any other mention -- an
+    interpreter's argument, a heredoc fed to a shell or to `source`, an alias in `-c`, a variable command word, a
+    pipe into `sh` or `xargs` -- appends UNRESOLVED. Only at the top level a push resolves and `cd` moves on."""
+    pipes, here = [], cwd
+    for cmd in cmds:
+        if cmd.words or cmd.redirects or cmd.bodies:
+            if pipes and pipes[-1][-1].sep in ("|", "|&"):
+                pipes[-1].append(cmd)
+            else:
+                pipes.append([cmd])
+    for pipe in pipes:
+        kinds = [_kind(cmd) for cmd in pipe]
+        for k, (cmd, (h, name, sub, chain, kind)) in enumerate(zip(pipe, kinds)):
+            if kind == "push":
+                f["found"].append(_push_target(cmd, h, sub, chain, here, top))
+                continue
+            safe = kind == "data" and all(kd[4] == "data" for kd in kinds[k + 1:])  # nothing later runs the output
+            bad = False
+            for i, (word, subs) in enumerate(zip(cmd.words, cmd.subs)):
+                for inner in subs:
+                    if safe and i > h:
+                        _check(inner, here, False, f)
+                    else:
+                        bad = bad or _tree_mentions(inner)
+                bad = bad or (_mentions(word) and not (i > h and (safe or kind == "cd")))
+            bad = bad or any(_mentions(t) and not (safe or op in FILE_WRITES or op == ">&") for op, t in cmd.redirects)
+            bad = bad or any(_mentions(text) and not (safe and not (live and any(x in text for x in LIVE)))
+                             for text, live in cmd.bodies)
+            if bad:
+                f["found"].append(UNRESOLVED)
+            elif safe and _tree_mentions([cmd]) and (
+                    any(kd[1] == "tee" for kd in kinds[k:])
+                    or any(op in FILE_WRITES or (op == ">&" and not (t.isdigit() or t == "-"))
+                           for later in pipe[k:] for op, t in later.redirects)):
+                f["wrote"] = True  # a text naming a push went into a file: only fine if nothing runs files
+        if not top:
+            continue
+        h, name, _sub, _chain, kind = kinds[0]
+        if len(pipe) == 1 and kind == "cd":
+            cmd = pipe[0]
+            nxt = _directory(here, cmd.words[1]) if h == 0 and len(cmd.words) == 2 and cmd.literal[1] else None
+            f["odd"] = f["odd"] or nxt is None
+            here = nxt or here
+        elif not (len(pipe) == 1 and (name == "git" or (kind == "data" and name != "printf"))
+                  or len(pipe) > 1 and all(kd[4] != "cd" for kd in kinds)):
+            f["odd"] = True  # another command (export, npm, a function ...) could move the target; a cd in a pipe
+            # only changes its own subshell
 
 
 def push_dirs(command: str, cwd: Path) -> list[Path]:
-    """Repositories a shell command pushes from -- by allow-list, not by deny-list.
+    """Repositories a shell command pushes from; [UNRESOLVED] when that cannot be proven; [] without a push.
 
-    A push is a `git [options] push` in the command position of a shell word list (so the words inside a quoted
-    argument, a heredoc or a `git commit -m` message are not one). Resolved are only plain forms: segments joined by
-    `&&`, `;` or newlines, an optional `cd <existing dir>`, a `2>&1`, a pipe into a filter (`| tail -3`) and `git [-C <dir>]... push ...`. Everything
-    else that could move the target -- subshells, other redirections, variables, `~`, backticks, env
-    assignments, other git global options, wrappers (env, sudo, xargs, find -exec, sh -c ...), and every segment that
-    is neither `cd <dir>` nor a `git` call -- turns a found push into UNRESOLVED, which the hook denies. Paths may be
-    written as Windows paths or as Git Bash `/c/...` paths. A command without a push returns []."""
+    Fail-closed by accounting, not by guessing: a command that mentions push (after quote removal) is split the way
+    bash splits it (_Lexer), and every mention must be accounted for (_check) -- as a plain `git [-C <dir>]... push`
+    in command position, resolved through `cd <dir>` segments joined by `&&`, `;` or newlines (a pipe into a filter
+    and `2>&1` are fine), or as data no command runs. Whatever is not proven -- subshells, `||`, `&`, assignments,
+    other git global options, wrappers, interpreters, a shell reading a heredoc or a pipe, a text written to a file
+    and a command that could run that file -- turns the result into UNRESOLVED, which the hook denies. Paths may be
+    written as `C:/...`, as Git Bash `/c/...` or quoted as `"C:\\..."`; unquoted backslashes are removed by bash."""
+    if not _mentions(command):
+        return []
+    lexer = _Lexer(command)
     try:
-        tokens = _words(command)
-    except ValueError:
-        return [UNRESOLVED] if "push" in command else []
-    segments, piped, odd, i = [[]], set(), "`" in command, 0
-    while i < len(tokens):
-        tok, i = tokens[i], i + 1
-        separator = tok.replace("\n", "")
-        if tok == ">&" and segments[-1][-1:] in (["1"], ["2"]) and tokens[i:i + 1] in (["1"], ["2"], ["-"]):
-            segments[-1].pop()  # 2>&1 moves nothing
-            i += 1
-        elif separator in ("", "&&", ";"):
-            segments.append([])
-        elif separator == "|":  # pipeline stages run side by side in subshells: none of them moves the others' target
-            piped.update((len(segments) - 1, len(segments)))
-            segments.append([])
-        elif set(separator) <= set(";&|()<>"):
-            odd = True  # a subshell or redirection: the words around it stay in the segment, never resolved
-        else:
-            segments[-1].append(tok)
-    here, found = cwd, []
-    for index, seg in enumerate(segments):
-        if not seg:
-            continue
-        stage = index in piped
-        j = 0
-        while j < len(seg) and (ASSIGN.match(seg[j]) or _name(seg[j]) in WRAPPERS or (j and seg[j].startswith("-"))):
-            j, odd = j + 1, True
-        if j == len(seg):
-            continue
-        head = _name(seg[j])
-        if head == "cd":
-            nxt = Path(_native(seg[1])) if len(seg) == 2 else None
-            if stage or nxt is None or seg[1].startswith("-") or not SAFE_TOKEN.match(seg[1]):
-                odd = True  # a cd inside a pipeline only changes its own subshell
-            else:
-                here = (nxt if nxt.is_absolute() else here / nxt).resolve()
-                odd = odd or not here.is_dir()
-        elif head != "git" and not stage:
-            odd = True  # any other command (declare, export, npm ...) could change the target
-        for k, tok in enumerate(seg):
-            if k >= j and _name(tok) == "git":  # also behind xargs, find -exec, timeout ...
-                sub, target, plain = _git_call(seg, k, here)
-                if sub == "push":
-                    ok = k == j and plain and all(SAFE_TOKEN.match(t) for t in seg) and target.resolve().is_dir()
-                    found.append(target.resolve() if ok else UNRESOLVED)
-            elif k > j and (head in SHELLS or "$(" in tok) and push_dirs(tok, here):
-                found.append(UNRESOLVED)  # sh -c "...", eval "...", "$(...)": a push inside a string that runs
-    return [UNRESOLVED] if found and odd else found
+        cmds = lexer.script()
+    except _Unsupported:
+        return [UNRESOLVED]
+    f = {"found": [], "wrote": False, "odd": lexer.odd}
+    _check(cmds, Path(cwd), True, f)
+    found = f["found"]
+    if (f["wrote"] and not _inert(cmds)) or not (lexer.comments or _tree_mentions(cmds)):
+        found.append(UNRESOLVED)  # the second: the letters are there but no word carries them -- not understood
+    return [UNRESOLVED] if UNRESOLVED in found or (found and f["odd"]) else found
 
 
 def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Session | None = None) -> str:
