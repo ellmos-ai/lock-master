@@ -70,6 +70,16 @@ A pull request that changes one of them needs, in addition to the tests:
   not enough. Background: #39 passed such a review and was fail-open; an adversarial probe found it within minutes
   (reverted in #40).
 
+Known limits of the `guard-proof` check:
+- **Four-space indent:** a required line indented by four spaces (a Markdown code block) still counts as filled. The
+  reviewer checks what the line says.
+- **Windows 8.3 short names:** a path such as `PURE-L~1/x.py` lands in `pure-locking/` when pulled into an existing
+  Windows clone, but the gate does not see it as a guard path. Reviewers watch for `~<digit>` in path components of
+  a PR. A follow-up fix is tracked as a ticket.
+- **Required check:** the gate only binds as a required status check under branch protection. A PR that deletes
+  `guard-proof.yml` does not run it. That is why the `Probe-Ausgefuehrt-von:` review step by another instance stays
+  mandatory.
+
 ### 4. License
 By contributing to `lock-master`, you agree that your contributions will be licensed under the [MIT License](LICENSE).
 
@@ -143,6 +153,16 @@ Ein Pull Request, der eine davon ändert, braucht zusätzlich zu den Tests:
 - **Den Merge** übernimmt eine Instanz, die die Probe selbst ausgeführt hat und nicht der Autor ist. „Diff gelesen,
   Tests grün“ reicht nicht. Hintergrund: #39 bestand eine solche Prüfung und war fail-open; eine adversariale Probe
   fand das in wenigen Minuten (revertiert in #40).
+
+Bekannte Grenzen der Prüfung `guard-proof`:
+- **Einzug mit vier Leerzeichen:** Eine Pflichtzeile, die mit vier Leerzeichen eingerückt ist (Markdown-Codeblock),
+  zählt weiterhin als ausgefüllt. Den Inhalt prüft der Reviewer.
+- **Windows-8.3-Kurznamen:** Ein Pfad wie `PURE-L~1/x.py` landet beim Pull in einen bestehenden Windows-Klon in
+  `pure-locking/`, das Gate erkennt ihn aber nicht als Guard-Pfad. Reviewer achten bei Pfadkomponenten eines PRs auf
+  `~<Ziffer>`. Ein Folgefix liegt als Ticket vor.
+- **Pflicht-Check:** Bindend wirkt das Gate erst als Required Status Check mit Branch-Protection. Ein PR, der
+  `guard-proof.yml` löscht, lässt es nicht laufen. Deshalb bleibt der Review-Schritt `Probe-Ausgefuehrt-von:` durch
+  eine andere Instanz verbindlich.
 
 ### 4. Lizenz
 Mit Ihrer Mitwirkung an `lock-master` erklären Sie sich damit einverstanden, dass Ihre Beiträge unter der [MIT-Lizenz](LICENSE) lizenziert werden.
