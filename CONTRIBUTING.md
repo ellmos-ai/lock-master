@@ -48,9 +48,13 @@ git diff --check
 ### 3a. Guard files
 These files decide whether an agent may edit or push. A mistake in them opens the lock guard of every installed
 agent, and the marketplace delivers what is merged:
-`plugin/lock_guard.py`, `plugin/board_mcp.py`, `hooks/hooks.json`, `hooks/run.sh`, `.claude-plugin/plugin.json`,
-`.mcp.json`, `pure-locking/lock_utils.py`, `team-lock/_lock_master_team/`, `.github/scripts/check_guard_proof.py`,
-`.github/workflows/guard-proof.yml`.
+the directories `plugin/`, `hooks/`, `.claude-plugin/`, `pure-locking/`, `team-lock/` and `.github/scripts/`
+(everything below them), plus `.mcp.json` and `.github/workflows/guard-proof.yml`.
+
+Whole directories, because a new file can be a guard change too. The hook runs with `plugin/` first on its
+import path and puts `pure-locking/` and `team-lock/` in front of it. A new module there with a standard-library
+name, such as `plugin/json.py`, would therefore replace that import and take over the guard. Paths are compared
+case-insensitively: on Windows and macOS, `Plugin/Lock_Guard.py` is the same file as `plugin/lock_guard.py`.
 
 A pull request that changes one of them needs, in addition to the tests:
 - **An adversarial probe**: try to make a foreign lock count as your own and an own lock fail.
@@ -115,9 +119,14 @@ git diff --check
 ### 3a. Guard-Dateien
 Diese Dateien entscheiden, ob ein Agent editieren oder pushen darf. Ein Fehler darin öffnet den Lock-Guard jedes
 installierten Agenten, und der Marketplace liefert aus, was gemergt ist:
-`plugin/lock_guard.py`, `plugin/board_mcp.py`, `hooks/hooks.json`, `hooks/run.sh`, `.claude-plugin/plugin.json`,
-`.mcp.json`, `pure-locking/lock_utils.py`, `team-lock/_lock_master_team/`, `.github/scripts/check_guard_proof.py`,
-`.github/workflows/guard-proof.yml`.
+die Verzeichnisse `plugin/`, `hooks/`, `.claude-plugin/`, `pure-locking/`, `team-lock/` und `.github/scripts/`
+(alles darunter), dazu `.mcp.json` und `.github/workflows/guard-proof.yml`.
+
+Ganze Verzeichnisse, weil auch eine neue Datei eine Guard-Änderung sein kann. Der Hook läuft mit `plugin/` an
+erster Stelle des Importpfads und stellt `pure-locking/` und `team-lock/` davor. Ein neues Modul dort mit dem Namen
+eines Standardmoduls, etwa `plugin/json.py`, würde daher diesen Import ersetzen und den Guard übernehmen. Pfade werden
+ohne Groß-/Kleinunterscheidung verglichen: Unter Windows und macOS ist `Plugin/Lock_Guard.py` dieselbe Datei wie
+`plugin/lock_guard.py`.
 
 Ein Pull Request, der eine davon ändert, braucht zusätzlich zu den Tests:
 - **Eine adversariale Probe**: Versuchen, einen fremden Lock als eigenen gelten zu lassen und einen eigenen

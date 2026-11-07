@@ -1,7 +1,7 @@
 """CI gate: a pull request that changes a guard file must name an adversarial probe and who ran it.
 
 Reads the `pull_request` event from $GITHUB_EVENT_PATH (JSON; the PR text is only ever data, never put into a
-shell) and lists the changed files with `git diff --name-only --no-renames <base>...<head>` (argument list, both
+shell) and lists the changed files with `git diff --name-only --no-renames -z <base>...<head>` (argument list, both
 SHAs validated first). Fails when a guard file changed and the description lacks a non-empty `Adversarial-Probe:`
 or `Probe-Ausgefuehrt-von:` line. Anything it cannot read fails closed. Standard library only.
 See CONTRIBUTING.md, "Guard files" (T-20261107-441069325).
@@ -13,19 +13,21 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
-# Exact files, or directories ending in "/". Keep CONTRIBUTING.md ("Guard files") in step: a test checks it.
+# Exact files, or directories ending in "/" (everything below them). Directories, not single modules: the hook runs
+# with plugin/ as sys.path[0] and prepends pure-locking/ and team-lock/, the gate runs with .github/scripts/ as
+# sys.path[0], so any new module there with a stdlib name (json.py, platform.py, argparse.py, ...) takes over an
+# import (r1 review of 1f51963). Keep CONTRIBUTING.md ("Guard files") in step: a test checks it.
 GUARD_PATHS = (
-    "plugin/lock_guard.py",
-    "plugin/board_mcp.py",
-    "hooks/hooks.json",
-    "hooks/run.sh",
-    ".claude-plugin/plugin.json",
+    "plugin/",
+    "hooks/",
+    ".claude-plugin/",
+    "pure-locking/",
+    "team-lock/",
     ".mcp.json",
-    "pure-locking/lock_utils.py",
-    "team-lock/_lock_master_team/",
-    ".github/scripts/check_guard_proof.py",
+    ".github/scripts/",
     ".github/workflows/guard-proof.yml",
 )
 REQUIRED = ("Adversarial-Probe", "Probe-Ausgefuehrt-von")
@@ -33,23 +35,56 @@ NON_VALUES = {"-", "--", "n/a", "na", "none", "tbd", "todo", "keine", "offen", "
 SHA = re.compile(r"[0-9a-f]{40}")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 PLACEHOLDER = re.compile(r"<[^<>]*>")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def normalize(path: str) -> str:
+    """Windows separators, leading ./ and case do not make another file: Windows and default macOS checkouts are
+    case-insensitive, so Plugin/Lock_Guard.py is plugin/lock_guard.py there."""
+    path = path.replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path.casefold()
 
 
 def is_guard(path: str) -> bool:
-    path = path.replace("\\", "/")
+    path = normalize(path)
     return any(path == g or (g.endswith("/") and path.startswith(g)) for g in GUARD_PATHS)
 
 
+def visible_text(body: str) -> str:
+    """The description as GitHub shows it as text: closed comments removed, everything after an unclosed `<!--`
+    (hidden by GitHub) dropped, fenced code blocks dropped (an unclosed fence runs to the end)."""
+    text = COMMENT.sub("", body or "").split("<!--", 1)[0]
+    kept, fence = [], None
+    for line in text.splitlines():
+        match = FENCE.match(line)
+        if fence is None and match:
+            fence = match.group(1)
+        elif fence is not None:
+            if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
+                    and not line.strip()[len(match.group(1)):].strip():
+                fence = None
+        else:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def without_invisibles(value: str) -> str:
+    """Drop format characters (zero-width space/joiners, word joiner, BOM: Unicode category Cf)."""
+    return "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
+
+
 def field_values(body: str) -> dict[str, str]:
-    """The value of each required line. HTML comments (the template's hints), `<...>` placeholders and stand-ins
-    such as `n/a` do not count."""
+    """The value of each required line. HTML comments (the template's hints), code blocks, `<...>` placeholders,
+    invisible characters and stand-ins such as `n/a` do not count."""
     values: dict[str, str] = {}
-    for line in COMMENT.sub("", body or "").splitlines():
-        key, sep, value = line.strip().lstrip("-*+ ").partition(":")
+    for line in visible_text(body).splitlines():
+        key, sep, value = without_invisibles(line).strip().lstrip("-*+ ").partition(":")
         key = key.strip(" *")
         if not sep or key not in REQUIRED or values.get(key):
             continue
-        value = PLACEHOLDER.sub("", value).strip(" *\t")
+        value = PLACEHOLDER.sub("", value).strip().strip("*").strip()
         if value and value.lower() not in NON_VALUES:
             values[key] = value
     return values
@@ -68,9 +103,11 @@ def check(body: str, changed: list[str]) -> list[str]:
 def changed_files(base: str, head: str) -> list[str]:
     if not (isinstance(base, str) and isinstance(head, str) and SHA.fullmatch(base) and SHA.fullmatch(head)):
         raise ValueError("pull_request base/head sha missing or not a 40-character lowercase hex sha")
-    result = subprocess.run(["git", "diff", "--name-only", "--no-renames", f"{base}...{head}"],
-                            capture_output=True, text=True, check=True)
-    return [line for line in result.stdout.splitlines() if line]
+    # -z: NUL-separated and unquoted; without it git quotes non-ASCII names ("plugin/\303\244.py"), which would
+    # then not start with a guard directory.
+    result = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}"],
+                            capture_output=True, check=True)
+    return [name for name in result.stdout.decode("utf-8", "surrogateescape").split("\0") if name]
 
 
 def main(event_path: str | Path | None = None) -> int:

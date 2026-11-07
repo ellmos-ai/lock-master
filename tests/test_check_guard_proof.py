@@ -20,7 +20,7 @@ FILLED = ("Adversarial-Probe: pytest tests/test_probe.py -> 10/10 denied (foreig
 
 
 def test_changes_outside_the_guard_files_pass_without_lines():
-    assert gp.check("", ["README.md", "tests/test_x.py", "team-lock/README.md", "plugin/README.md"]) == []
+    assert gp.check("", ["README.md", "tests/test_x.py", "lock_scan.py", ".github/workflows/tests.yml"]) == []
 
 
 def test_guard_change_without_the_lines_fails_naming_both():
@@ -48,17 +48,47 @@ def test_the_unfilled_template_fails_and_lines_inside_comments_do_not_count():
     assert len(gp.check(hidden, ["plugin/lock_guard.py"])) == 2
 
 
+# r1 review of 1f51963, finding 3: what GitHub does not render as a plain line must not count either.
+@pytest.mark.parametrize("body", [
+    "```\n" + FILLED + "```\n",                      # inside a code block
+    "~~~text\n" + FILLED + "~~~\n",                  # tilde fence with an info string
+    "   ```\n" + FILLED,                             # indented, never closed: the rest is code
+    "<!--\n" + FILLED,                               # unclosed comment: GitHub hides the rest
+    "<!-- note -->\n<!--\n" + FILLED,                # a closed comment before an unclosed one
+])
+def test_lines_github_does_not_show_as_text_do_not_count(body):
+    assert len(gp.check(body, ["plugin/lock_guard.py"])) == 2
+
+
+@pytest.mark.parametrize("value", ["​", "‌", "‍", "⁠", "﻿", " ​⁠ ", " "])
+def test_invisible_values_do_not_count(value):
+    body = f"Adversarial-Probe: {value}\nProbe-Ausgefuehrt-von: r1\n"
+    assert len(gp.check(body, ["plugin/lock_guard.py"])) == 1
+
+
+def test_text_after_a_closed_code_block_counts_again():
+    assert gp.check("```\nexample\n```\n" + FILLED, ["plugin/lock_guard.py"]) == []
+
+
 @pytest.mark.parametrize("path", [
     "plugin/lock_guard.py", "plugin/board_mcp.py", "hooks/hooks.json", "hooks/run.sh", ".claude-plugin/plugin.json",
     ".mcp.json", "pure-locking/lock_utils.py", "team-lock/_lock_master_team/__init__.py",
     ".github/scripts/check_guard_proof.py", ".github/workflows/guard-proof.yml", "plugin\\lock_guard.py",
+    # r1 finding 1: a new module next to a guard module shadows a stdlib import of the hook (sys.path[0] = plugin/,
+    # pure-locking/ and team-lock/ prepended), so everything below these directories is a guard file
+    "plugin/json.py", "pure-locking/platform.py", "team-lock/argparse.py", "team-lock/msvcrt.py",
+    "pure-locking/fcntl.py", "hooks/other.sh", ".claude-plugin/marketplace.json", ".github/scripts/json.py",
+    # r1 finding 2: case variants and a leading ./ name the same file on Windows and macOS
+    "Plugin/Lock_Guard.py", "PLUGIN/JSON.PY", "Pure-Locking/Lock_Utils.py", "./plugin/lock_guard.py",
+    ".\\Hooks\\Run.sh", ".MCP.json", ".GitHub/Workflows/Guard-Proof.yml",
 ])
 def test_every_guard_path_is_recognised(path):
     assert gp.is_guard(path)
 
 
-@pytest.mark.parametrize("path", ["plugin/lock_guard.py.bak", "xplugin/lock_guard.py", "team-lock/team_lock.py",
-                                  "hooks/hooks.json.md", "pure-locking/lock_scan.py"])
+@pytest.mark.parametrize("path", ["plugin.bak/lock_guard.py", "xplugin/lock_guard.py", "hooks.json",
+                                  "lock_utils.py", "tests/plugin/lock_guard.py", "docs/hooks/run.sh",
+                                  ".mcp.json.bak", ".github/workflows/tests.yml"])
 def test_look_alike_paths_are_not_guard_files(path):
     assert not gp.is_guard(path)
 
@@ -114,6 +144,17 @@ def test_main_on_a_real_guard_change(repo, tmp_path, capsys):
     assert gp.main(event(tmp_path, base, head, "no probe")) == 1
     assert "plugin/lock_guard.py" in capsys.readouterr().out
     assert gp.main(event(tmp_path, base, head, FILLED)) == 0
+
+
+@pytest.mark.parametrize("new_file", ["plugin/json.py", "Plugin/Json.py", "plugin/änderung.py",
+                                      "hooks/mit leerzeichen.sh"])
+def test_main_counts_a_new_module_that_would_shadow_a_hook_import(repo, tmp_path, new_file):
+    work, base = repo
+    (work / new_file).parent.mkdir(parents=True, exist_ok=True)
+    (work / new_file).write_text("print('HIJACKED')\n", encoding="utf-8")
+    git(work, "add", "-A")
+    git(work, "commit", "-q", "-m", "shadow module")
+    assert gp.main(event(tmp_path, base, git(work, "rev-parse", "HEAD"), "no probe")) == 1
 
 
 def test_main_counts_a_guard_file_renamed_away(repo, tmp_path):
