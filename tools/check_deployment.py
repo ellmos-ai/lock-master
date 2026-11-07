@@ -43,9 +43,9 @@ Kopiert wird byteweise, nicht zeilenweise: so kommen die Zeilenenden der Quelle
 mit und der CRLF-Drift verschwindet, den eine robocopy-Spiegelung hinterlaesst.
 
 Aufruf:
-    python bin/check_deployment.py <zielordner>
-    python bin/check_deployment.py <zielordner> --json
-    python bin/check_deployment.py <zielordner> --apply [--force] [--dry-run]
+    python tools/check_deployment.py <zielordner>
+    python tools/check_deployment.py <zielordner> --json
+    python tools/check_deployment.py <zielordner> --apply [--force] [--dry-run]
 
 Exit 0 = Deploy entspricht dem Klon (bzw. --apply hat ihn hergestellt).
 Exit 1 = mindestens eine Datei weicht ab oder fehlt (Drift).
@@ -143,7 +143,7 @@ def main(argv: list[str]) -> int:
     dry_run = "--dry-run" in argv
     if len(args) != 1:
         print(__doc__.strip().splitlines()[0])
-        print("Aufruf: python bin/check_deployment.py <zielordner> "
+        print("Aufruf: python tools/check_deployment.py <zielordner> "
               "[--json] [--apply [--force] [--dry-run]]")
         return 2
     if force and not do_apply:
