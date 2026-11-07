@@ -45,7 +45,7 @@ then relies on the fence check above.
   `agent`; `queue=true` to wait in line) and release it when done (`board_release`; session end does it too). The hook
   denies edits to files another agent has claimed and names the holder and your place in the queue: leave a note, wait
   or ask the user, do not edit around it. A claim is a signal between cooperating agents, not a security boundary.
-- **Leases (optional preview, only when `ELLMOS_LOCK_LEASES` is set; needs the not yet published `roshambo` package):** each edit takes a short per-file lease for this session, shared across
+- **Leases (optional preview, only when the plugin option `lease_store` or `ELLMOS_LOCK_LEASES` is set; needs the not yet published `roshambo` package):** each edit takes a short per-file lease for this session, shared across
   computers through the configured store. A denied edit names the session that holds the lease: wait for it to end
   or ask the user, do not edit the file another way.
 

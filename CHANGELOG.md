@@ -7,6 +7,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (1.8.3 - 2026-11-07)
+
+- **Plugin option `lease_store` (`userConfig`, `sensitive: true`).** The lease-store URL can hold a database password,
+  so Claude Code now asks for it when the plugin is enabled and keeps it in the system's credential store instead of
+  an environment variable. The hook reads it as `CLAUDE_PLUGIN_OPTION_LEASE_STORE` through the new `lease_url()`;
+  `ELLMOS_LOCK_LEASES` still works when the option is empty, and the option wins when both are set. Leaving it empty
+  keeps leases off as before. Raised by the Claude directory review of 1.8.1 ("Uses a credential from the user's
+  machine"). Tests: option before variable, fallback, fail-closed without `roshambo`, password scrubbed from errors.
+
+### Fixed (1.8.3 - 2026-11-07)
+
+- **Lease tests were order dependent.** `test_configured_leases_without_roshambo_fail_closed` blocked only the
+  `roshambo` package; once an earlier test had imported the real `roshambo.lease_store`, the import still succeeded.
+  It now blocks the submodule too. The plugin test fixtures also clear the new option variable.
+
 ### Changed (1.8.2 - 2026-11-07)
 
 - **`check_deployment.py` moved from `bin/` to `tools/`.** It is a maintainer tool that compares a partial deploy of
