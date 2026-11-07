@@ -34,7 +34,9 @@ the project, readable by every agent and every human.
 Each session has a name, `claude-code@<HOST>.<sid8>`, given in the SessionStart context. Create locks with it as
 `--owner`: such a lock is yours alone, parallel sessions of the host are held off. A lock whose `owner` is only
 `claude-code@<HOST>` (or a prefix in `ELLMOS_LOCK_OWNER`) is shared by all Claude Code sessions of the host; the hook
-then relies on the fence check above.
+then relies on the fence check above. Subagents and teammates share the lead's session id and thus its session name;
+a delegated worker therefore locks as `<spawn name>@<HOST>` (e.g. `opus-worker-o1@ASUS-GEI`), which only that worker
+owns (fence-checked; actor names are reserved).
 
 ## Team board and leases
 

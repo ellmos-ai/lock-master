@@ -649,6 +649,21 @@ but a guard hook present" as its own outcome (exit 2).
    no protection against a second creator in the same moment, and no number by
    which a displaced holder can tell it lost the lock. The template stays the
    field reference; it is not a creation procedure.
+
+   **Which `--owner` the Claude Code hook counts as yours** (plugin `lock_guard.py`):
+
+   | Owner form | Own for | Fence check |
+   |---|---|---|
+   | `claude-code@<HOST>.<sid8>` (session name) | the session **and all its subagents/teammates** (they share the lead's session id) | no |
+   | `claude-code@<HOST>` or `claude-code@<HOST>:<anything>` | every Claude Code session of the host | yes |
+   | `<spawn name>@<HOST>` or `<spawn name>@<HOST>:<anything>` | only the delegated worker spawned with that name (hook payload carries `agent_id`; `agent_type` is the spawn name) | yes |
+
+   A delegated worker uses its spawn name, e.g. `--owner opus-worker-o1@ASUS-GEI`: the lead and the
+   sibling workers stay held off. Actor names (`claude-code`, `claude-desktop`, `codex`, `kimi`,
+   `antigravity`, `copilot`) are reserved and never become a worker owner. Residual risk: spawn names repeat
+   across sessions (and unnamed spawns all report their definition name, e.g. `general-purpose`), so the
+   form is trusted on first use like the actor prefix; give workers distinctive names.
+   [C 2026-11-07 T-20261107-958032576]
 3. **RELEASE:** delete the lock file you created when done. Active release
    by the creator is required; the 24h expiry is only a safety net for
    forgotten locks. If work takes longer, renew `created` so the lock does
