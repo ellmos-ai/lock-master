@@ -420,9 +420,19 @@ class _Lexer:
         """At `$` or a backtick. True only for a `$` that stays a literal character."""
         s, i = self.s, self.i
         nxt = s[i + 1:i + 2]
-        if s[i] == "`" or s.startswith("$((", i) or (not quoted and nxt in ("'", '"')):
-            raise _Unsupported("backticks, arithmetic or $'...' quoting")
-        if nxt == "(":
+        if s[i] == "`" or s.startswith("$((", i):
+            raise _Unsupported("backticks or arithmetic")
+        if not quoted and nxt == "'":  # $'...': escapes decoded at run time, so the text stays raw and not literal
+            end = i + 2
+            while end < len(s) and s[end] != "'":
+                end += 2 if s[end] == "\\" else 1
+            if end >= len(s):
+                raise _Unsupported("unterminated $'...'")
+            out.append(s[i + 2:end])
+            self.i = end + 1
+        elif not quoted and nxt == '"':  # $"...": a translated "...", the quotes follow
+            self.i += 1
+        elif nxt == "(":
             self.i += 2
             subs.append(self.script(closer=True))
             out.append("$(...)")
@@ -474,10 +484,11 @@ def _kind(cmd: _Cmd) -> tuple[int, str | None, int | None, list[str] | None, str
             chain = chain + [words[i + 1]] if plain and chain is not None else None
             i += 2 if words[i] in GIT_VALUE_OPTIONS else 1
         sub = i if i < len(words) else None
-        if sub is not None and words[sub].lower() == "push":
-            return h, name, sub, chain, "push"
+        if sub is not None and (words[sub].lower() == "push" or not cmd.literal[sub]):
+            return h, name, sub, chain, "push"  # a subcommand only known at run time (p{u..u}sh, $x$y) may be push
     bare = not any(ch in words[h] for ch in "/\\")  # ./cat or /tmp/x/cat can be any script
-    if bare and (name in DATA_COMMANDS
+    assigns = name == "printf" and any(w.startswith("-v") for w in words[h + 1:])  # printf -v stores it in a variable
+    if bare and not assigns and (name in DATA_COMMANDS
                  or (name == "git" and chain is not None and sub is not None and cmd.literal[sub]
                      and words[sub] in GIT_DATA)
                  or (name == "gh" and h + 1 < len(words) and cmd.literal[h + 1] and words[h + 1] in GH_DATA)):
@@ -540,10 +551,8 @@ def _check(cmds: list[_Cmd], cwd: Path, top: bool, f: dict) -> None:
             bad = False
             for i, (word, subs) in enumerate(zip(cmd.words, cmd.subs)):
                 for inner in subs:
-                    if safe and i > h:
-                        _check(inner, here, False, f)
-                    else:
-                        bad = bad or _tree_mentions(inner)
+                    _check(inner, here, False, f)  # a push inside, also one with a run-time subcommand
+                    bad = bad or (not (safe and i > h) and _tree_mentions(inner))
                 bad = bad or (_mentions(word) and not (i > h and (safe or kind == "cd")))
             bad = bad or any(_mentions(t) and not (safe or op in FILE_WRITES or op == ">&") for op, t in cmd.redirects)
             bad = bad or any(_mentions(text) and not (safe and not (live and any(x in text for x in LIVE)))
@@ -578,19 +587,24 @@ def push_dirs(command: str, cwd: Path) -> list[Path]:
     and `2>&1` are fine), or as data no command runs. Whatever is not proven -- subshells, `||`, `&`, assignments,
     other git global options, wrappers, interpreters, a shell reading a heredoc or a pipe, a text written to a file
     and a command that could run that file -- turns the result into UNRESOLVED, which the hook denies. Paths may be
-    written as `C:/...`, as Git Bash `/c/...` or quoted as `"C:\\..."`; unquoted backslashes are removed by bash."""
-    if not _mentions(command):
+    written as `C:/...`, as Git Bash `/c/...` or quoted as `"C:\\..."`; unquoted backslashes are removed by bash.
+
+    A command that says `git` but not push is split as well, for one rule only: a git call whose subcommand word is
+    known only at run time (`git p{u..u}sh`, `git $x$y`, `git pu$(echo s)h`) may be a push and is UNRESOLVED. What
+    such a command does not let the lexer split (backticks, arithmetic) is not checked, as before."""
+    pushy = _mentions(command)
+    if not (pushy or "git" in MENTION_NOISE.sub("", command).lower()):
         return []
     lexer = _Lexer(command)
     try:
         cmds = lexer.script()
-    except _Unsupported:
-        return [UNRESOLVED]
-    f = {"found": [], "wrote": False, "odd": lexer.odd}
-    _check(cmds, Path(cwd), True, f)
-    found = f["found"]
-    if (f["wrote"] and not _inert(cmds)) or not (lexer.comments or _tree_mentions(cmds)):
-        found.append(UNRESOLVED)  # the second: the letters are there but no word carries them -- not understood
+        f = {"found": [], "wrote": False, "odd": lexer.odd}
+        _check(cmds, Path(cwd), True, f)
+        found = f["found"]
+        if pushy and ((f["wrote"] and not _inert(cmds)) or not (lexer.comments or _tree_mentions(cmds))):
+            found.append(UNRESOLVED)  # the second: the letters are there but no word carries them -- not understood
+    except (_Unsupported, RecursionError):  # RecursionError: $(...) nested hundreds of levels deep
+        return [UNRESOLVED] if pushy else []
     return [UNRESOLVED] if UNRESOLVED in found or (found and f["odd"]) else found
 
 

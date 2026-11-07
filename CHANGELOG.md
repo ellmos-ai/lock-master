@@ -39,13 +39,24 @@ removes unquoted backslashes, so `cd C:\x\repo ; git push` runs `cd C:xrepo`, fa
 (measured with Git Bash 5.3) - the first version read the Windows path and allowed it. All 47 are regression tests
 (`test_probe_case`); a differential run of 62 further commands against Git Bash found no push the hook allows.
 
+The second round of the probe (36 more cases) found one more: `printf -v c 'git -C L push'; $c` - `printf -v` stores
+the text in a variable the next command runs, so `printf` counts as data only without `-v` (no other data command can
+assign; `read`, `mapfile`, `declare`, `export`, `local`, `eval` never were data). It also showed pushes spelled
+without the letters, open on `main` too: `git p{u..u}sh`, `git pu$'\x73'h`, `git pu$(echo s)h`, `x=pu; y=sh; git $x$y`.
+These are closed now: a command that says `git` is split as well, and a git call whose subcommand word is known only
+at run time (variable, `$(...)`, brace, glob, `$'...'`) counts as a possible push - also inside `$(...)`. All 83 cases
+of round 2 are tests; the differential run against Git Bash has 77 commands now, again with no push the hook allows.
+Deep `$(...)` nesting fails closed when the text says push and is not checked otherwise.
+
 Known false alarms, kept on purpose (rewrite the command, or write files with the Write tool): text an interpreter
-or shell may run (`python -c "print('git push')"`, `python - <<PY ... PY`, `python t.py "git push"`), unquoted
-backslash paths (quote them or use `/`), `$(...)` or variables in a push command, `git push --dry-run`, an assignment
-before `cd`, `||`, `&` and subshells next to a push, `git grep -O` (runs its value). Out of reach, as before: a push
-spelled without the letters (a variable, a git alias in the config, a script file run in a later command). Takes
-effect with the next plugin release. Question left open: the hook does not match the PowerShell tool (see the pull
-request).
+or shell may run (`python -c "print('git push')"`, `python - <<PY ... PY`, `python t.py "git push"`), `printf -v`
+with a push text, unquoted backslash paths (quote them or use `/`), `$(...)` or variables in a push command, a git
+subcommand from a variable or expansion (`git $SUB`, `git "$@"`, `git ${GIT_OPTS} status`, `git p[u]sh`) - denied in
+every repository, `git push --dry-run` from a locked repository, an assignment before `cd`, `||`, `&` and subshells
+next to a push, `git grep -O` (runs its value). Out of reach, as before (strict `xfail` tests): a push whose text
+says neither push nor has a git call with a run-time subcommand - the command word from variables too, backticks, a
+file written in two steps and run, a git alias in the config, a script file run in a later command. Takes effect
+with the next plugin release. Question left open: the hook does not match the PowerShell tool (see the pull request).
 
 ## [1.9.0] - 2026-11-07
 

@@ -283,11 +283,46 @@ def test_text_that_mentions_a_push_is_not_a_push(project, cmd):
     "echo 'git push' > x.sh; X=$(sh x.sh)",
     "cat <<EOF\n$(git push)\nEOF",
     "./cat 'git push'",
+    # builtins that store text in a variable a later command runs (printf -v is the only one among DATA_COMMANDS)
+    "printf -v c 'git push'; $c", "printf -vc 'git push'; $c", "printf -v c '%s' 'git push'",
+    "read c <<< 'git push'; $c", "readarray -t a <<< 'git push'", "mapfile a <<< 'git push'",
+    "declare c='git push'; $c", "typeset c='git push'", "export c='git push'", "local c='git push'",
+    "eval 'git push'", "c='git push'; $c",
 ])
 def test_text_a_program_may_run_is_not_proven_data(project, cmd):
     """Deliberate false alarms: an interpreter, a shell or a later command may run the text, so it is denied (as on
     main). Rewrite the command, e.g. write the file with the Write tool."""
     assert lock_guard.push_dirs(cmd, project) == [lock_guard.UNRESOLVED], cmd
+
+
+def test_printf_without_v_is_still_data(project):
+    assert lock_guard.push_dirs("printf '%s\\n' 'git push later' >> notes.md", project) == []
+
+
+def test_deep_nesting_fails_closed_only_with_a_push(project):
+    def nest(inner: str) -> str:
+        return "echo " + "$(echo " * 1500 + inner + ")" * 1500
+    assert lock_guard.push_dirs(nest("git push"), project) == [lock_guard.UNRESOLVED]
+    assert lock_guard.push_dirs(nest("git status"), project) == []
+
+
+@pytest.mark.parametrize("cmd", [
+    "git $SUB", 'git "$@"', "git ${CMD:-status}", "git $(cat cmd.txt) origin", "git -C . p{u..u}sh",
+    "git pu$'\\x73'h", "git pu$(echo s)h", "x=pu; y=sh; git $x$y", 'echo "$(git $x)"', 'cd "$(git -C . $x)"',
+])
+def test_git_with_a_run_time_subcommand_is_unresolved(project, cmd):
+    """The subcommand word is only known when bash runs it, so it may be push even though the text never says so."""
+    assert lock_guard.push_dirs(cmd, project) == [lock_guard.UNRESOLVED], cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    'git -C "$DIR" status', 'git commit -m "$MSG"', 'git log --format="$FMT" -n 3', "git -C ~/repo status",
+    'cd "$(git rev-parse --show-toplevel)"', "echo `git rev-parse HEAD`", "echo $HOME && git status",
+    "printf '%s' $'tab\\there'", 'echo $"text"',
+])
+def test_git_with_a_literal_subcommand_stays_unchecked(project, cmd):
+    """No push in the text and every git subcommand literal: not a push, whatever the arguments expand to."""
+    assert lock_guard.push_dirs(cmd, project) == [], cmd
 
 
 def test_a_commented_commit_and_push_chain_resolves(project):
@@ -375,6 +410,55 @@ PROBE = [
     ("unquoted backslash path: bash drops the backslashes, the cd fails, the push runs in {L}",
      "cd {L} && cd {Fbs} ; git push", "deny"),
     ("a script written and run in the same command", 'echo "git -C {L} push" > x.sh; sh x.sh', "deny"),
+    # round 2 of the probe (issue comment 6712598000, its names)
+    ("three open items of main: backslash-newline before push", "git -C {L} \\\npush", "deny"),
+    ("round 2: variable as command word", "G=git; $G -C {L} push", "deny"),
+    ("round 2: git subtree push", "git -C {L} subtree push --prefix=x origin main", "deny"),
+    ("printf -v assigns a command that is then run", "printf -v c 'git -C {L} push'; $c", "deny"),
+    ("read from here-string then run", 'read c <<< "git -C {L} push"; $c', "deny"),
+    ("mapfile from here-string then run", 'mapfile -t a <<< "git -C {L} push"; "${{a[@]}}"', "deny"),
+    ("tee to stderr then sh", 'echo "git -C {L} push" | tee /dev/stderr | sh', "deny"),
+    ("data written to a file then sourced", "echo 'git -C {L} push' > /tmp/lm45_x.sh; . /tmp/lm45_x.sh", "deny"),
+    ("heredoc written to file then run", "cat > /tmp/lm45_y.sh <<EOF\ngit -C {L} push\nEOF\nbash /tmp/lm45_y.sh",
+     "deny"),
+    ("command substitution as command word", "$(echo git -C {L} push)", "deny"),
+    ("command substitution as argument of echo is still a push", "echo $(git -C {L} push)", "deny"),
+    ("array assignment then run", 'c=(git -C {L} push); "${{c[@]}}"', "deny"),
+    ("function definition", "f() {{ git -C {L} push; }}; f", "deny"),
+    ("alias via config then use", "git config alias.x push; git -C {L} x", "deny"),
+    ("GIT_CONFIG_COUNT alias", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=push git -C {L} x",
+     "deny"),
+    ("exec wrapper", "exec git -C {L} push", "deny"),
+    ("time keyword", "time git -C {L} push", "deny"),
+    ("negation", "! git -C {L} push", "deny"),
+    ("case statement", "case x in x) git -C {L} push;; esac", "deny"),
+    ("push with receive-pack", "git -C {L} push --receive-pack='sh -c true' origin main", "deny"),
+    ("push piped from data", "echo x | git -C {L} push", "deny"),
+    ("push after redirect to file", "git -C {L} push > /tmp/lm45_out.txt", "deny"),
+    ("mixed case subcommand", "git -C {L} PUSH", "deny"),
+    ("brace sequence p{{u..u}}sh", "git -C {L} p{{u..u}}sh", "deny"),
+    ("ANSI-C quoting pu$'\\x73'h", "git -C {L} pu$'\\x73'h", "deny"),
+    ("command substitution inside the word", "git -C {L} pu$(echo s)h", "deny"),
+    ("two variables", "x=pu; y=sh; git -C {L} $x$y", "deny"),
+    ("ALLOW commit with heredoc message mentioning push",
+     "git commit -m \"$(cat <<'EOF'\nfix: handle git push on worktrees\nEOF\n)\"", "allow"),
+    ("ALLOW commit -F - heredoc", "git commit -F - <<'EOF'\nmessage that says git push\nEOF", "allow"),
+    ("ALLOW gh pr create with heredoc body",
+     "gh pr create --title t --body \"$(cat <<'EOF'\nRun git push first.\nEOF\n)\"", "allow"),
+    ("ALLOW grep for push in a log", "git log --oneline | grep push", "allow"),
+    ("ALLOW echo text to a notes file", "echo 'remember to git push' > notes.txt", "allow"),
+    ("ALLOW push with refspec and 2>&1 | tail", "git push origin main 2>&1 | tail -3", "allow"),
+    ("ALLOW -C free repo", "git -C {F} push", "allow"),
+    ("ALLOW cd free && push", "cd {F} && git push origin HEAD", "allow"),
+    ("ALLOW commit then push in free repo", "git commit -qm x --allow-empty && git push", "allow"),
+    ("ALLOW two-line command", "git status\ngit push", "allow"),
+    ("push --dry-run from the free repository (nothing is pushed, and not from {L})", "git push --dry-run", "allow"),
+]
+PROBE_GAPS = [  # out of reach, as on main: no word says push, and no git call has a run-time subcommand word
+    ("file written in two steps then run",
+     "echo -n 'git -C {L} pu' > /tmp/lm45_z.sh; echo 'sh' >> /tmp/lm45_z.sh; sh /tmp/lm45_z.sh", "deny"),
+    ("the command word from variables too", "x=pu; y=sh; g=git; $g -C {L} $x$y", "deny"),
+    ("backticks inside the subcommand", "git -C {L} pu`echo s`h", "deny"),
 ]
 
 
@@ -392,8 +476,7 @@ def probe_repos(project):
     return locked, free, link
 
 
-@pytest.mark.parametrize("name,template,expected", PROBE, ids=[case[0] for case in PROBE])
-def test_probe_case(probe_repos, name, template, expected):
+def probe_verdict(probe_repos, template: str) -> str:
     locked, free, link = probe_repos
     if "{LINK}" in template and link is None:
         pytest.skip("no symlink privilege")
@@ -402,8 +485,18 @@ def test_probe_case(probe_repos, name, template, expected):
                           Fbs=backslashed)
     out = lock_guard.pretooluse({"tool_name": "Bash", "cwd": str(free), "session_id": "probe-session",
                                  "tool_input": {"command": cmd}})
-    got = "deny" if out and out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny" else "allow"
-    assert got == expected, cmd
+    return "deny" if out and out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny" else "allow"
+
+
+@pytest.mark.parametrize("name,template,expected", PROBE, ids=[case[0] for case in PROBE])
+def test_probe_case(probe_repos, name, template, expected):
+    assert probe_verdict(probe_repos, template) == expected, template
+
+
+@pytest.mark.xfail(strict=True, reason="out of reach, as on main: the command never says push")
+@pytest.mark.parametrize("name,template,expected", PROBE_GAPS, ids=[case[0] for case in PROBE_GAPS])
+def test_probe_gap(probe_repos, name, template, expected):
+    assert probe_verdict(probe_repos, template) == expected, template
 
 
 # --- optional leases (roshambo) and the team board -------------------------------------------------------------
