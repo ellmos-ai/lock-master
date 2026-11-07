@@ -3,7 +3,7 @@
 > **Kanonisch ist diese Datei im Repo** `ellmos-ai/lock-master` als
 > `LOCK-SYSTEM_de.md`; die Fassung unter `<OneDrive>/_scripts/LOCK-SYSTEM.md` ist ihre
 > **Deploy-Kopie**. Änderungen gehören in den Klon und werden von dort deployt
-> (`bin/check_deployment.py <zielordner>` meldet Abweichung). Wer stattdessen die
+> (`tools/check_deployment.py <zielordner>` meldet Abweichung). Wer stattdessen die
 > Deploy-Kopie bearbeitet, baut die Gabelung wieder auf, die T-20260913-633163908
 > aufgelöst hat — damals waren beide Fassungen so weit auseinander, dass jede Regeln
 > trug, die der anderen fehlten. **Englische Fassung:** `LOCK-SYSTEM.md` im selben Repo

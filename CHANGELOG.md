@@ -7,7 +7,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+### Changed (1.8.2 - 2026-11-07)
+
+- **`check_deployment.py` moved from `bin/` to `tools/`.** It is a maintainer tool that compares a partial deploy of
+  this clone (on our system `<OneDrive>/_scripts`) with its manifest; plugin users never run it. In a Claude Code plugin
+  `bin/` is the folder for programs the plugin ships to users, so the file was listed as a shipped executable in the
+  Claude directory review of 1.8.1. Call it now as `python tools/check_deployment.py <target>`.
+
+### Added (1.8.2 - 2026-11-07)
 
 - **Twin status `pointer-dataless`.** A mirror `REPO.pointer.json` that is a cloud placeholder (macOS `SF_DATALESS`,
   read fails with `EDEADLK`; Windows recall/offline attributes) no longer hides behind the generic `index-unresolved`
