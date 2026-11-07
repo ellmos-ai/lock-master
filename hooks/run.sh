@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts plugin/lock_guard.py (modes pretooluse|session|sessionend) or, for mode `mcp`, the team-board MCP server
+# Starts plugin/lock_guard.py (modes pretooluse|session|sessionend|subagent) or, for mode `mcp`, the team-board MCP server
 # plugin/board_mcp.py, with a real Python 3 interpreter.
 # On Windows, `python3` can be the Microsoft Store placeholder, so `py -3` is tried first
 # and every candidate must actually run before it is used.

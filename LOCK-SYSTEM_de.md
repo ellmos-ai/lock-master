@@ -730,6 +730,14 @@ Neue Pipelines dürfen das Muster übernehmen, wenn Teamarbeit mehr braucht als 
    ein abgelöster Halter merkt, dass er die Sperre verlor. Die Vorlage bleibt die
    Feldreferenz; sie ist kein Anlegeverfahren.
    [C 2026-09-20 T-20260920-699139879]
+
+   **Owner für einen delegierten Claude-Code-Worker** (Subagent oder In-process-Teammate): Worker teilen die
+   Sitzungs-ID des Leads, der Sitzungsname `claude-code@<HOST>.<sid8>` gehört also dem Lead und allen seinen
+   Workern. Den eigenen Lock eines Workers setzt man mit `--owner <Sitzungsname>:<agent_id>`. Den Wert teilt
+   der Plugin-Hook dem Worker bei SubagentStart mit und nennt ihn zusätzlich in jeder Ablehnung. Als eigen
+   wertet der Hook diesen Owner nur bei exakter Übereinstimmung, ohne Präfix und ohne Vertrauensvorschuss
+   beim ersten Zugriff. Ohne `agent_id` im Hook-Payload ist er fremd wie jeder andere Owner.
+   [C 2026-11-07 T-20261107-958032576]
 3. **FREIGEBEN:** die selbst angelegte Lock-Datei am Ende **selbst löschen**. Aktives Freigeben durch den Ersteller ist Pflicht; der 24h-Verfall ist nur ein **Sicherheitsnetz** für vergessene Locks. Bei langer Laufzeit `created` erneuern, damit die Sperre nicht vorzeitig verfällt.
 
 ---

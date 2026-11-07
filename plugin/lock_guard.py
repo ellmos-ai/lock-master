@@ -8,6 +8,8 @@ Modes (first argument):
                  messages of this host's team locks, and name this session.
   sessionend  -- release this session's leases (only when leases are on), its
                  team-board claims and its fence memory.
+  subagent    -- (SubagentStart) tell a delegated worker the owner name of its
+                 own locks, `<session name>:<agent_id>` (see worker_owner()).
   (--actor <name> after the mode: claude-code (default), codex or kimi. Other
    actors than claude-code get a denial as exit code 2 plus the reason on stderr,
    which is the contract Codex and Kimi Code both honour.)
@@ -34,7 +36,11 @@ the host, so it is fence-checked: the first time a session relies on such a lock
 the hook remembers its fence number; if the lock later carries another one (or
 none, or the file was restored), the grant moved on -- possibly to a parallel
 session with the same owner string -- and the lock is no longer treated as the
-session's own (lu.fence_status, fail-closed). Team locks of the same host are shared
+session's own (lu.fence_status, fail-closed). Subagents and in-process teammates
+share the lead's session id and so its session name; a delegated worker's own lock
+is owned by exactly `<session name>:<agent_id>` (worker_owner(): the documented
+unique `agent_id` of the payload, narrow ASCII charset, exact case-folded match, no
+prefix, no fence trust). Without `agent_id` no worker owner exists. Team locks of the same host are shared
 by that host's agents; inside them a file claim (`EDITING`) held by another agent
 name denies edits to the claimed path. User and until locks block always; condition
 locks block only the operations they name.
@@ -110,6 +116,23 @@ def owner_prefixes() -> list[str]:
     return prefixes or [f"{actor()}@{host_token().lower()}"]
 
 
+AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")  # used with fullmatch: no ':', whitespace, control or non-ASCII
+
+
+def worker_owner(payload: dict) -> str | None:
+    """`<session name>:<agent_id>` inside a subagent or in-process teammate, else None.
+
+    Claude Code documents `agent_id` as the unique identifier of the subagent or teammate a hook fires in
+    (`agent_type` only names the agent's type, so it is no identity). Workers share the lead's session id, so the
+    session name alone cannot tell them apart; the pair can, and it is unique per session: a worker spawned anew,
+    even under the same name, gets another agent_id. The charset is narrow because the owner ends up in a
+    `key: value` line of a lock file. Anything unusable yields None, i.e. the behaviour without workers."""
+    name, agent_id = session_name(payload), payload.get("agent_id")
+    if not name or not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id):
+        return None
+    return f"{name}:{agent_id}"
+
+
 def session_name(payload: dict) -> str | None:
     """`<actor>@<HOST>.<sid8>`: one name per agent session, usable as lock owner and team-board agent name
     (no `:`; the team-lock agent grammar is [A-Za-z0-9_.@+-]). None when the payload has no session id."""
@@ -131,6 +154,7 @@ class Session:
 
     def __init__(self, payload: dict):
         self.name = session_name(payload)
+        self.worker = worker_owner(payload)
         sid = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("session_id") or ""))[:64]
         self.file = state_dir() / f"{sid}.json" if sid else None
         self.fences: dict[str, int | None] = {}
@@ -294,9 +318,14 @@ def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Se
         return "other-operation"
     if lu.is_condition_lock(lock_path, data):
         return "block"
-    owner = (data.get("owner") or "").lower()
+    raw_owner = data.get("owner") or ""
+    owner = raw_owner.lower()
     if session is not None and session.name and owner == session.name.lower():
-        return "own"  # the session's own name cannot be anybody else's: nothing to fence
+        # No other session carries this name: nothing to fence. Its subagents and teammates do, though (they share
+        # the lead's session id); a worker's lock of its own is owned by `<session name>:<agent_id>`, below.
+        return "own"
+    if session is not None and session.worker and raw_owner.isascii() and owner == session.worker.lower():
+        return "own"  # exactly this worker of this session; isascii: no Unicode case folding onto ASCII (K -> k)
     is_team = lu.is_team_lock(lock_path.name) and (lu.lock_host(lock_path) or "").upper() == host
     if any(owner == p or owner.startswith(p + ":") for p in prefixes):
         if is_team:
@@ -520,12 +549,16 @@ def pretooluse(payload: dict) -> dict | None:
             reason = (f"lock-master: a foreign active lock covers this {what} {path}. "
                       "Do not work around it; coordinate with the holder or the user. "
                       + " | ".join(describe(h) for h in hits))
+            if sess.worker:  # fallback in case the SubagentStart hook did not run
+                reason += (f" This area is not yours. For areas nobody holds, create your own locks as this worker "
+                           f"with --owner {sess.worker}.")
             moved = [sess.lost[Session.key(h)] for h in hits if Session.key(h) in sess.lost]
             if moved:
                 reason += (f" -- fencing: {clean(moved[0], 300)}. This lock carried the grant your session relied on "
                            "earlier and has been granted anew since. If you re-created it yourself, release it and "
                            "set it again with /lock (named after your session, so it stays yours"
-                           + (f": {sess.name}" if sess.name else "") + "); otherwise another session took the area.")
+                           + (f": {sess.worker or sess.name}" if sess.worker or sess.name else "")
+                           + "); otherwise another session took the area.")
             return deny(reason)
         if op != "edit":
             continue
@@ -634,7 +667,19 @@ def session_end(payload: dict) -> None:
     return None
 
 
-MODES = {"pretooluse": pretooluse, "session": session, "sessionend": session_end}
+def subagent(payload: dict) -> dict | None:
+    """SubagentStart: one line naming the worker's own owner. Pure function of the payload -- no files, no
+    network -- so firing again on resume and on every teammate message repeats the same text, which Claude Code
+    does not inject a second time. No agent_id: nothing to say, the worker keeps the plain session rules."""
+    owner = worker_owner(payload)
+    if not owner:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": (
+        f"lock-master: as this worker, create your own locks with --owner {owner} (yours alone: the lead and the "
+        "other workers of this session are held off).")}}
+
+
+MODES = {"pretooluse": pretooluse, "session": session, "sessionend": session_end, "subagent": subagent}
 
 
 def main(argv: list[str]) -> int:
