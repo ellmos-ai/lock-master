@@ -27,6 +27,8 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("COMPUTERNAME", "TESTHOST")
     monkeypatch.delenv("ELLMOS_LOCK_OWNER", raising=False)
     monkeypatch.delenv("ELLMOS_LOCK_ACTOR", raising=False)
+    monkeypatch.delenv("ELLMOS_LOCK_LEASES", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_LEASE_STORE", raising=False)
     monkeypatch.setenv("ELLMOS_LOCK_STATE_DIR", str(tmp_path / "_state"))
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
@@ -196,6 +198,7 @@ def edit_as(path: Path, session_id: str) -> dict:
 
 def test_leases_are_off_without_url(monkeypatch):
     monkeypatch.delenv("ELLMOS_LOCK_LEASES", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_LEASE_STORE", raising=False)
     assert lock_guard.lease_store() is None
 
 
@@ -235,6 +238,7 @@ def test_session_end_releases_leases(project, leases):
 def test_configured_leases_without_roshambo_fail_closed(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("ELLMOS_LOCK_LEASES", f"sqlite:///{tmp_path / 'l.db'}")
     monkeypatch.setitem(sys.modules, "roshambo", None)  # import fails as if not installed
+    monkeypatch.setitem(sys.modules, "roshambo.lease_store", None)  # also when a test imported it before
     monkeypatch.delenv("ELLMOS_LOCK_FAIL_OPEN", raising=False)
     payload = json.dumps({**edit(tmp_path / "x.py"), "session_id": "s1"})
     monkeypatch.setattr(sys, "stdin", type("S", (), {"read": staticmethod(lambda: payload)})())
@@ -387,5 +391,32 @@ def test_fail_closed_message_never_shows_the_lease_store_url(project, monkeypatc
 
 def test_password_alone_or_decoded_is_scrubbed(monkeypatch):
     monkeypatch.setenv("ELLMOS_LOCK_LEASES", "postgresql://u:s%40cret@db.example/x")
+    text = lock_guard._without_dsn(RuntimeError("auth failed for password s@cret (raw s%40cret)"))
+    assert "s@cret" not in text and "s%40cret" not in text and "<password>" in text
+
+
+def test_plugin_option_names_the_lease_store_before_the_env_variable(monkeypatch):
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", "sqlite:///env.db")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LEASE_STORE", " sqlite:///option.db ")
+    assert lock_guard.lease_url() == "sqlite:///option.db"
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LEASE_STORE", "")  # option left empty: the variable still works
+    assert lock_guard.lease_url() == "sqlite:///env.db"
+    monkeypatch.delenv("ELLMOS_LOCK_LEASES")
+    assert lock_guard.lease_url() == "" and lock_guard.lease_store() is None
+
+
+def test_lease_store_from_plugin_option_without_roshambo_fails_closed(monkeypatch, capsys, tmp_path):
+    monkeypatch.delenv("ELLMOS_LOCK_LEASES", raising=False)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LEASE_STORE", f"sqlite:///{tmp_path / 'l.db'}")
+    # both entries: an earlier test may already have imported the real roshambo.lease_store
+    monkeypatch.setitem(sys.modules, "roshambo", None)
+    monkeypatch.setitem(sys.modules, "roshambo.lease_store", None)
+    out = run_main(monkeypatch, capsys, {**edit(tmp_path / "x.py"), "session_id": "s1"})
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_password_from_plugin_option_is_scrubbed(monkeypatch):
+    monkeypatch.delenv("ELLMOS_LOCK_LEASES", raising=False)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_LEASE_STORE", "postgresql://u:s%40cret@db.example/x")
     text = lock_guard._without_dsn(RuntimeError("auth failed for password s@cret (raw s%40cret)"))
     assert "s@cret" not in text and "s%40cret" not in text and "<password>" in text

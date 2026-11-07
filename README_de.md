@@ -15,7 +15,7 @@
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Auditiert](https://img.shields.io/badge/Third--Party-Auditiert%20%7C%20100%25%20Permissiv-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-aktiv-blue.svg)](MARKETING-LOG.txt)
-[![Version 1.8.1](https://img.shields.io/badge/Version-1.8.1-informational.svg)](VERSION)
+[![Version 1.8.3](https://img.shields.io/badge/Version-1.8.3-informational.svg)](VERSION)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
 [![Mitwirken: Willkommen](https://img.shields.io/badge/Mitwirken-Willkommen-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexierung](https://img.shields.io/badge/llms.txt-indexiert-purple.svg)](llms.txt)
@@ -408,7 +408,7 @@ Warum hook-master `PreToolUse` aus seinen Standard-Bausteinen lässt, steht in d
 
 **Optionale Leases über Rechner hinweg (Vorschau, noch nicht öffentlich verfügbar):** Sie brauchen das Paket
 `roshambo`, das noch nicht veröffentlicht ist. Ohne `ELLMOS_LOCK_LEASES` ist davon nichts aktiv, und das Plugin
-verhält sich genau wie oben beschrieben. `ELLMOS_LOCK_LEASES` auf einen Lease-Store von ellmos-roshambo setzen
+verhält sich genau wie oben beschrieben. Den Lease-Store in der Plugin-Option `lease_store` eintragen (Claude Code fragt beim Aktivieren des Plugins danach und legt ihn im Anmeldeinformationsspeicher des Systems ab, weil eine Datenbank-URL ein Passwort enthalten kann) oder `ELLMOS_LOCK_LEASES` setzen; sind beide gesetzt, gilt die Option. Der Wert ist ein Lease-Store von ellmos-roshambo
 (`roshambo.lease_store`): `sqlite:///pfad/leases.db` für einen Rechner, `postgresql://...` für
 eine selbst gehostete Datenbank, die mehrere Rechner teilen. Dann nimmt jede Bearbeitung zusätzlich eine Lease je
 Datei für die Sitzung (`ELLMOS_LOCK_LEASE_TTL`, Standard 900 s, jede Bearbeitung der Datei verlängert sie). Eine

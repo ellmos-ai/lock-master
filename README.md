@@ -15,7 +15,7 @@
 [![Attribution: NOTICE](https://img.shields.io/badge/Attribution-NOTICE-blue.svg)](NOTICE)
 [![Third-Party Audited](https://img.shields.io/badge/Third--Party-Audited%20%7C%20100%25%20Permissive-success.svg)](THIRD_PARTY_LICENSES.md)
 [![Marketing Log](https://img.shields.io/badge/Marketing%20Log-active-blue.svg)](MARKETING-LOG.txt)
-[![Version 1.8.1](https://img.shields.io/badge/version-1.8.1-informational.svg)](VERSION)
+[![Version 1.8.3](https://img.shields.io/badge/version-1.8.3-informational.svg)](VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Contributing: Welcome](https://img.shields.io/badge/Contributing-Welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![LLM Indexing](https://img.shields.io/badge/llms.txt-indexed-purple.svg)](llms.txt)
@@ -407,7 +407,7 @@ Why hook-master leaves `PreToolUse` out of its default snippets is explained in 
 
 **Optional leases across computers (preview, not yet available to the public):** they need the `roshambo` package,
 which is not published yet. Without `ELLMOS_LOCK_LEASES` nothing of this is active and the plugin works exactly as
-described above. Set `ELLMOS_LOCK_LEASES` to a lease store of ellmos-roshambo (`roshambo.lease_store`): `sqlite:///path/leases.db` for one computer, `postgresql://...` for a
+described above. Enter the lease store in the plugin option `lease_store` (Claude Code asks for it when the plugin is enabled and keeps it in the system's credential store, because a database URL can hold a password), or set `ELLMOS_LOCK_LEASES`; the option wins when both are set. The value is a lease store of ellmos-roshambo (`roshambo.lease_store`): `sqlite:///path/leases.db` for one computer, `postgresql://...` for a
 self-hosted database that several computers share. Every edit then also takes a per-file lease for the session
 (`ELLMOS_LOCK_LEASE_TTL`, default 900 s, renewed by each edit of the file). An edit of a file whose lease another
 session holds is denied with holder, host and intent; the session's leases are released at session end. The key is
