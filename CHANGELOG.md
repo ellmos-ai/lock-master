@@ -7,6 +7,29 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (unreleased) - the push check no longer blocks worktree pushes or text that mentions a push
+
+T-20261107-349313698. The hook answered "could not resolve the repository of this git push" for pushes from
+worktrees and for commands that only contained the words. Root causes, measured with `push_dirs()`:
+
+- **The worktree was not the problem, the command parsing was.** A plain `git push` from a linked worktree resolved
+  and checked the main clone's locks correctly. What failed: `cd /c/_Local_DEV/worktrees/x && git push` and
+  `git -C /c/... push` (Git Bash drive paths do not exist for Windows Python; `-C` even led to a made-up
+  `C:\c\...` directory that no lock covers), unquoted Windows paths (`cd C:\...`, the shell lexer ate the
+  backslashes), a trailing `2>&1`, and a command spanning several lines.
+- **A push was found by text search** (`\bgit\b[^\n;&|]*\bpush\b`), so `echo "git push"`, a commit message, a heredoc
+  body, `git checkout -b fix/worktree-push-detection` or `git status | grep push` counted as a push and then failed
+  the allow-list.
+
+Now: a push is a `git [options] push` among the words of the shell command line (quoted arguments and heredoc bodies
+are data). Git Bash `/c/...` and Windows paths are understood, a newline separates commands, `2>&1` is allowed, and a
+`-C` directory that does not exist fails closed. Wrapped or nested forms (`xargs git push`, `find -exec`, `timeout`,
+`sudo`, `sh -c`, `cmd /c`, `powershell -c`, `eval`, `$(...)`, backticks, heredocs fed to a shell) are still found and
+still denied as unresolvable. A pipe, subshell or other redirection next to a real push still denies. Deliberate
+trade-off: a push hidden inside the string of an interpreter (`python -c "...git push..."`) is not detected any more -
+that is the text case the ticket asked to stop blocking; the hook never was a sandbox. Takes effect with the next
+plugin release. Question left open: the hook does not match the PowerShell tool (see the pull request).
+
 ### Added (1.8.3 - 2026-11-07)
 
 - **Plugin option `lease_store` (`userConfig`, `sensitive: true`).** The lease-store URL can hold a database password,

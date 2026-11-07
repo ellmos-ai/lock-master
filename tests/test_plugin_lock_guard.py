@@ -1,5 +1,6 @@
 """Tests for the Claude Code plugin hook plugin/lock_guard.py."""
 import json
+import os
 import subprocess
 import sys
 import time
@@ -160,6 +161,115 @@ def test_cumulative_dash_c(project):
 
 def test_plain_git_chain_with_push_resolves(project):
     assert lock_guard.push_dirs("git add . && git commit -m x && git push", project) == [project.resolve()]
+
+
+# --- T-20261107-349313698: worktree pushes and what counts as a push command --------------------------------------
+
+def git_run(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=str(cwd), check=True,
+                   capture_output=True, timeout=30)
+
+
+@pytest.fixture
+def clone_and_worktree(project):
+    """A real repository `clone` and a linked worktree `wt` next to it (the C:/_Local_DEV/worktrees layout)."""
+    clone, wt = project / "clone", project / "wt"
+    clone.mkdir()
+    git_run(clone, "init", "-q")
+    (clone / "f.txt").write_text("x", encoding="utf-8")
+    git_run(clone, "add", "f.txt")
+    git_run(clone, "commit", "-q", "-m", "init")
+    git_run(clone, "worktree", "add", "-q", "-b", "side", str(wt))
+    return clone, wt
+
+
+def spellings(path: Path) -> list[str]:
+    """The ways an agent writes a directory in a Bash command: native, forward slashes, Git Bash `/c/...`."""
+    forms = [f'"{path}"', path.as_posix()]
+    if os.name == "nt":
+        forms += [f"/{path.drive[0].lower()}{path.as_posix()[2:]}", str(path)]  # unquoted backslashes
+    return forms
+
+
+def bash(cmd: str, cwd: Path) -> dict:
+    return {"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": cmd}}
+
+
+def push_commands(wt: Path) -> list[str]:
+    cmds = ["git push", "git push -u origin HEAD", "git push origin side 2>&1"]
+    for form in spellings(wt):
+        cmds += [f"cd {form} && git push", f"git -C {form} push origin side", f"cd {form} && git push -u origin side 2>&1"]
+    return cmds
+
+
+def test_worktree_push_of_a_free_repository_is_allowed(project, clone_and_worktree):
+    clone, wt = clone_and_worktree
+    for cmd in push_commands(wt):
+        cwd = wt if cmd.startswith("git push") else project  # plain pushes run inside the worktree
+        assert not denied(bash(cmd, cwd)), cmd
+
+
+def test_worktree_push_is_denied_by_a_lock_in_the_main_clone(project, clone_and_worktree):
+    clone, wt = clone_and_worktree
+    write_lock(clone, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
+    for cmd in push_commands(wt):
+        cwd = wt if cmd.startswith("git push") else project
+        assert denied(bash(cmd, cwd)), cmd
+
+
+def test_worktree_push_is_denied_by_a_lock_in_the_worktree(project, clone_and_worktree):
+    clone, wt = clone_and_worktree
+    write_lock(wt, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
+    for cmd in push_commands(wt):
+        cwd = wt if cmd.startswith("git push") else project
+        assert denied(bash(cmd, cwd)), cmd
+
+
+def test_dash_c_to_a_missing_directory_fails_closed(project):
+    assert lock_guard.push_dirs("git -C does-not-exist push", project) == [lock_guard.UNRESOLVED]
+
+
+def test_stderr_to_stdout_redirect_keeps_the_target(project):
+    assert lock_guard.push_dirs("git push origin main 2>&1", project) == [project.resolve()]
+
+
+@pytest.mark.parametrize("cmd", [
+    'echo "git push"',
+    "python -c \"print('git push')\"",
+    "echo 'The hook blocks git push from worktrees' >> notes.md",
+    'gh issue create --title "t" --body "after git push the hook fails"',
+    'git commit -m "docs: explain git push in worktrees"',
+    "git checkout -b fix/worktree-push-detection",
+    "git log --grep=push",
+    "git status | grep push",
+    "cat <<'EOF' > ticket.md\nafter git push the hook fails\nEOF",
+    'python - <<PY\nopen("t.md", "w").write("git push")\nPY',
+    "python -c 'open(\"t.md\", \"w\").write(\"x\")'\npython t.py \"git push\"",
+])
+def test_text_that_mentions_a_push_is_not_a_push(project, cmd):
+    write_lock(project, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
+    assert lock_guard.push_dirs(cmd, project) == [], cmd
+    assert not denied(bash(cmd, project)), cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "git push", "cd . && git push", "echo a; git push", "git add .\ngit commit -m x\ngit push",
+    "/usr/bin/git push", '"git" push', "\\git push", "git pu''sh", "git.exe push", "GIT_DIR=/x git push",
+    "xargs git push", "find . -exec git push \\;", 'echo "$(git push)"', "echo `git push`", "echo $(git push)",
+    'bash -c "git push"', "eval 'git push'", "bash <<EOF\ngit push\nEOF", "time git push", "env -i git push",
+    "git push # why not",
+    # adversarial probe: wrappers, look-alike spellings, separators, nested shells, interpreters of a command line
+    "timeout 5 git push", "xargs /usr/bin/git push", "sudo -n git push", "nohup git push &", "false || git push",
+    "git status & git push", "{ git push; }", "if true; then git push; fi", "(git push)", "git\tpush", "git  push",
+    "git --no-pager push", "git -c a=b push", "git -C . -c a=b push", 'git "push"', "'git' 'push'", "GIT push",
+    "git push\r\n", "echo a\r\ngit push", "echo a &&\ngit push", "cmd /c \"git push\"", "powershell -c 'git push'",
+    "pwsh -Command \"cd x; git push\"", "sh -c 'echo a; git push'", 'bash -c "bash -c \'git push\'"',
+    "echo x | git push", "git push > out.txt", "git push >&2", "git push 2>err.txt", "echo ok;;git push",
+])
+def test_real_push_commands_are_still_found(project, cmd):
+    assert lock_guard.push_dirs(cmd, project), cmd
+    write_lock(project, "LOCK.txt", owner="codex@OTHERHOST", host="OTHERHOST")
+    assert denied(bash(cmd, project)), cmd
 
 
 # --- optional leases (roshambo) and the team board -------------------------------------------------------------
