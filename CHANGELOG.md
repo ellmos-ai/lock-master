@@ -7,7 +7,36 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed (unreleased) - the push check no longer blocks worktree pushes or text that mentions a push
+## [1.9.0] - 2026-11-07
+
+Everything merged after the tag `v1.8.3`. Releases 1.6.4 to 1.8.3 are listed below under their own version
+sub-headings; they are not regrouped here.
+
+### Added (1.9.0 - 2026-11-07)
+
+- **Own locks for delegated workers** (T-20261107-958032576; replaces #39, reverted in #40 as fail-open):
+  - Claude Code documents `agent_id` as the unique id of the subagent or teammate a hook fires in. The hook now
+    counts a lock owned by exactly `<session name>:<agent_id>` as that worker's own. There is no prefix, no trust on
+    first use, and the owner must be ASCII.
+  - The lead, sibling workers, other sessions, a re-spawned worker and any payload without `agent_id` stay blocked.
+  - The `agent_id` must match `[A-Za-z0-9_-]{1,128}`.
+  - A new SubagentStart hook (mode `subagent`) tells the worker its owner in one line, without files or network. A
+    denial names it as a fallback.
+  - Tests: `tests/test_plugin_worker_agent_id.py`, 40 tests, 17 of them fail on `faefe3f`. Among them: r1's
+    collision probes, Unicode lookalikes and a round trip through `lock_create.py`.
+- **CI gate `guard-proof`** (#43, T-20261107-441069325). A pull request that changes a guard file (`plugin/`, `hooks/`,
+  `.claude-plugin/`, `pure-locking/`, `team-lock/`, `.mcp.json`, `.github/scripts/` and the gate workflow itself) fails
+  unless its description carries non-empty `Adversarial-Probe:` and `Probe-Ausgefuehrt-von:` lines. Files:
+  `.github/scripts/check_guard_proof.py`, `.github/workflows/guard-proof.yml`, the pull request template and the section
+  "Guard files" in `CONTRIBUTING.md`. Tests: `tests/test_check_guard_proof.py`.
+
+### Changed (1.9.0)
+
+- Release preparation: version 1.9.0 in `VERSION`, `pyproject.toml`, `.claude-plugin/plugin.json`,
+  `ellmos-module.v2.json`, `llms.txt`, both README badges and `tests/test_metadata.py`. No code change compared with
+  the merged state `700c643`.
+
+### Fixed (1.9.0) - the push check no longer blocks worktree pushes or text that mentions a push
 
 T-20261107-349313698. The hook answered "could not resolve the repository of this git push" for pushes from
 worktrees and for commands that only contained the words. Root causes, measured with `push_dirs()`:
@@ -57,35 +86,6 @@ next to a push, `git grep -O` (runs its value). Out of reach, as before (strict 
 says neither push nor has a git call with a run-time subcommand - the command word from variables too, backticks, a
 file written in two steps and run, a git alias in the config, a script file run in a later command. Takes effect
 with the next plugin release. Question left open: the hook does not match the PowerShell tool (see the pull request).
-
-## [1.9.0] - 2026-11-07
-
-Everything merged after the tag `v1.8.3`. Releases 1.6.4 to 1.8.3 are listed below under their own version
-sub-headings; they are not regrouped here.
-
-### Added (1.9.0 - 2026-11-07)
-
-- **Own locks for delegated workers** (T-20261107-958032576; replaces #39, reverted in #40 as fail-open):
-  - Claude Code documents `agent_id` as the unique id of the subagent or teammate a hook fires in. The hook now
-    counts a lock owned by exactly `<session name>:<agent_id>` as that worker's own. There is no prefix, no trust on
-    first use, and the owner must be ASCII.
-  - The lead, sibling workers, other sessions, a re-spawned worker and any payload without `agent_id` stay blocked.
-  - The `agent_id` must match `[A-Za-z0-9_-]{1,128}`.
-  - A new SubagentStart hook (mode `subagent`) tells the worker its owner in one line, without files or network. A
-    denial names it as a fallback.
-  - Tests: `tests/test_plugin_worker_agent_id.py`, 40 tests, 17 of them fail on `faefe3f`. Among them: r1's
-    collision probes, Unicode lookalikes and a round trip through `lock_create.py`.
-- **CI gate `guard-proof`** (#43, T-20261107-441069325). A pull request that changes a guard file (`plugin/`, `hooks/`,
-  `.claude-plugin/`, `pure-locking/`, `team-lock/`, `.mcp.json`, `.github/scripts/` and the gate workflow itself) fails
-  unless its description carries non-empty `Adversarial-Probe:` and `Probe-Ausgefuehrt-von:` lines. Files:
-  `.github/scripts/check_guard_proof.py`, `.github/workflows/guard-proof.yml`, the pull request template and the section
-  "Guard files" in `CONTRIBUTING.md`. Tests: `tests/test_check_guard_proof.py`.
-
-### Changed (1.9.0)
-
-- Release preparation: version 1.9.0 in `VERSION`, `pyproject.toml`, `.claude-plugin/plugin.json`,
-  `ellmos-module.v2.json`, `llms.txt`, both README badges and `tests/test_metadata.py`. No code change compared with
-  the merged state `700c643`.
 
 ### Upgrade note (1.9.0)
 
