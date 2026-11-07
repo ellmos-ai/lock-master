@@ -7,6 +7,57 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (unreleased) - the push check no longer blocks worktree pushes or text that mentions a push
+
+T-20261107-349313698. The hook answered "could not resolve the repository of this git push" for pushes from
+worktrees and for commands that only contained the words. Root causes, measured with `push_dirs()`:
+
+- **The worktree was not the problem, the command parsing was.** A plain `git push` from a linked worktree resolved
+  and checked the main clone's locks correctly. What failed: `cd /c/_Local_DEV/worktrees/x && git push` and
+  `git -C /c/... push` (Git Bash drive paths do not exist for Windows Python; `-C` even led to a made-up
+  `C:\c\...` directory that no lock covers), a trailing `2>&1`, and a command spanning several lines.
+- **A push was found by text search** (`\bgit\b[^\n;&|]*\bpush\b`), so `echo "git push"`, a commit message, a heredoc
+  body, `git checkout -b fix/worktree-push-detection` or `git status | grep push` counted as a push and then failed
+  the allow-list.
+
+Now the check splits the command the way bash does and accounts for every mention of `push` (`push_dirs()`, new
+`_Lexer` and `_check()`; no `shlex`, no heredoc regex). A mention counts only as one of: a plain
+`git [-C <dir>]... push` in command position, resolved through `cd <dir>` segments joined by `&&`, `;` or newlines (a
+pipe into a filter and `2>&1` are fine); the path of a `cd`; the name of a file written to; or data of a command that
+runs nothing (`echo`, `printf`, `cat`, `grep`, `head`, `tail`, `wc`, `tee`, `git commit/log/checkout/branch/stash ...`,
+`gh issue/pr/api`) whose output no later pipeline stage runs - including its quoted heredoc bodies and
+`$(cat <<'EOF' ...)` arguments. Every other mention denies as unresolvable. Comments are data, as for bash.
+
+The first version of this change (fdf5b74, e956301) decided "this is data" in the parser and was wrong in places; the
+adversarial probe on the pull request found 13 commands that `main` denied and it let through, each confirmed with a
+real bash and a bare remote (a heredoc marker inside quotes or a comment, `\"`, a heredoc fed to `source`, `.` or
+`fish`, `git -c alias.x=push x`, `echo ... | sh`, `printf ... | bash`, `| xargs sh -c`, `python -c` with subprocess),
+plus three gaps `main` has as well (backslash-newline before `push`, `$G push`, `git subtree push`). Three more were
+found while closing them: a continuation inside the word (`pu\<newline>sh`), `echo "git push" > x.sh; sh x.sh` (a
+text written to a file is fine only when nothing in the command can run a file), and unquoted Windows paths: bash
+removes unquoted backslashes, so `cd C:\x\repo ; git push` runs `cd C:xrepo`, fails, and pushes from the old directory
+(measured with Git Bash 5.3) - the first version read the Windows path and allowed it. All 47 are regression tests
+(`test_probe_case`); a differential run of 62 further commands against Git Bash found no push the hook allows.
+
+The second round of the probe (36 more cases) found one more: `printf -v c 'git -C L push'; $c` - `printf -v` stores
+the text in a variable the next command runs, so `printf` counts as data only without `-v` (no other data command can
+assign; `read`, `mapfile`, `declare`, `export`, `local`, `eval` never were data). It also showed pushes spelled
+without the letters, open on `main` too: `git p{u..u}sh`, `git pu$'\x73'h`, `git pu$(echo s)h`, `x=pu; y=sh; git $x$y`.
+These are closed now: a command that says `git` is split as well, and a git call whose subcommand word is known only
+at run time (variable, `$(...)`, brace, glob, `$'...'`) counts as a possible push - also inside `$(...)`. All 83 cases
+of round 2 are tests; the differential run against Git Bash has 77 commands now, again with no push the hook allows.
+Deep `$(...)` nesting fails closed when the text says push and is not checked otherwise.
+
+Known false alarms, kept on purpose (rewrite the command, or write files with the Write tool): text an interpreter
+or shell may run (`python -c "print('git push')"`, `python - <<PY ... PY`, `python t.py "git push"`), `printf -v`
+with a push text, unquoted backslash paths (quote them or use `/`), `$(...)` or variables in a push command, a git
+subcommand from a variable or expansion (`git $SUB`, `git "$@"`, `git ${GIT_OPTS} status`, `git p[u]sh`) - denied in
+every repository, `git push --dry-run` from a locked repository, an assignment before `cd`, `||`, `&` and subshells
+next to a push, `git grep -O` (runs its value). Out of reach, as before (strict `xfail` tests): a push whose text
+says neither push nor has a git call with a run-time subcommand - the command word from variables too, backticks, a
+file written in two steps and run, a git alias in the config, a script file run in a later command. Takes effect
+with the next plugin release. Question left open: the hook does not match the PowerShell tool (see the pull request).
+
 ## [1.9.0] - 2026-11-07
 
 Everything merged after the tag `v1.8.3`. Releases 1.6.4 to 1.8.3 are listed below under their own version
