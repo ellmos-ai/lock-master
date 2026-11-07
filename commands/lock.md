@@ -15,9 +15,6 @@ Set a lock before non-trivial work so other agents (Claude, Codex, Gemini, Kimi)
      mistake a newer grant of the same area for yours. If the context named none, build it:
      `claude-code@<HOST>.` plus the first 8 letters/digits of `${CLAUDE_SESSION_ID}`, lowercase (the same rule the hook uses).
      Only when neither is available, use `claude-code@<HOST>`.
-   - **As a delegated worker (subagent or teammate)** use `<your spawn name>@<HOST>` instead, e.g.
-     `opus-worker-o1@ASUS-GEI`: workers share the lead's session id and thereby its session name, so only the
-     spawn name keeps the lead and sibling workers off your area. Actor names (`codex`, `kimi`, ...) are reserved.
      (`<HOST>` is the host name with anything but letters, digits, `_`, `.` and `-` replaced by `-`; the hook, the commands and
      the board tools all use that one form.)
    - `<project>` is the project root (the git top level when inside a repository).

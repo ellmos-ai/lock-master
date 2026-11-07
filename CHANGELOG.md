@@ -15,19 +15,6 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   pointer on this device. Found 06.11.2026 on the Mac Studio, where 20 of 50 mirror pointers were dehydrated and two
   BACH workers returned every task (PB-1, BACH #3985).
 
-### Fixed
-
-- **A delegated worker was denied its own lock** (T-20261107-958032576). A subagent or teammate that set
-  `lock_create.py --owner opus-worker-o1@ASUS-GEI` was then blocked by the hook from editing the area, because the
-  hook knew only the session name and the actor prefix, and treated the lock as foreign. Workers share the lead's
-  session id, so neither of those forms told lead and teammates apart: a lock on the session name, or on
-  `claude-code@<HOST>:<name>`, admitted the lead and every sibling worker as well. The hook now also counts
-  `<spawn name>@<HOST>` (and `...:<suffix>`) as own when the payload carries `agent_id`; `agent_type` is the spawn
-  name. This owner is fence-checked like the actor prefix. Lead, siblings and payloads without `agent_id` stay
-  blocked. Actor names (`claude-code`, `claude-desktop`, `codex`, `kimi`, `antigravity`, `copilot`) are reserved.
-  User locks, until locks and condition locks are unchanged. New tests: `tests/test_plugin_worker_owner.py` (4 of
-  the 10 failed before the fix). `/lock`, the lock-protocol skill and `LOCK-SYSTEM*.md` name the worker form.
-
 ### Fixed (1.8.1 - 2026-11-06)
 
 - **`lock-board` MCP server failed to connect on Windows** (`CONNECTION_CLOSED`) when Claude Code was started outside

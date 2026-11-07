@@ -34,11 +34,7 @@ the host, so it is fence-checked: the first time a session relies on such a lock
 the hook remembers its fence number; if the lock later carries another one (or
 none, or the file was restored), the grant moved on -- possibly to a parallel
 session with the same owner string -- and the lock is no longer treated as the
-session's own (lu.fence_status, fail-closed). Subagents and teammates share the
-lead's session id, hence its session name; a delegated worker therefore owns a lock
-named `<spawn name>@<HOST>` (see worker_prefix(): only with `agent_id` in the payload,
-actor names reserved), a shared owner fence-checked like the prefixes, which the lead
-and the worker's siblings do not own. Team locks of the same host are shared
+session's own (lu.fence_status, fail-closed). Team locks of the same host are shared
 by that host's agents; inside them a file claim (`EDITING`) held by another agent
 name denies edits to the claimed path. User and until locks block always; condition
 locks block only the operations they name.
@@ -114,27 +110,6 @@ def owner_prefixes() -> list[str]:
     return prefixes or [f"{actor()}@{host_token().lower()}"]
 
 
-SPAWN_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")  # Claude Code's Agent(name=...) grammar, case-folded
-# Actor names a spawn name must never take over: a worker called "codex" would otherwise own codex@<HOST> locks.
-RESERVED_WORKER_NAMES = {"claude-code", "claude-desktop", "codex", "kimi", "antigravity", "copilot"}
-
-
-def worker_prefix(payload: dict) -> str | None:
-    """`<spawn name>@<host>` of a delegated worker (subagent or teammate), else None.
-
-    Inside a worker the payload carries `agent_id` and, as `agent_type`, the name it was spawned with
-    (`Agent(name=...)`; the definition name for an unnamed spawn), while `session_id` is the lead's and shared by
-    the whole team. So the session name cannot tell lead and teammates apart; the spawn name can. A lock owned by
-    `<spawn name>@<HOST>` (or `...:<suffix>`) is the worker's own -- not the lead's, not a sibling's. Spawn names
-    repeat across sessions, so it is a shared owner like `<actor>@<HOST>` and fence-checked the same way."""
-    if not payload.get("agent_id"):
-        return None
-    name = str(payload.get("agent_type") or "").strip().lower()
-    if not SPAWN_NAME.match(name) or name in RESERVED_WORKER_NAMES or name == actor():
-        return None
-    return f"{name}@{host_token().lower()}"
-
-
 def session_name(payload: dict) -> str | None:
     """`<actor>@<HOST>.<sid8>`: one name per agent session, usable as lock owner and team-board agent name
     (no `:`; the team-lock agent grammar is [A-Za-z0-9_.@+-]). None when the payload has no session id."""
@@ -156,7 +131,6 @@ class Session:
 
     def __init__(self, payload: dict):
         self.name = session_name(payload)
-        self.worker = worker_prefix(payload)
         sid = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("session_id") or ""))[:64]
         self.file = state_dir() / f"{sid}.json" if sid else None
         self.fences: dict[str, int | None] = {}
@@ -322,11 +296,7 @@ def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Se
         return "block"
     owner = (data.get("owner") or "").lower()
     if session is not None and session.name and owner == session.name.lower():
-        # No other session carries this name: nothing to fence. Its teammates do, though -- they share the
-        # lead's session id; a worker's lock of its own is `<spawn name>@<HOST>` (worker_prefix).
-        return "own"
-    if session is not None and session.worker:
-        prefixes = [*prefixes, session.worker]
+        return "own"  # the session's own name cannot be anybody else's: nothing to fence
     is_team = lu.is_team_lock(lock_path.name) and (lu.lock_host(lock_path) or "").upper() == host
     if any(owner == p or owner.startswith(p + ":") for p in prefixes):
         if is_team:
@@ -360,8 +330,6 @@ def foreign_claim(path: Path, locks: list, session: Session | None, prefixes: li
     (team.TeamLockFormatError / ValueError / OSError); the caller reports it without blocking, because the team
     lock itself still lets the host's agents in."""
     me = ((session.name if session else None) or "").lower()
-    if session is not None and session.worker:
-        prefixes = [*prefixes, session.worker]
 
     def mine(agent: str) -> bool:
         a = agent.lower()
@@ -557,8 +525,7 @@ def pretooluse(payload: dict) -> dict | None:
                 reason += (f" -- fencing: {clean(moved[0], 300)}. This lock carried the grant your session relied on "
                            "earlier and has been granted anew since. If you re-created it yourself, release it and "
                            "set it again with /lock (named after your session, so it stays yours"
-                           + (f": {sess.worker or sess.name}" if sess.worker or sess.name else "")
-                           + "); otherwise another session took the area.")
+                           + (f": {sess.name}" if sess.name else "") + "); otherwise another session took the area.")
             return deny(reason)
         if op != "edit":
             continue

@@ -730,21 +730,6 @@ Neue Pipelines dürfen das Muster übernehmen, wenn Teamarbeit mehr braucht als 
    ein abgelöster Halter merkt, dass er die Sperre verlor. Die Vorlage bleibt die
    Feldreferenz; sie ist kein Anlegeverfahren.
    [C 2026-09-20 T-20260920-699139879]
-
-   **Welchen `--owner` der Claude-Code-Hook als eigenen wertet** (Plugin `lock_guard.py`):
-
-   | Owner-Form | Eigen für | Fence-Prüfung |
-   |---|---|---|
-   | `claude-code@<HOST>.<sid8>` (Sitzungsname) | die Sitzung **und alle ihre Subagenten/Teammates** (sie teilen die Sitzungs-ID des Leads) | nein |
-   | `claude-code@<HOST>` oder `claude-code@<HOST>:<beliebig>` | jede Claude-Code-Sitzung des Hosts | ja |
-   | `<Spawn-Name>@<HOST>` oder `<Spawn-Name>@<HOST>:<beliebig>` | nur den delegierten Worker, der unter diesem Namen gestartet wurde (Hook-Payload trägt `agent_id`; `agent_type` ist der Spawn-Name) | ja |
-
-   Ein delegierter Worker nimmt seinen Spawn-Namen, z. B. `--owner opus-worker-o1@ASUS-GEI`: Lead und
-   Geschwister-Worker bleiben ausgesperrt. Akteursnamen (`claude-code`, `claude-desktop`, `codex`, `kimi`,
-   `antigravity`, `copilot`) sind reserviert und werden nie zum Worker-Owner. Restrisiko: Spawn-Namen wiederholen
-   sich über Sitzungen hinweg (unbenannte Spawns melden alle ihren Definitionsnamen, z. B. `general-purpose`),
-   daher gilt die Form wie das Akteurspräfix nach Trust-on-First-Use; Worker unverwechselbar benennen.
-   [C 2026-11-07 T-20261107-958032576]
 3. **FREIGEBEN:** die selbst angelegte Lock-Datei am Ende **selbst löschen**. Aktives Freigeben durch den Ersteller ist Pflicht; der 24h-Verfall ist nur ein **Sicherheitsnetz** für vergessene Locks. Bei langer Laufzeit `created` erneuern, damit die Sperre nicht vorzeitig verfällt.
 
 ---
