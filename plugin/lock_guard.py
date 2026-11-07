@@ -15,7 +15,8 @@ Modes (first argument):
 All lock semantics come from pure-locking/lock_utils.py and team-lock/ (no
 second implementation). Local files only, unless leases are switched on.
 
-Leases (optional): with ELLMOS_LOCK_LEASES set to a roshambo lease-store URL
+Leases (optional): with a roshambo lease-store URL in the plugin option
+`lease_store` or in ELLMOS_LOCK_LEASES (see lease_url())
 (`sqlite:///path` for one computer, `postgresql://...` for several), every
 edit also takes a per-file lease for this session (TTL ELLMOS_LOCK_LEASE_TTL,
 default 900 s). A file whose lease another session holds is denied. The key is
@@ -383,12 +384,19 @@ class LeaseStoreUnavailable(Exception):
     and an outage of the shared database (reboot, VPN down) must not stop every agent on the host."""
 
 
+def lease_url() -> str:
+    """URL of the lease store: the plugin option `lease_store` (userConfig, kept in the platform's credential
+    store, exported by Claude Code as CLAUDE_PLUGIN_OPTION_LEASE_STORE), else ELLMOS_LOCK_LEASES; empty = off."""
+    return (os.environ.get("CLAUDE_PLUGIN_OPTION_LEASE_STORE", "").strip()
+            or os.environ.get("ELLMOS_LOCK_LEASES", "").strip())
+
+
 def lease_store():
-    """The roshambo lease store named by ELLMOS_LOCK_LEASES, or None while leases are off.
+    """The roshambo lease store named by lease_url(), or None while leases are off.
 
     A missing roshambo package or an unknown URL scheme is a local configuration error and fails closed;
     a store that cannot be reached raises LeaseStoreUnavailable."""
-    url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
+    url = lease_url()
     if not url:
         return None
     from roshambo.lease_store import open_lease_store  # optional dependency, only with leases on
@@ -426,7 +434,7 @@ def _store_unreachable(exc: BaseException) -> bool:
 def _without_dsn(exc: Exception) -> str:
     """Error text without the configured URL or its password, also in URL-decoded form."""
     text = f"{type(exc).__name__}: {exc}"
-    url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
+    url = lease_url()
     if not url:
         return text
     text = text.replace(url, "<lease store>")
