@@ -36,6 +36,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   / `pointer-unreadable`. It stays fail-closed (exit 1, never "free"); `--check-dir` now names the repair: keep the
   pointer on this device. Found 06.11.2026 on the Mac Studio, where 20 of 50 mirror pointers were dehydrated and two
   BACH workers returned every task (PB-1, BACH #3985).
+- **Own locks for delegated workers** (T-20261107-958032576; replaces #39, reverted in #40 as fail-open):
+  - Claude Code documents `agent_id` as the unique id of the subagent or teammate a hook fires in. The hook now
+    counts a lock owned by exactly `<session name>:<agent_id>` as that worker's own. There is no prefix, no trust on
+    first use, and the owner must be ASCII.
+  - The lead, sibling workers, other sessions, a re-spawned worker and any payload without `agent_id` stay blocked.
+  - The `agent_id` must match `[A-Za-z0-9_-]{1,128}`.
+  - A new SubagentStart hook (mode `subagent`) tells the worker its owner in one line, without files or network. A
+    denial names it as a fallback.
+  - Tests: `tests/test_plugin_worker_agent_id.py`, 40 tests, 17 of them fail on `faefe3f`. Among them: r1's
+    collision probes, Unicode lookalikes and a round trip through `lock_create.py`.
 
 ### Fixed (1.8.1 - 2026-11-06)
 
