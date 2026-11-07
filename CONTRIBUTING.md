@@ -45,6 +45,27 @@ git diff --check
 - Ensure all 10 governance invariants (`INV-LOCAL-01` to `INV-SLA-10`) remain VERIFIED.
 - Pull requests must target the `main` branch.
 
+### 3a. Guard files
+These files decide whether an agent may edit or push. A mistake in them opens the lock guard of every installed
+agent, and the marketplace delivers what is merged:
+`plugin/lock_guard.py`, `plugin/board_mcp.py`, `hooks/hooks.json`, `hooks/run.sh`, `.claude-plugin/plugin.json`,
+`.mcp.json`, `pure-locking/lock_utils.py`, `team-lock/_lock_master_team/`, `.github/scripts/check_guard_proof.py`,
+`.github/workflows/guard-proof.yml`.
+
+A pull request that changes one of them needs, in addition to the tests:
+- **An adversarial probe**: try to make a foreign lock count as your own and an own lock fail.
+  - Use foreign actor names (`codex-cli@HOST`, `agy@HOST`, …), look-alike owners, and Unicode and case variants.
+  - Use a foreign session with the same identifiers, and malformed input (charset, line breaks, injection into the
+    `key: value` lock file).
+  - Show fail-closed behaviour when a hook does not run or a payload field is missing.
+  - Every case that should be denied must be denied. Record the command or link and the result.
+- **Two lines in the PR description**: `Adversarial-Probe:` (command or link plus result) and
+  `Probe-Ausgefuehrt-von:` (the instance that ran the probe). The `guard-proof` check fails when a guard file
+  changed and either line is empty. The PR text is only read as data.
+- **The merge** is done by an instance that ran the probe itself and is not the author. "Diff read, tests green" is
+  not enough. Background: #39 passed such a review and was fail-open; an adversarial probe found it within minutes
+  (reverted in #40).
+
 ### 4. License
 By contributing to `lock-master`, you agree that your contributions will be licensed under the [MIT License](LICENSE).
 
@@ -90,6 +111,29 @@ git diff --check
 - Halten Sie API-Schlüssel, Tokens und private Zugangsdaten strikt außerhalb des Repositories.
 - Stellen Sie sicher, dass alle 10 Invarianten (`INV-LOCAL-01` bis `INV-SLA-10`) verifiziert bleiben.
 - Pull Requests müssen gegen den `main`-Branch gerichtet sein.
+
+### 3a. Guard-Dateien
+Diese Dateien entscheiden, ob ein Agent editieren oder pushen darf. Ein Fehler darin öffnet den Lock-Guard jedes
+installierten Agenten, und der Marketplace liefert aus, was gemergt ist:
+`plugin/lock_guard.py`, `plugin/board_mcp.py`, `hooks/hooks.json`, `hooks/run.sh`, `.claude-plugin/plugin.json`,
+`.mcp.json`, `pure-locking/lock_utils.py`, `team-lock/_lock_master_team/`, `.github/scripts/check_guard_proof.py`,
+`.github/workflows/guard-proof.yml`.
+
+Ein Pull Request, der eine davon ändert, braucht zusätzlich zu den Tests:
+- **Eine adversariale Probe**: Versuchen, einen fremden Lock als eigenen gelten zu lassen und einen eigenen
+  scheitern zu lassen.
+  - Fremde Akteursnamen (`codex-cli@HOST`, `agy@HOST`, …), ähnlich aussehende Owner, Unicode- und
+    Groß-/Kleinvarianten.
+  - Eine fremde Sitzung mit gleichen Kennungen und fehlerhafte Eingaben (Zeichenset, Zeilenumbrüche, Injection in
+    die `key: value`-Lockdatei).
+  - Fail-closed-Verhalten, wenn ein Hook nicht läuft oder ein Payload-Feld fehlt.
+  - Jeder Fall, der abgewiesen werden soll, muss abgewiesen werden. Befehl oder Link und Ergebnis festhalten.
+- **Zwei Zeilen in der PR-Beschreibung**: `Adversarial-Probe:` (Befehl oder Link plus Ergebnis) und
+  `Probe-Ausgefuehrt-von:` (die Instanz, die die Probe ausgeführt hat). Die Prüfung `guard-proof` schlägt fehl,
+  wenn eine Guard-Datei geändert ist und eine der Zeilen leer ist. Der PR-Text wird nur als Daten gelesen.
+- **Den Merge** übernimmt eine Instanz, die die Probe selbst ausgeführt hat und nicht der Autor ist. „Diff gelesen,
+  Tests grün“ reicht nicht. Hintergrund: #39 bestand eine solche Prüfung und war fail-open; eine adversariale Probe
+  fand das in wenigen Minuten (revertiert in #40).
 
 ### 4. Lizenz
 Mit Ihrer Mitwirkung an `lock-master` erklären Sie sich damit einverstanden, dass Ihre Beiträge unter der [MIT-Lizenz](LICENSE) lizenziert werden.
