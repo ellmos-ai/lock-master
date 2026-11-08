@@ -38,6 +38,9 @@ PLACEHOLDER = re.compile(r"<[^<>]*>")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
+SHORT_SEGMENT = re.compile(r"~[0-9]+")
+
+
 def normalize(path: str) -> str:
     """Windows separators, leading ./ and case do not make another file: Windows and default macOS checkouts are
     case-insensitive, so Plugin/Lock_Guard.py is plugin/lock_guard.py there."""
@@ -48,8 +51,23 @@ def normalize(path: str) -> str:
 
 
 def is_guard(path: str) -> bool:
-    path = normalize(path)
-    return any(path == g or (g.endswith("/") and path.startswith(g)) for g in GUARD_PATHS)
+    norm = normalize(path)
+    if any(norm == g or (g.endswith("/") and norm.startswith(g)) for g in GUARD_PATHS):
+        return True
+    # Windows 8.3 short-name segments (e.g. pure-l~1, team-l~1, lock-m~1): fail-closed.
+    # If any path segment contains ~[0-9]+, treat as protected guard.
+    segments = norm.split("/")
+    if any(SHORT_SEGMENT.search(seg) for seg in segments):
+        try:
+            resolved = Path(path).resolve()
+            repo_root = Path(__file__).resolve().parent.parent.parent
+            rel = resolved.relative_to(repo_root).as_posix().casefold()
+            if any(rel == g.rstrip("/").casefold() or rel.startswith(g.casefold()) for g in GUARD_PATHS):
+                return True
+        except (ValueError, OSError):
+            pass
+        return True
+    return False
 
 
 def visible_text(body: str) -> str:

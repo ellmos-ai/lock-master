@@ -65,6 +65,32 @@ def test_owner_prefix_from_environment(project, monkeypatch):
     assert denied(edit(project / "src" / "a.py"))
 
 
+def test_unicode_kelvin_owner_comparison_is_not_matched_as_ascii(project, monkeypatch):
+    kelvin_host = "WOR\u212aSTATION"
+    ascii_host = "WORKSTATION"
+
+    # 1. Lock owned by Kelvin owner must NOT match ASCII session/prefix
+    monkeypatch.setenv("COMPUTERNAME", ascii_host)
+    write_lock(project, "LOCK.txt", owner=f"claude-code@{kelvin_host}", host=ascii_host)
+    payload = {
+        "tool_name": "Edit",
+        "cwd": str(project),
+        "tool_input": {"file_path": str(project / "src" / "a.py")},
+        "session_id": "testsession1",
+    }
+    assert denied(payload)
+
+    # 2. Lock owned by exact session name with Kelvin must NOT match ASCII session
+    sess_kelvin = f"claude-code@{kelvin_host}.testsess"
+    write_lock(project, "LOCK.txt", owner=sess_kelvin, host=ascii_host)
+    assert denied(payload)
+
+    # 3. Lock owned by ASCII owner must NOT match session configured with Kelvin prefix
+    write_lock(project, "LOCK.txt", owner=f"claude-code@{ascii_host}", host=ascii_host)
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", f"claude-code@{kelvin_host}")
+    assert denied(payload)
+
+
 def test_team_lock_same_host_allows_other_host_denies(project, monkeypatch):
     write_lock(project, "LOCK.team.TESTHOST.txt", owner="kimi@TESTHOST", host="TESTHOST")
     assert not denied(edit(project / "src" / "a.py"))

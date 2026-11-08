@@ -9,7 +9,7 @@ script="${CLAUDE_PLUGIN_ROOT}/plugin/lock_guard.py"
 if [ -n "$ELLMOS_PYTHON" ]; then
   exec "$ELLMOS_PYTHON" "$script" "$mode"
 fi
-if command -v py >/dev/null 2>&1 && py -3 -c "import sys" >/dev/null 2>&1; then
+if command -v py >/dev/null 2>&1 && py -3 -c "import sys; assert sys.version_info >= (3, 10)" >/dev/null 2>&1; then
   exec py -3 "$script" "$mode"
 fi
 for candidate in python3 python; do
@@ -17,5 +17,8 @@ for candidate in python3 python; do
     exec "$candidate" "$script" "$mode"
   fi
 done
-echo "lock-master: no Python 3.10+ found (set ELLMOS_PYTHON); lock checks are inactive" >&2
+echo "lock-master: warning: Python 3.10+ not found (set ELLMOS_PYTHON); lock checks are inactive" >&2
+if [ "$LOCK_MASTER_FAIL_CLOSED" = "1" ]; then
+  exit 2
+fi
 exit 0

@@ -127,9 +127,10 @@ def actor() -> str:
 
 
 def owner_prefixes() -> list[str]:
-    raw = os.environ.get("ELLMOS_LOCK_OWNER", "")
-    prefixes = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return prefixes or [f"{actor()}@{host_token().lower()}"]
+    raw = os.environ.get("ELLMOS_LOCK_OWNER")
+    if raw is not None:
+        return [p.strip().lower() for p in raw.split(",") if p.strip() and p.strip().isascii()]
+    return [f"{actor()}@{host_token().lower()}"]
 
 
 AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")  # used with fullmatch: no ':', whitespace, control or non-ASCII
@@ -622,22 +623,26 @@ def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Se
     if lu.is_condition_lock(lock_path, data):
         return "block"
     raw_owner = data.get("owner") or ""
-    owner = raw_owner.lower()
-    if session is not None and session.name and owner == session.name.lower():
-        # No other session carries this name: nothing to fence. Its subagents and teammates do, though (they share
-        # the lead's session id); a worker's lock of its own is owned by `<session name>:<agent_id>`, below.
-        return "own"
-    if session is not None and session.worker and raw_owner.isascii():
+    # Owner comparison is strictly ASCII: Unicode folding (e.g. Kelvin U+212A -> 'k') must never match ASCII owners.
+    if session is not None and session.name and raw_owner.isascii() and session.name.isascii():
+        if raw_owner.lower() == session.name.lower():
+            # No other session carries this name: nothing to fence. Its subagents and teammates do, though (they share
+            # the lead's session id); a worker's lock of its own is owned by `<session name>:<agent_id>`, below.
+            return "own"
+    if session is not None and session.worker and raw_owner.isascii() and session.worker.isascii():
         # Exactly this worker of this session. isascii: no Unicode case folding onto ASCII (K -> k). The session
         # name part compares case-folded as everywhere; the harness-issued agent_id must match exactly.
         name_part, _, id_part = raw_owner.partition(":")
-        if name_part.lower() == session.name.lower() and id_part == session.worker.partition(":")[2]:
+        sess_name, _, sess_worker_id = session.worker.partition(":")
+        if name_part.lower() == sess_name.lower() and id_part == sess_worker_id:
             return "own"
     is_team = lu.is_team_lock(lock_path.name) and (lu.lock_host(lock_path) or "").upper() == host
-    if any(owner == p or owner.startswith(p + ":") for p in prefixes):
-        if is_team:
-            return "team"  # shared by the host's agents by design: the file is the board, not one grant
-        return "own" if session is None or session.holds(lock_path) else "block"
+    if raw_owner.isascii():
+        owner = raw_owner.lower()
+        if any(p.isascii() and (owner == p or owner.startswith(p + ":")) for p in prefixes):
+            if is_team:
+                return "team"  # shared by the host's agents by design: the file is the board, not one grant
+            return "own" if session is None or session.holds(lock_path) else "block"
     return "team" if is_team else "block"
 
 
@@ -666,10 +671,14 @@ def foreign_claim(path: Path, locks: list, session: Session | None, prefixes: li
     (team.TeamLockFormatError / ValueError / OSError); the caller reports it without blocking, because the team
     lock itself still lets the host's agents in."""
     me = ((session.name if session else None) or "").lower()
+    sess_ascii = bool(session and session.name and session.name.isascii())
 
     def mine(agent: str) -> bool:
+        if not agent.isascii():
+            return False
         a = agent.lower()
-        return a == me or any(a == p or a.startswith(p + ":") for p in prefixes)
+        return (bool(me and sess_ascii and a == me) or
+                any(p.isascii() and (a == p or a.startswith(p + ":")) for p in prefixes))
 
     for name, _scope, _legacy, source_dir in locks:
         lock_path = Path(source_dir) / name
@@ -926,10 +935,12 @@ def session(payload: dict) -> dict | None:
     for lock_name, _s, _l, src in locks:
         lock_path = Path(src) / lock_name
         lines.append(f"- {describe(lock_path)}")
-        owner = (lu.parse_lock_file(lock_path).get("owner") or "").lower()
-        if sess.file is not None and not lu.is_team_lock(lock_name) and any(
-                owner == p or owner.startswith(p + ":") for p in prefixes):
-            sess.holds(lock_path)  # remember the fence of a shared-owner lock now, not at the first edit
+        raw_owner = lu.parse_lock_file(lock_path).get("owner") or ""
+        if raw_owner.isascii():
+            owner = raw_owner.lower()
+            if sess.file is not None and not lu.is_team_lock(lock_name) and any(
+                    p.isascii() and (owner == p or owner.startswith(p + ":")) for p in prefixes):
+                sess.holds(lock_path)  # remember the fence of a shared-owner lock now, not at the first edit
         if lu.is_team_lock(lock_name) and (lu.lock_host(lock_path) or "").upper() == host:
             lines += team_board(lock_path)
             board = True
@@ -960,7 +971,7 @@ def release_board_entries(payload: dict) -> None:
             start, end = team._section_layout(lines)["file_claims"]
             bundles, _ = team._parse_claim_bundles(lines[start:end], "file_claims", lock_path.parent)
             for bundle in bundles:
-                if bundle.agent.lower() == name.lower():
+                if bundle.agent.isascii() and name.isascii() and bundle.agent.lower() == name.lower():
                     team.update_team_lock(lock_path, "file_claims", "release", name, resources=bundle.resources,
                                           project_dir=lock_path.parent)
             team.update_team_lock(lock_path, "presence", "release", name, project_dir=lock_path.parent)
