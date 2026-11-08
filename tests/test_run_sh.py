@@ -41,6 +41,7 @@ def no_python_env(tmp_path: Path):
         # On POSIX / Git Bash
         script = bin_dir / cmd
         script.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        script.chmod(0o755)  # must be executable, else POSIX `command -v` skips the stub
         # On Windows CMD / batch
         bat = bin_dir / f"{cmd}.bat"
         bat.write_text("@exit /b 1\n", encoding="utf-8")
