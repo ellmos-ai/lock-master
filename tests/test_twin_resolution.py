@@ -400,6 +400,85 @@ def test_klon_ohne_spiegel_mit_und_ohne_deklaration():
         assert lock_utils.twin_dirs_for_path(declared_clone, cfg) == ([], "index-unresolved")
 
 
+# ---------------------------------------------------------------- Verschwundene Worktrees & Zwillingsindex-Resilienz (T-20261107-754743212)
+
+def test_vanished_worktree_under_clone_roots_does_not_block_existing_clone_with_mirror(tmp_path):
+    clone, twin, cfg = _setup(tmp_path)
+    index_path = Path(cfg["index_path"])
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+
+    # Simuliere einen veralteten Indexeintrag fuer einen geloeschten Worktree unter clone_roots
+    vanished_wt = tmp_path / "repos" / "worktrees" / "demo-repo-temp-wt"
+    assert not vanished_wt.exists(), "Worktree-Pfad darf nicht existieren"
+
+    key = lock_utils._path_key(clone)
+    index["by_clone_path"].setdefault(key, []).append(str(vanished_wt))
+    index["by_repo_name"].setdefault("demo-repo", []).append(str(vanished_wt))
+    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Der geloeschte Worktree-Pfad darf den intakten Klon + Spiegel nicht blockieren
+    dirs, status = lock_utils.twin_dirs_for_path(clone, cfg)
+    assert status == "ok", f"Erwartet 'ok', erhalten '{status}'"
+    assert [Path(d).resolve() for d in dirs] == [twin.resolve()], dirs
+
+
+def test_adversarial_vanished_onedrive_mirror_stays_fail_closed_index_unresolved(tmp_path):
+    """Adversarial-Probe: Ein echter fehlender OneDrive-Spiegelpfad (ausserhalb von clone_roots)
+    MUSS fail-closed index-unresolved bleiben, auch wenn ein geloeschter Worktree vorliegt."""
+    clone, twin, cfg = _setup(tmp_path)
+    index_path = Path(cfg["index_path"])
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+
+    # Entferne den echten OneDrive-Spiegel von der Platte
+    import shutil
+    shutil.rmtree(twin)
+    assert not twin.exists(), "OneDrive-Spiegel muss entfernt sein"
+
+    # Fuege zusaetzlich einen geloeschten Worktree unter clone_roots ein
+    vanished_wt = tmp_path / "repos" / "demo-wt"
+    assert not vanished_wt.exists()
+    key = lock_utils._path_key(clone)
+    index["by_clone_path"][key] = [str(vanished_wt), str(twin)]
+    index["by_repo_name"]["demo-repo"] = [str(vanished_wt), str(twin)]
+    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    dirs, status = lock_utils.twin_dirs_for_path(clone, cfg)
+    assert status == "index-unresolved", f"Echter fehlender Spiegel MUSS index-unresolved sein, war: {status}"
+    assert dirs == []
+
+
+def test_build_twin_index_ignores_worktrees_and_clones_under_clone_roots(tmp_path):
+    repos_root = tmp_path / "repos"
+    onedrive_root = tmp_path / "onedrive"
+    repos_root.mkdir()
+    onedrive_root.mkdir()
+
+    clone = repos_root / "demo-repo"
+    clone.mkdir()
+    (clone / ".git").mkdir()
+    wt = repos_root / "worktrees" / "demo-repo-wt"
+    wt.mkdir(parents=True)
+    (wt / ".git").write_text("gitdir: ../../demo-repo/.git/worktrees/demo-repo-wt\n", encoding="utf-8")
+    twin = onedrive_root / "demo-repo"
+    twin.mkdir()
+
+    # Worktree traegt versehentlich REPO.pointer.json
+    (wt / lock_utils.REPO_POINTER_NAME).write_text(_pointer("demo-repo", clone), encoding="utf-8")
+    (twin / lock_utils.REPO_POINTER_NAME).write_text(_pointer("demo-repo", clone), encoding="utf-8")
+
+    cfg = {"clone_roots": [str(repos_root)]}
+    index = lock_utils.build_twin_index([clone, wt, twin], cfg)
+
+    # Worktree darf NIEMALS als Zwillingsspiegel im Index landen!
+    assert str(wt) not in index["by_repo_name"].get("demo-repo", [])
+    key = lock_utils._path_key(clone)
+    assert str(wt) not in index["by_clone_path"].get(key, [])
+    # Echter OneDrive-Spiegel muss im Index stehen
+    assert str(twin) in index["by_repo_name"].get("demo-repo", [])
+    assert str(twin) in index["by_clone_path"].get(key, [])
+
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

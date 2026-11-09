@@ -1411,6 +1411,34 @@ def _path_key(p: Path) -> str:
         return str(p).lower()
 
 
+def _is_under_clone_roots(p: Path, roots: list[Path]) -> bool:
+    """True if p is equal to or located inside any configured clone root."""
+    try:
+        resolved = p.resolve()
+    except OSError:
+        resolved = p
+    for r in roots:
+        try:
+            if resolved == r or r in resolved.parents:
+                return True
+        except OSError:
+            pass
+        rk = _path_key(r).rstrip("\\/")
+        pk = _path_key(p)
+        if pk == rk or pk.startswith(rk + "\\") or pk.startswith(rk + "/"):
+            return True
+    return False
+
+
+def _is_git_repo_or_worktree(d: Path) -> bool:
+    """True if d contains a .git directory or .git worktree pointer file."""
+    try:
+        git_entry = d / ".git"
+        return git_entry.is_dir() or git_entry.is_file()
+    except OSError:
+        return False
+
+
 def twin_dirs_for_path(path: Path, twin_config: dict | None):
     """Twin directories of `path` in the other tree.
 
@@ -1537,7 +1565,14 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
                 return [], "ok"
             continue
         dirs = [Path(h) for h in hits]
+        valid_twins: list[Path] = []
         for directory in dirs:
+            is_under_clones = _is_under_clone_roots(directory, clone_roots)
+            if not directory.exists() and is_under_clones:
+                # A vanished worktree or secondary clone path recorded in the cache
+                # must not invalidate the resolution of the existing clone.
+                continue
+
             pointer = (read_repo_pointer(directory)
                        if directory.is_absolute() and directory.is_dir() else None)
             declared = _pointer_clone_path(pointer) if pointer else None
@@ -1553,16 +1588,21 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
                     return [], "index-unresolved"
             else:
                 return [], "index-unresolved"
+            valid_twins.append(directory)
+
+        if not valid_twins:
+            return [], "index-unresolved"
+
         # The twin of an ancestor covers this path through inheritance; the
         # matching subpath below the twin is checked too, so a scoped lock
         # sitting deeper on the mirror side is not missed either.
         rel = Path(".") if is_wt_container else resolved.relative_to(ancestor)
-        out = list(dirs)
+        out = list(valid_twins)
         if rel != Path("."):
             # A counterpart subdirectory may not exist yet. Keep its logical
             # path so a root lock bound to another subpath is not reported as
             # overlapping simply because only the twin root was returned.
-            out += [d / rel for d in dirs]
+            out += [d / rel for d in valid_twins]
         return out, "ok"
     return [], "index-unmapped"
 
@@ -1643,12 +1683,30 @@ def build_twin_index(directories, twin_config: dict | None = None) -> dict:
     unreadable: dict[str, list[str]] = {}
     no_mirror: list[str] = collect_declared_no_mirror(twin_config)
 
+    clone_roots = []
+    if isinstance(twin_config, dict):
+        for raw in twin_config.get("clone_roots", []):
+            try:
+                clone_roots.append(Path(os.path.expandvars(str(raw))).resolve())
+            except OSError:
+                continue
+
     def add_no_mirror(val: str) -> None:
         if val and val not in no_mirror:
             no_mirror.append(val)
 
     for d in directories:
         d = Path(d)
+        if _is_git_repo_or_worktree(d):
+            # A git clone or worktree is never a twin mirror in OneDrive!
+            continue
+        if clone_roots and _is_under_clone_roots(d, clone_roots):
+            pointer_test = read_repo_pointer(d)
+            declared_clone = _pointer_clone_path(pointer_test) if pointer_test else None
+            if declared_clone and _path_key(declared_clone) == _path_key(d):
+                continue
+            if any(part in ("worktrees", ".worktrees") for part in d.parts):
+                continue
         try:
             if not (d / REPO_POINTER_NAME).is_file():
                 continue
