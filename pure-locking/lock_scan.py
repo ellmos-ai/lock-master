@@ -35,6 +35,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -47,6 +48,45 @@ DEFAULT_ROOTS_FILE = Path(__file__).resolve().parent / "lock_roots.json"
 CACHE_REFRESH_SECONDS = 30 * 60
 CHECK_DIR_MAX_DESCENDANTS = 1024
 CHECK_DIR_MAX_DESCENDANTS_CEILING = 1_000_000
+CHECK_DIR_WALK_TIMEOUT_SECONDS = 15.0
+
+# Directories that never contain legitimate project governance locks.
+# Skipping these prevents massive traversal times on huge dependency / build trees (.AI)
+# and avoids cloud placeholder hydration and reparse point inspection for third-party files.
+CHECK_DIR_EXCLUDED_DESCENDANT_DIRS = frozenset({
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_temp",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    "target",
+    "dist",
+    "build",
+})
+
+
+class DescendantResult(tuple):
+    """2-tuple (hits, complete) with optional .undetermined_reason.
+
+    Unpacks cleanly as `hits, complete = _descendant_locks(...)` for full
+    backward compatibility with existing callers, while allowing rich error inspection.
+    """
+    def __new__(cls, hits: list, complete: bool, undetermined_reason: str | None = None):
+        obj = super().__new__(cls, (hits, complete))
+        obj.undetermined_reason = undetermined_reason
+        return obj
+
+    @property
+    def hits(self) -> list:
+        return self[0]
+
+    @property
+    def complete(self) -> bool:
+        return self[1]
 
 
 def _is_directory_redirect(path: Path) -> bool:
@@ -165,8 +205,9 @@ def _verified_regular_file_link(path: Path) -> bool:
             and first.st_dev == last.st_dev and first.st_ino == last.st_ino)
 
 
-def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
-    """Find nested locks for a subtree query, with a fail-closed work bound.
+def _descendant_locks(target: Path, now: datetime, limit: int | None = None,
+                      time_limit: float | None = None) -> DescendantResult:
+    """Find nested locks for a subtree query, with a fail-closed work bound and time limit.
 
     The normal ancestor lookup is fast, but asking about a project root must
     also see a LOCK under tests/ or src/. On a huge tree the bounded walk may
@@ -175,36 +216,47 @@ def _descendant_locks(target: Path, now: datetime, limit: int | None = None):
     hits = []
     if limit is None:
         limit = CHECK_DIR_MAX_DESCENDANTS
+    if time_limit is None:
+        time_limit = CHECK_DIR_WALK_TIMEOUT_SECONDS
+    start_time = time.monotonic()
     pending = [target]
     visited = 0
     while pending:
+        if time_limit is not None and (time.monotonic() - start_time) > time_limit:
+            return DescendantResult(hits, False, "walk-timeout")
         current = pending.pop()
         try:
             if _is_directory_redirect(current):
-                return hits, False
-            entries = list(current.iterdir())
+                return DescendantResult(hits, False, "directory-redirect")
             children = []
-            for entry in entries:
-                if entry.name == ".git":
-                    continue
-                if _is_directory_redirect(entry):
-                    if _verified_regular_file_link(entry):
+            with os.scandir(current) as it:
+                for entry in it:
+                    if entry.name.lower() in CHECK_DIR_EXCLUDED_DESCENDANT_DIRS:
                         continue
-                    return hits, False
-                if entry.is_dir():
-                    children.append(entry)
+                    try:
+                        child_path = Path(entry.path)
+                        if _is_directory_redirect(child_path):
+                            if _verified_regular_file_link(child_path):
+                                continue
+                            return DescendantResult(hits, False, "directory-redirect")
+                        if entry.is_dir():
+                            children.append(child_path)
+                    except OSError:
+                        return DescendantResult(hits, False, "unreadable-directory")
         except OSError:
-            return hits, False
+            return DescendantResult(hits, False, "unreadable-directory")
         for child in children:
             visited += 1
             if visited > limit:
-                return hits, False
+                return DescendantResult(hits, False, "descendants-limit-exceeded")
+            if time_limit is not None and (time.monotonic() - start_time) > time_limit:
+                return DescendantResult(hits, False, "walk-timeout")
             try:
                 hits.extend(lock_utils.active_locks_affecting_target(child, target, now))
             except OSError:
-                return hits, False
+                return DescendantResult(hits, False, "unreadable-directory")
             pending.append(child)
-    return hits, True
+    return DescendantResult(hits, True, None)
 
 
 def host_name() -> str:
@@ -652,8 +704,9 @@ def _check_create_dir(target: Path, anchor: Path, as_json: bool, strict: bool,
 
 
 def _check_dir(target: Path, as_json: bool, strict: bool,
-               roots_file: Path | None = None, *, creation_anchor: Path | None = None) -> int:
-    """--check-dir: worktree-aware lock check for exactly ONE directory (no
+               roots_file: Path | None = None, *, creation_anchor: Path | None = None,
+               shallow: bool = False, walk_timeout: float | None = None) -> int:
+    """--check-dir: worktree-aware lock check for exactly ONE directory or file (no
     full scan). See lock_utils.active_locks_for_path().
 
     Also reports active git guard hooks (pre-push/pre-commit/pre-receive)
@@ -684,6 +737,8 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             print("lock_scan --check-dir: UNDETERMINED, check_dir_max_descendants "
                   f"must be an integer from 1 to {CHECK_DIR_MAX_DESCENDANTS_CEILING}.")
         return 1
+    if walk_timeout is None:
+        walk_timeout = config.get("check_dir_walk_timeout_seconds", CHECK_DIR_WALK_TIMEOUT_SECONDS)
     query_error = _query_redirect_or_error(target, config)
     if query_error is not None:
         if as_json:
@@ -695,7 +750,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
                   "a query-path redirect can hide lexical ancestor locks.")
         return 1
     target = target.resolve()
-    if not target.is_dir() and creation is None:
+    if not target.exists() and creation is None:
         msg = f"lock_scan --check-dir: {target} does not exist -- not 'free', a usage error."
         if as_json:
             print(json.dumps({"checked": str(target), "error": "target-not-found"},
@@ -703,10 +758,17 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         else:
             print(msg, file=sys.stderr)
         return 2
+
+    target_is_file = target.is_file()
+    target_type = "file" if target_is_file else "directory"
+    check_dir = target.parent if target_is_file else target
+
     now = datetime.now(timezone.utc)
     try:
-        main_root = lock_utils.worktree_main_dir(target)
-        hits = lock_utils.active_locks_for_path(target, now)
+        main_root = lock_utils.worktree_main_dir(check_dir)
+        hits = lock_utils.active_locks_for_path(check_dir, now)
+        if target_is_file:
+            hits = [h for h in hits if h[2] or lock_utils.lock_applies_to_target(h[3] / h[0], target)]
     except lock_utils.GitPathResolutionError as exc:
         if as_json:
             print(json.dumps({"checked": str(target), "error": "git-worktree-unresolved",
@@ -715,10 +777,15 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
         else:
             print(f"lock_scan --check-dir: {target} -- UNDETERMINED ({exc}).")
         return 1
-    if creation is None:
-        nested_hits, descendants_complete = _descendant_locks(target, now, limit=descendant_limit)
+
+    undetermined_reason = None
+    if creation is not None or target_is_file or shallow:
+        nested_hits, descendants_complete = [], True
     else:
-        nested_hits, descendants_complete = [], True  # no existing target descendants
+        nested_res = _descendant_locks(target, now, limit=descendant_limit, time_limit=walk_timeout)
+        nested_hits, descendants_complete = nested_res
+        if not descendants_complete:
+            undetermined_reason = getattr(nested_res, "undetermined_reason", None) or "descendants-limit-exceeded"
     hits.extend(nested_hits)
 
     # Two-trees rule: the twin in the other tree counts as well
@@ -729,7 +796,7 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     # A worktree is not registered as a separate clone in the twin index.
     # Resolve its main clone first; likewise walk up from mirror subfolders to
     # the pointer. Keep the same relative path on the opposite tree.
-    twin_query = target
+    twin_query = check_dir
     twins, twin_status = lock_utils.twin_dirs_for_path(twin_query, twin_cfg)
     # twin_dirs_for_path returns all registered twins, and for a subpath also
     # its mapped child in EACH twin. Keep every terminal mapped path, not only
@@ -738,9 +805,9 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     if not twins and twin_status in ("ok", "not-applicable", "index-unmapped"):
         anchor = main_root
         if anchor is None:
-            anchor = next((p for p in (target, *target.parents)
+            anchor = next((p for p in (check_dir, *check_dir.parents)
                            if _has_repo_pointer(p)), None)
-        if anchor is not None and anchor != target:
+        if anchor is not None and anchor != check_dir:
             anchor_twins, anchor_status = lock_utils.twin_dirs_for_path(anchor, twin_cfg)
             if anchor_status != "not-applicable":
                 twin_query = anchor
@@ -748,13 +815,13 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             if twins:
                 try:
                     if main_root is not None:
-                        top = lock_utils.git_worktree_top_dir(target)
+                        top = lock_utils.git_worktree_top_dir(check_dir)
                         if top is None:
                             raise lock_utils.GitPathResolutionError(
-                                f"Git worktree root is missing: {target}")
-                        relative = target.relative_to(top)
+                                f"Git worktree root is missing: {check_dir}")
+                        relative = check_dir.relative_to(top)
                     else:
-                        relative = target.relative_to(anchor)
+                        relative = check_dir.relative_to(anchor)
                 except (OSError, ValueError, subprocess.SubprocessError):
                     relative = Path(".")  # root query is conservative on uncertainty
                 mapped_twins = [t / relative for t in twins]
@@ -762,10 +829,15 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
     twin_hits = []
     for mapped in mapped_twins:
         twin_hits.extend(lock_utils.active_locks_for_path(mapped, now))
-        if mapped.is_dir():
-            twin_nested, twin_complete = _descendant_locks(mapped, now, limit=descendant_limit)
+        if mapped.is_dir() and not (target_is_file or shallow):
+            twin_res = _descendant_locks(mapped, now, limit=descendant_limit, time_limit=walk_timeout)
+            twin_nested, twin_complete = twin_res
             twin_hits.extend(twin_nested)
             descendants_complete = descendants_complete and twin_complete
+            if not twin_complete and not undetermined_reason:
+                undetermined_reason = getattr(twin_res, "undetermined_reason", None) or "descendants-limit-exceeded"
+    if target_is_file:
+        twin_hits = [h for h in twin_hits if h[2] or lock_utils.lock_applies_to_target(h[3] / h[0], target)]
     hits.extend(twin_hits)
 
     rows = [
@@ -776,12 +848,12 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
             "from_main_repo_of_worktree": bool(
                 main_root is not None
                 and (source_dir == main_root or source_dir in main_root.parents)
-                and source_dir != target and source_dir not in target.parents),
+                and source_dir != check_dir and source_dir not in check_dir.parents),
             "from_twin": (name, scope, is_legacy, source_dir) in twin_hits,
         }
         for name, scope, is_legacy, source_dir in hits
     ]
-    guards = lock_utils.git_hook_guards(target)
+    guards = lock_utils.git_hook_guards(check_dir)
 
     creation_payload = {}
     if creation is not None:
@@ -796,14 +868,26 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
                                  "twins_descendants_complete": descendants_complete,
                                  "checks_complete": True})
 
+    if not descendants_complete and not undetermined_reason:
+        undetermined_reason = "descendants-incomplete"
+    elif twin_status not in ("ok", "not-applicable") and not undetermined_reason:
+        undetermined_reason = f"twin-status-{twin_status}"
+
     if as_json:
-        print(json.dumps(
-            {"checked": str(target), "locks": rows, "hook_guards": guards,
-             "twin_status": twin_status,
-             "descendants_complete": descendants_complete if creation is None else None,
-             "twins_checked": [str(t) for t in twins], **creation_payload},
-            ensure_ascii=False, indent=2,
-        ))
+        payload = {
+            "checked": str(target),
+            "locks": rows,
+            "hook_guards": guards,
+            "twin_status": twin_status,
+            "descendants_complete": descendants_complete if creation is None else None,
+            "twins_checked": [str(t) for t in twins],
+            **creation_payload,
+        }
+        if creation is None:
+            payload["target_type"] = target_type
+        if undetermined_reason is not None:
+            payload["undetermined_reason"] = undetermined_reason
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         if rows:
             return 1
         if twin_status not in ("ok", "not-applicable") or not descendants_complete:
@@ -812,7 +896,8 @@ def _check_dir(target: Path, as_json: bool, strict: bool,
 
     if not rows:
         if not descendants_complete:
-            print(f"lock_scan --check-dir: {target} -- UNDETERMINED, nested lock scan incomplete (limit, unreadable directory or link).")
+            reason_str = undetermined_reason or "limit, unreadable directory or link"
+            print(f"lock_scan --check-dir: {target} -- UNDETERMINED, nested lock scan incomplete ({reason_str}).")
         elif twin_status == "pointer-unreadable":
             print(
                 f"lock_scan --check-dir: {target} -- UNDETERMINED, not 'free'. "
@@ -914,6 +999,19 @@ def main() -> int:
         "exit code).",
     )
     parser.add_argument(
+        "--shallow",
+        "--no-descendants",
+        dest="shallow",
+        action="store_true",
+        help="With --check-dir: check only ancestors and the target itself without scanning the descendant subtree.",
+    )
+    parser.add_argument(
+        "--walk-timeout",
+        type=float,
+        default=None,
+        help="With --check-dir: maximum seconds for descendant walk (default 15.0s).",
+    )
+    parser.add_argument(
         "--verify-fence",
         metavar="LOCKFILE",
         help="Check whether the grant number given with --fence is still the "
@@ -957,7 +1055,8 @@ def main() -> int:
 
     if args.check_dir:
         return _check_dir(Path(args.check_dir), args.json, args.strict,
-                          Path(args.roots_file))
+                          Path(args.roots_file), shallow=args.shallow,
+                          walk_timeout=args.walk_timeout)
 
     config = load_config(Path(args.roots_file))
     twin_cfg = config.get("twin_resolution") or {}

@@ -912,3 +912,112 @@ class TestExplicitProtectedPaths:
             assert _check_dir(nested_clone, True, False, config) == 1
         finally:
             _git("worktree", "remove", "--force", str(wt), cwd=git_repo)
+
+
+class TestFastPathExclusionsAndFiles:
+    def test_excluded_directories_skipped_in_descendant_walk(self, tmp_path, capsys):
+        """Excluded dirs like .git, .venv, node_modules, .pytest_temp are not traversed."""
+        # Create excluded subdirectories with LOCK files inside
+        for excl in [".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_temp", ".pytest_cache", ".ruff_cache", ".mypy_cache", "target", "dist", "build"]:
+            d = tmp_path / excl / "nested"
+            d.mkdir(parents=True)
+            (d / "LOCK.user.txt").write_text("owner: test\n", encoding="utf-8")
+
+        # Also create a legitimate clean directory
+        (tmp_path / "src").mkdir()
+
+        # Check dir should skip all excluded dirs and report free
+        exit_code = _check_dir(tmp_path, as_json=True, strict=False)
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["descendants_complete"] is True
+        assert payload["locks"] == []
+        assert payload["target_type"] == "directory"
+
+    def test_file_target_succeeds_without_descendant_walk(self, tmp_path, capsys):
+        """--check-dir on an existing file succeeds without descending."""
+        f = tmp_path / "module.py"
+        f.write_text("print('hello')", encoding="utf-8")
+
+        exit_code = _check_dir(f, as_json=True, strict=False)
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["checked"] == str(f.resolve())
+        assert payload["target_type"] == "file"
+        assert payload["descendants_complete"] is True
+        assert payload["locks"] == []
+
+    def test_file_target_ancestor_lock_fails_closed(self, tmp_path, capsys):
+        """Ancestor lock above a file still locks the file (fail-closed)."""
+        f = tmp_path / "sub" / "script.py"
+        f.parent.mkdir(parents=True)
+        f.write_text("code", encoding="utf-8")
+
+        # Place lock in tmp_path (ancestor)
+        stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        (tmp_path / "LOCK.user.txt").write_text(
+            f"owner: operator\ncreated: {stamp}\nexpires_after: 24h\n", encoding="utf-8"
+        )
+
+        exit_code = _check_dir(f, as_json=True, strict=False)
+        assert exit_code == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["target_type"] == "file"
+        assert len(payload["locks"]) == 1
+        assert payload["locks"][0]["path"] == str(tmp_path / "LOCK.user.txt")
+
+    def test_file_target_parent_scoped_lock_respects_file(self, tmp_path, capsys):
+        """Lock in parent with protected_paths only locks the specified target file."""
+        f1 = tmp_path / "allowed.py"
+        f2 = tmp_path / "blocked.py"
+        f1.write_text("allowed", encoding="utf-8")
+        f2.write_text("blocked", encoding="utf-8")
+
+        stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        (tmp_path / "LOCK.starter.txt").write_text(
+            f"owner: agent\ncreated: {stamp}\nexpires_after: 24h\npaths_version: 1\nprotected_paths: blocked.py\n",
+            encoding="utf-8",
+        )
+
+        # blocked.py is locked
+        assert _check_dir(f2, as_json=True, strict=False) == 1
+        capsys.readouterr()
+
+        # allowed.py is free
+        assert _check_dir(f1, as_json=True, strict=False) == 0
+        capsys.readouterr()
+
+    def test_shallow_flag_skips_descendants(self, tmp_path, capsys):
+        """--shallow skips descendant checking and reports free if target and ancestors are free."""
+        sub = tmp_path / "nested"
+        sub.mkdir()
+        (sub / "LOCK.user.txt").write_text("owner: agent\n", encoding="utf-8")
+
+        # Normal check sees nested lock
+        assert _check_dir(tmp_path, as_json=True, strict=False, shallow=False) == 1
+        capsys.readouterr()
+
+        # Shallow check ignores nested lock
+        assert _check_dir(tmp_path, as_json=True, strict=False, shallow=True) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["descendants_complete"] is True
+        assert payload["locks"] == []
+
+    def test_undetermined_reason_on_walk_limit(self, tmp_path, monkeypatch, capsys):
+        """When descendant walk limit is exceeded, undetermined_reason is set."""
+        (tmp_path / "d1").mkdir()
+        (tmp_path / "d2").mkdir()
+        monkeypatch.setattr(lock_scan, "CHECK_DIR_MAX_DESCENDANTS", 1)
+
+        assert _check_dir(tmp_path, as_json=True, strict=False) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["descendants_complete"] is False
+        assert payload["undetermined_reason"] == "descendants-limit-exceeded"
+
+    def test_undetermined_reason_on_walk_timeout(self, tmp_path, capsys):
+        """When descendant walk times out, undetermined_reason is walk-timeout."""
+        (tmp_path / "d1").mkdir()
+        assert _check_dir(tmp_path, as_json=True, strict=False, walk_timeout=-1.0) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["descendants_complete"] is False
+        assert payload["undetermined_reason"] == "walk-timeout"
