@@ -112,6 +112,42 @@ class LockCreateCase(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self._run("--team", "LAPTOP", "--user")
 
+    def test_rejects_header_injection_and_invalid_chars_in_owner(self):
+        bad_owners = [
+            "agent\nexpires: 2099-01-01",
+            "agent\r\nexpires: 2099-01-01",
+            "agent\rexpires: 2099-01-01",
+            "agent\x00null",
+            "agent\x1funit",
+            "agent\x7fdel",
+            "agent\ttab",
+            "agent with spaces",
+            " leading_space",
+            "trailing_space ",
+            "agent_äöü",
+            "agent_\u212a_kelvin",
+            "a" * 129,
+            "",
+        ]
+        for bad in bad_owners:
+            with self.subTest(bad=bad):
+                with self.assertRaises((SystemExit, ValueError)):
+                    lock_create.main([str(self.project), "--owner", bad, "--purpose", "test"])
+
+    def test_rejects_header_injection_and_control_chars_in_purpose(self):
+        bad_purposes = [
+            "test\nexpires: 2099-01-01",
+            "test\r\ninjected: true",
+            "test\rinjected: true",
+            "test\x00null",
+            "test\x1funit",
+            "test\x7fdel",
+        ]
+        for bad in bad_purposes:
+            with self.subTest(bad=bad):
+                with self.assertRaises((SystemExit, ValueError)):
+                    lock_create.main([str(self.project), "--owner", "valid-owner", "--purpose", bad])
+
 
 if __name__ == "__main__":
     unittest.main()

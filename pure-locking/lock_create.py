@@ -31,6 +31,24 @@ from lock_utils import created_utc_iso, is_lock_file, lock_fence, new_fence
 _SCOPE_OK = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
 
+def check_owner(owner: str) -> str:
+    """Validate owner field: printable ASCII (32 < ord(c) < 127, max 128 chars) without whitespace or control chars."""
+    if not owner or len(owner) > 128:
+        raise ValueError(f"invalid owner length: {len(owner) if owner else 0} (must be 1-128 chars)")
+    if any(ord(c) <= 32 or ord(c) >= 127 for c in owner):
+        raise ValueError(f"invalid owner {owner!r} -- allowed: printable ASCII (32 < ord(c) < 127) without whitespace")
+    return owner
+
+
+def check_purpose(purpose: str | None) -> str | None:
+    """Validate purpose field: free text, but refuses CR/LF and control characters."""
+    if purpose is None:
+        return None
+    if any(c in "\r\n" or ord(c) < 32 or ord(c) == 127 for c in purpose):
+        raise ValueError(f"invalid purpose {purpose!r}: contains control characters or newlines")
+    return purpose
+
+
 def _check_segment(value: str, what: str) -> str:
     """Validate a file-name segment (scope or team host)."""
     if not value or any(c not in _SCOPE_OK for c in value):
@@ -62,8 +80,10 @@ def build_lock_name(scope: str | None, team_host: str | None,
 
 def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
     """Render the key: value body of the lock file."""
+    owner = check_owner(args.owner)
+    purpose = check_purpose(args.purpose)
     lines = [
-        f"owner: {args.owner}",
+        f"owner: {owner}",
         # Sekundengenau: Bei Minutengenauigkeit landen zwei fast gleichzeitige
         # Anspruechen im Host-Tiebreak, und dort verliert derselbe Host
         # strukturell immer. lock_utils._parse_created liest Sekunden bereits.
@@ -86,8 +106,8 @@ def build_lock_body(args: argparse.Namespace, scope_label: str) -> str:
     if args.release_condition:
         lines.append(f"release_condition: {args.release_condition}")
     lines.append(f"mode: {args.mode}")
-    if args.purpose:
-        lines.append(f"purpose: {args.purpose}")
+    if purpose:
+        lines.append(f"purpose: {purpose}")
     lines.append(f"scope: {scope_label}")
     if getattr(args, "paths", None):
         lines.append("paths_version: 1")
@@ -205,7 +225,18 @@ def main(argv: list[str] | None = None) -> int:
         args.host = args.team
     else:
         args.host = args.host or platform.node() or "unknown"
-    args.owner = args.owner or f"lock_create/{args.host}"
+    if args.owner is None:
+        args.owner = f"lock_create/{args.host}"
+    try:
+        args.owner = check_owner(args.owner)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if args.purpose is not None:
+        try:
+            args.purpose = check_purpose(args.purpose)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     name = build_lock_name(args.scope, args.team, args.user, args.condition)
     if not is_lock_file(name):  # defence in depth: must match the canonical regex
