@@ -103,9 +103,19 @@ def test_look_alike_paths_are_not_guard_files(path):
     "some/path/with~1/segment.py",
     ".\\PURE-L~1\\guard.py",
     "foo~2/bar.py",
+    "docs/notes~1.md",
 ])
 def test_short_83_name_segments_treated_as_guard_fail_closed(path):
     assert gp.is_guard(path)
+
+
+@pytest.mark.parametrize("path", [
+    "my_long_filename~1.md",
+    "docs/my_long_notes~1.txt",
+    "some/deep/very_long_directory_name~1/file.py",
+])
+def test_non_83_longer_prefix_segments_are_not_flagged(path):
+    assert not gp.is_guard(path)
 
 
 def test_contributing_lists_every_guard_path_in_both_languages():

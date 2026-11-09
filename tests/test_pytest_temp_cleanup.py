@@ -52,9 +52,33 @@ def test_sessionfinish_cleans_up_all_lock_files_in_basetemp(tmp_path: Path):
 
     conftest.pytest_sessionfinish(session, 0)
 
+    # All LOCK* files MUST be removed and .pytest_temp itself should be removed
+    assert not basetemp.exists()
+
+
+def test_sessionfinish_preserves_custom_basetemp_dir_but_removes_locks(tmp_path: Path):
+    from tests import conftest
+
+    custom_basetemp = tmp_path / "custom_temp_folder"
+    custom_basetemp.mkdir()
+    (custom_basetemp / "subfolder").mkdir()
+
+    (custom_basetemp / "LOCK.txt").write_text("owner: test\n", encoding="utf-8")
+    (custom_basetemp / "subfolder" / "LOCK.user.txt").write_text("owner: user\n", encoding="utf-8")
+    (custom_basetemp / "keep_me.txt").write_text("keep this\n", encoding="utf-8")
+
+    config = SimpleNamespace(option=SimpleNamespace(basetemp=str(custom_basetemp)), rootpath=ROOT)
+    session = SimpleNamespace(config=config)
+
+    conftest.pytest_sessionfinish(session, 0)
+
+    # Directory and non-lock files MUST be preserved
+    assert custom_basetemp.is_dir()
+    assert (custom_basetemp / "keep_me.txt").read_text(encoding="utf-8") == "keep this\n"
+
     # All LOCK* files MUST be removed
-    leftover_locks = list(basetemp.rglob("LOCK*")) if basetemp.is_dir() else []
-    assert leftover_locks == [], f"Found leftover lock files after sessionfinish: {leftover_locks}"
+    leftover_locks = list(custom_basetemp.rglob("LOCK*"))
+    assert leftover_locks == [], f"Found leftover lock files in custom basetemp: {leftover_locks}"
 
 
 def test_onedrive_basetemp_guard_protects_cloud_storage(tmp_path: Path):

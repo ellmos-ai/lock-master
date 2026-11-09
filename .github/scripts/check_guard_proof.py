@@ -38,7 +38,7 @@ PLACEHOLDER = re.compile(r"<[^<>]*>")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
-SHORT_SEGMENT = re.compile(r"~[0-9]+")
+SHORT_83_SEGMENT = re.compile(r"^[^~]{1,6}~[0-9]+(\.[^.]{0,3})?$", re.IGNORECASE)
 
 
 def normalize(path: str) -> str:
@@ -54,18 +54,11 @@ def is_guard(path: str) -> bool:
     norm = normalize(path)
     if any(norm == g or (g.endswith("/") and norm.startswith(g)) for g in GUARD_PATHS):
         return True
-    # Windows 8.3 short-name segments (e.g. pure-l~1, team-l~1, lock-m~1): fail-closed.
-    # If any path segment contains ~[0-9]+, treat as protected guard.
+    # Windows 8.3 short-name segments (e.g. pure-l~1, team-l~1, plugin~1): fail-closed.
+    # Segments matching the Windows 8.3 short-name format are treated as protected guard paths
+    # because on 8.3 filesystems they could alias a guard directory or file.
     segments = norm.split("/")
-    if any(SHORT_SEGMENT.search(seg) for seg in segments):
-        try:
-            resolved = Path(path).resolve()
-            repo_root = Path(__file__).resolve().parent.parent.parent
-            rel = resolved.relative_to(repo_root).as_posix().casefold()
-            if any(rel == g.rstrip("/").casefold() or rel.startswith(g.casefold()) for g in GUARD_PATHS):
-                return True
-        except (ValueError, OSError):
-            pass
+    if any(SHORT_83_SEGMENT.match(seg) for seg in segments):
         return True
     return False
 

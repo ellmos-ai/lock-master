@@ -128,8 +128,10 @@ def actor() -> str:
 
 def owner_prefixes() -> list[str]:
     raw = os.environ.get("ELLMOS_LOCK_OWNER")
-    if raw is not None:
-        return [p.strip().lower() for p in raw.split(",") if p.strip() and p.strip().isascii()]
+    if raw is not None and raw.strip():
+        owners = [p.strip().lower() for p in raw.split(",") if p.strip() and p.strip().isascii()]
+        if owners:
+            return owners
     return [f"{actor()}@{host_token().lower()}"]
 
 

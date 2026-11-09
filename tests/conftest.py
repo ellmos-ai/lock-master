@@ -35,9 +35,14 @@ def pytest_configure(config: pytest.Config) -> None:
     if not basetemp_opt:
         basetemp_opt = config.getoption("basetemp") if hasattr(config, "getoption") else None
 
+    # Anchor relative basetemp to repo root
+    if basetemp_opt and not Path(basetemp_opt).is_absolute():
+        config.option.basetemp = str((root / basetemp_opt).resolve())
+
     # If the project or basetemp is inside OneDrive / CloudStorage, redirect to safe local temp
-    target_path = (root / basetemp_opt).resolve() if basetemp_opt else root
-    if _is_cloud_or_onedrive(root) or (basetemp_opt and _is_cloud_or_onedrive(target_path)):
+    current_basetemp = getattr(config.option, "basetemp", None) or basetemp_opt
+    target_path = Path(current_basetemp).resolve() if current_basetemp else root
+    if _is_cloud_or_onedrive(root) or (current_basetemp and _is_cloud_or_onedrive(target_path)):
         safe_temp = Path(tempfile.gettempdir()) / "lock-master-pytest-temp"
         safe_temp.mkdir(parents=True, exist_ok=True)
         config.option.basetemp = str(safe_temp)
@@ -49,7 +54,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         basetemp_val = getattr(session.config.option, "basetemp", None)
         if not basetemp_val:
             return
-        bt = Path(basetemp_val).resolve()
+        root = Path(session.config.rootpath).resolve()
+        bt = (root / basetemp_val).resolve()
         if not bt.is_dir():
             return
 
@@ -61,7 +67,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             except OSError:
                 pass
 
-        # 2. Try removing the entire basetemp folder if it is .pytest_temp or a tempdir
-        shutil.rmtree(bt, ignore_errors=True)
+        # 2. Only remove the entire basetemp folder if it is an expected dedicated test temp dir
+        if bt.name in (".pytest_temp", "lock-master-pytest-temp"):
+            shutil.rmtree(bt, ignore_errors=True)
     except Exception:
         pass

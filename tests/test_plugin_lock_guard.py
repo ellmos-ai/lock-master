@@ -65,6 +65,29 @@ def test_owner_prefix_from_environment(project, monkeypatch):
     assert denied(edit(project / "src" / "a.py"))
 
 
+def test_owner_prefixes_empty_or_whitespace_or_commas_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("COMPUTERNAME", "TESTHOST")
+    monkeypatch.delenv("ELLMOS_LOCK_ACTOR", raising=False)
+
+    monkeypatch.delenv("ELLMOS_LOCK_OWNER", raising=False)
+    assert lock_guard.owner_prefixes() == ["claude-code@testhost"]
+
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", "")
+    assert lock_guard.owner_prefixes() == ["claude-code@testhost"]
+
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", "   ")
+    assert lock_guard.owner_prefixes() == ["claude-code@testhost"]
+
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", " , ")
+    assert lock_guard.owner_prefixes() == ["claude-code@testhost"]
+
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", " ,  , ,, ")
+    assert lock_guard.owner_prefixes() == ["claude-code@testhost"]
+
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", "custom-owner, another-owner")
+    assert lock_guard.owner_prefixes() == ["custom-owner", "another-owner"]
+
+
 def test_unicode_kelvin_owner_comparison_is_not_matched_as_ascii(project, monkeypatch):
     kelvin_host = "WOR\u212aSTATION"
     ascii_host = "WORKSTATION"
@@ -87,8 +110,12 @@ def test_unicode_kelvin_owner_comparison_is_not_matched_as_ascii(project, monkey
 
     # 3. Lock owned by ASCII owner must NOT match session configured with Kelvin prefix
     write_lock(project, "LOCK.txt", owner=f"claude-code@{ascii_host}", host=ascii_host)
-    monkeypatch.setenv("ELLMOS_LOCK_OWNER", f"claude-code@{kelvin_host}")
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", f"other-agent@otherhost,claude-code@{kelvin_host}")
     assert denied(payload)
+
+    # 4. Pure non-ASCII owner input falls back to default actor@host prefix
+    monkeypatch.setenv("ELLMOS_LOCK_OWNER", f"claude-code@{kelvin_host}")
+    assert lock_guard.owner_prefixes() == [f"claude-code@{ascii_host.lower()}"]
 
 
 def test_team_lock_same_host_allows_other_host_denies(project, monkeypatch):
