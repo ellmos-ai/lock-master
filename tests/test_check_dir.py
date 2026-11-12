@@ -66,7 +66,7 @@ def write_twin_index(index: Path, clone: Path, mirrors: list[Path]) -> None:
             "schema": "ellmos-repo-pointer-v1",
             "repo_id": f"ellmos-ai/{clone.name}",
             "local_locator": {"repo_name": clone.name,
-                              "windows_default": str(clone)},
+                              "canonical_path": str(clone)},
         }), encoding="utf-8")
     index.write_text(json.dumps(lock_utils.build_twin_index(mirrors)),
                      encoding="utf-8")
@@ -247,7 +247,7 @@ class TestActiveLocksForPath:
                 "schema": "ellmos-repo-pointer-v1",
                 "repo_id": f"ellmos-ai/{clone_name}",
                 "local_locator": {"repo_name": clone_name,
-                                  "windows_default": str(clone)},
+                                  "canonical_path": str(clone)},
             }, ensure_ascii=False), encoding="utf-8")
             assert lock_create.main([
                 str(mirror), "--scope", "secret", "--path", relative.as_posix(),
