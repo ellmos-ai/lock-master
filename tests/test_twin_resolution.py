@@ -28,11 +28,19 @@ import lock_utils  # noqa: E402
 B = chr(92)  # Backslash, bewusst nicht als Literal (Windows-Pfade in JSON)
 
 
-def _pointer(repo_name: str, clone: Path) -> str:
+def _pointer(repo_name: str, clone: Path, *, macos_clone: Path | str | None = None,
+             repo_id: str | None = None) -> str:
+    local_locator = {"repo_name": repo_name, "windows_default": str(clone)}
+    if macos_clone is not None:
+        local_locator["macos_default"] = str(macos_clone)
+    elif lock_utils.platform.system() == "Darwin":
+        # These generic synthetic fixtures model a same-host twin pair. A
+        # Windows locator must not be treated as a macOS filesystem path.
+        local_locator["macos_default"] = str(clone)
     return json.dumps({
         "schema": "ellmos-repo-pointer-v1",
-        "repo_id": f"ellmos-ai/{repo_name}",
-        "local_locator": {"repo_name": repo_name, "windows_default": str(clone)},
+        "repo_id": repo_id or f"ellmos-ai/{repo_name}",
+        "local_locator": local_locator,
     }, ensure_ascii=False, indent=2)
 
 
@@ -217,13 +225,16 @@ def test_klon_ordner_darf_anders_heissen_als_repo_name():
         assert twin.resolve() in [Path(d).resolve() for d in dirs], dirs
 
 
-def test_andere_pointer_schemata_gelten_als_lesbar():
+def test_andere_pointer_schemata_gelten_als_lesbar(monkeypatch):
     """REPO.pointer.json existiert im Bestand in mehreren Formen. Am lebenden
     Baum gemessen: 3 von 29 Pointern nannten weder local_locator.repo_name noch
     repo_id, sondern top-level repo_name/canonical_path bzw. project/local_clone.
     Sie als "unlesbar" zu behandeln haette drei gesunde Repos fail-closed
     blockiert -- ein Waechter, der grundlos Alarm schlaegt, wird nicht mehr
     gelesen. (T-20260913-715231627)"""
+    # This legacy-schema compatibility check is about the Windows locator
+    # spelling; keep it independent from the host running the test suite.
+    monkeypatch.setattr(lock_utils.platform, "system", lambda: "Windows")
     varianten = [
         {"local_locator": {"repo_name": "demo", "windows_default": "C:/x/demo"}},
         {"repo_name": "demo", "canonical_path": "C:/x/demo"},
@@ -236,6 +247,100 @@ def test_andere_pointer_schemata_gelten_als_lesbar():
         assert lock_utils._pointer_clone_path(v) is not None, v
     # Ein Pointer, der ueber seinen Klon nichts sagt, bleibt unlesbar.
     assert lock_utils._pointer_repo_name({"schema": "x"}) is None
+
+
+def test_macos_locator_is_platform_selected_and_legacy_hosts_are_unchanged(monkeypatch):
+    pointer = {
+        "local_locator": {
+            "repo_name": "demo",
+            "windows_default": "C:/_LOCAL_DEV/repos/demo",
+            "macos_default": "/Users/lukas/services/demo",
+        }
+    }
+    monkeypatch.setattr(lock_utils.platform, "system", lambda: "Darwin")
+    assert lock_utils._pointer_clone_path(pointer).as_posix() == "/Users/lukas/services/demo"
+
+    monkeypatch.setattr(lock_utils.platform, "system", lambda: "Windows")
+    assert lock_utils._pointer_clone_path(pointer).as_posix() == "C:/_LOCAL_DEV/repos/demo"
+
+    monkeypatch.setattr(lock_utils.platform, "system", lambda: "Linux")
+    assert lock_utils._pointer_clone_path(pointer).as_posix() == "C:/_LOCAL_DEV/repos/demo"
+
+
+def test_macos_missing_wrong_platform_and_ambiguous_locators_fail_closed(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(lock_utils.platform, "system", lambda: "Darwin")
+    clone = tmp_path / "repos" / "demo"
+    clone.mkdir(parents=True)
+    twin = tmp_path / "onedrive" / "demo"
+    twin.mkdir(parents=True)
+    index_path = tmp_path / "TWIN-INDEX.ASUS-GEI.json"
+    cfg = {"clone_roots": [str(clone.parent)], "index_path": str(index_path)}
+
+    # A Windows-only locator remains explicit but cannot become a Mac path.
+    pointer = {
+        "schema": "ellmos-repo-pointer-v1",
+        "repo_id": "ellmos-ai/demo",
+        "local_locator": {
+            "repo_name": "demo",
+            "windows_default": "C:/_LOCAL_DEV/repos/demo",
+        },
+    }
+    pointer_path = twin / lock_utils.REPO_POINTER_NAME
+    pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
+    assert lock_utils._pointer_clone_path(pointer) is None
+    assert lock_utils.twin_dirs_for_path(twin, cfg) == ([], "pointer-unresolved")
+
+    index = lock_utils.build_twin_index([twin])
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(clone, cfg) == ([], "index-unresolved")
+
+    # Two different active-platform declarations are not resolved by order.
+    pointer["local_locator"]["macos_default"] = str(clone)
+    pointer["macos_default"] = str(tmp_path / "other-repos" / "demo")
+    pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
+    assert lock_utils._pointer_clone_path(pointer) is None
+    assert lock_utils.twin_dirs_for_path(twin, cfg) == ([], "pointer-unresolved")
+
+
+def test_macos_index_uses_declared_path_and_rejects_same_name_foreign_remote(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(lock_utils.platform, "system", lambda: "Darwin")
+    clone_root = tmp_path / "repos"
+    clone = clone_root / "demo"
+    clone.mkdir(parents=True)
+    twin = tmp_path / "onedrive" / "demo"
+    twin.mkdir(parents=True)
+    pointer_path = twin / lock_utils.REPO_POINTER_NAME
+    index_path = tmp_path / "TWIN-INDEX.ASUS-GEI.json"
+    cfg = {"clone_roots": [str(clone_root)], "index_path": str(index_path)}
+    pointer_path.write_text(
+        _pointer("demo", Path("C:/_LOCAL_DEV/repos/demo"), macos_clone=clone),
+        encoding="utf-8")
+    (twin / "LOCK.user.txt").write_text(
+        "synthetic foreign lock\n", encoding="utf-8")
+
+    index = lock_utils.build_twin_index([twin], cfg)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert lock_utils.twin_dirs_for_path(twin, cfg) == ([clone], "ok")
+    dirs, status = lock_utils.twin_dirs_for_path(clone, cfg)
+    assert status == "ok", status
+    assert dirs == [twin]
+    assert lock_utils.active_locks(dirs[0]), "Counterpart lock was not visible"
+
+    # Same repository basename is insufficient when a pointer names another
+    # absolute clone path under a different remote identity.
+    foreign_clone = tmp_path / "foreign" / "demo"
+    foreign_clone.mkdir(parents=True)
+    pointer_path.write_text(
+        _pointer("demo", Path("C:/_LOCAL_DEV/repos/demo"),
+                 macos_clone=foreign_clone, repo_id="other-org/demo.git"),
+        encoding="utf-8")
+    index = lock_utils.build_twin_index([twin], cfg)
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    dirs, status = lock_utils.twin_dirs_for_path(clone, cfg)
+    assert dirs == []
+    assert status == "index-unresolved"
 
 
 def test_legacy_pointer_dateien_bleiben_lesbar(tmp_path):
