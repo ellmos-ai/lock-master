@@ -149,7 +149,7 @@ def test_two_hosts_write_and_read_only_their_own_twin_index(tmp_path, monkeypatc
         mirror.mkdir(parents=True)
         (mirror / lock_utils.REPO_POINTER_NAME).write_text(
             json.dumps({"repo_id": "o/repo-ü", "local_locator": {
-                "repo_name": "repo-ü", "windows_default": str(clone)}},
+                "repo_name": "repo-ü", "canonical_path": str(clone)}},
                 ensure_ascii=False),
             encoding="utf-8")
         monkeypatch.setenv("COMPUTERNAME", host)
