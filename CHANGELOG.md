@@ -7,6 +7,139 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-07
+
+Everything merged after the tag `v1.8.3`. Releases 1.6.4 to 1.8.3 are listed below under their own version
+sub-headings; they are not regrouped here.
+
+### Added (1.9.0 - 2026-11-07)
+
+- **Own locks for delegated workers** (T-20261107-958032576; replaces #39, reverted in #40 as fail-open):
+  - Claude Code documents `agent_id` as the unique id of the subagent or teammate a hook fires in. The hook now
+    counts a lock owned by exactly `<session name>:<agent_id>` as that worker's own. There is no prefix, no trust on
+    first use, and the owner must be ASCII.
+  - The lead, sibling workers, other sessions, a re-spawned worker and any payload without `agent_id` stay blocked.
+  - The `agent_id` must match `[A-Za-z0-9_-]{1,128}`.
+  - A new SubagentStart hook (mode `subagent`) tells the worker its owner in one line, without files or network. A
+    denial names it as a fallback.
+  - Tests: `tests/test_plugin_worker_agent_id.py`, 40 tests, 17 of them fail on `faefe3f`. Among them: r1's
+    collision probes, Unicode lookalikes and a round trip through `lock_create.py`.
+- **CI gate `guard-proof`** (#43, T-20261107-441069325). A pull request that changes a guard file (`plugin/`, `hooks/`,
+  `.claude-plugin/`, `pure-locking/`, `team-lock/`, `.mcp.json`, `.github/scripts/` and the gate workflow itself) fails
+  unless its description carries non-empty `Adversarial-Probe:` and `Probe-Ausgefuehrt-von:` lines. Files:
+  `.github/scripts/check_guard_proof.py`, `.github/workflows/guard-proof.yml`, the pull request template and the section
+  "Guard files" in `CONTRIBUTING.md`. Tests: `tests/test_check_guard_proof.py`.
+
+### Changed (1.9.0)
+
+- Release preparation: version 1.9.0 in `VERSION`, `pyproject.toml`, `.claude-plugin/plugin.json`,
+  `ellmos-module.v2.json`, `llms.txt`, both README badges and `tests/test_metadata.py`. No code change compared with
+  the merged state `700c643`.
+
+### Fixed (1.9.0) - the push check no longer blocks worktree pushes or text that mentions a push
+
+T-20261107-349313698. The hook answered "could not resolve the repository of this git push" for pushes from
+worktrees and for commands that only contained the words. Root causes, measured with `push_dirs()`:
+
+- **The worktree was not the problem, the command parsing was.** A plain `git push` from a linked worktree resolved
+  and checked the main clone's locks correctly. What failed: `cd /c/_Local_DEV/worktrees/x && git push` and
+  `git -C /c/... push` (Git Bash drive paths do not exist for Windows Python; `-C` even led to a made-up
+  `C:\c\...` directory that no lock covers), a trailing `2>&1`, and a command spanning several lines.
+- **A push was found by text search** (`\bgit\b[^\n;&|]*\bpush\b`), so `echo "git push"`, a commit message, a heredoc
+  body, `git checkout -b fix/worktree-push-detection` or `git status | grep push` counted as a push and then failed
+  the allow-list.
+
+Now the check splits the command the way bash does and accounts for every mention of `push` (`push_dirs()`, new
+`_Lexer` and `_check()`; no `shlex`, no heredoc regex). A mention counts only as one of: a plain
+`git [-C <dir>]... push` in command position, resolved through `cd <dir>` segments joined by `&&`, `;` or newlines (a
+pipe into a filter and `2>&1` are fine); the path of a `cd`; the name of a file written to; or data of a command that
+runs nothing (`echo`, `printf`, `cat`, `grep`, `head`, `tail`, `wc`, `tee`, `git commit/log/checkout/branch/stash ...`,
+`gh issue/pr/api`) whose output no later pipeline stage runs - including its quoted heredoc bodies and
+`$(cat <<'EOF' ...)` arguments. Every other mention denies as unresolvable. Comments are data, as for bash.
+
+The first version of this change (fdf5b74, e956301) decided "this is data" in the parser and was wrong in places; the
+adversarial probe on the pull request found 13 commands that `main` denied and it let through, each confirmed with a
+real bash and a bare remote (a heredoc marker inside quotes or a comment, `\"`, a heredoc fed to `source`, `.` or
+`fish`, `git -c alias.x=push x`, `echo ... | sh`, `printf ... | bash`, `| xargs sh -c`, `python -c` with subprocess),
+plus three gaps `main` has as well (backslash-newline before `push`, `$G push`, `git subtree push`). Three more were
+found while closing them: a continuation inside the word (`pu\<newline>sh`), `echo "git push" > x.sh; sh x.sh` (a
+text written to a file is fine only when nothing in the command can run a file), and unquoted Windows paths: bash
+removes unquoted backslashes, so `cd C:\x\repo ; git push` runs `cd C:xrepo`, fails, and pushes from the old directory
+(measured with Git Bash 5.3) - the first version read the Windows path and allowed it. All 47 are regression tests
+(`test_probe_case`); a differential run of 62 further commands against Git Bash found no push the hook allows.
+
+The second round of the probe (36 more cases) found one more: `printf -v c 'git -C L push'; $c` - `printf -v` stores
+the text in a variable the next command runs, so `printf` counts as data only without `-v` (no other data command can
+assign; `read`, `mapfile`, `declare`, `export`, `local`, `eval` never were data). It also showed pushes spelled
+without the letters, open on `main` too: `git p{u..u}sh`, `git pu$'\x73'h`, `git pu$(echo s)h`, `x=pu; y=sh; git $x$y`.
+These are closed now: a command that says `git` is split as well, and a git call whose subcommand word is known only
+at run time (variable, `$(...)`, brace, glob, `$'...'`) counts as a possible push - also inside `$(...)`. All 83 cases
+of round 2 are tests; the differential run against Git Bash has 77 commands now, again with no push the hook allows.
+Deep `$(...)` nesting fails closed when the text says push and is not checked otherwise.
+
+Known false alarms, kept on purpose (rewrite the command, or write files with the Write tool): text an interpreter
+or shell may run (`python -c "print('git push')"`, `python - <<PY ... PY`, `python t.py "git push"`), `printf -v`
+with a push text, unquoted backslash paths (quote them or use `/`), `$(...)` or variables in a push command, a git
+subcommand from a variable or expansion (`git $SUB`, `git "$@"`, `git ${GIT_OPTS} status`, `git p[u]sh`) - denied in
+every repository, `git push --dry-run` from a locked repository, an assignment before `cd`, `||`, `&` and subshells
+next to a push, `git grep -O` (runs its value). Out of reach, as before (strict `xfail` tests): a push whose text
+says neither push nor has a git call with a run-time subcommand - the command word from variables too, backticks, a
+file written in two steps and run, a git alias in the config, a script file run in a later command. Takes effect
+with the next plugin release. Question left open: the hook does not match the PowerShell tool (see the pull request).
+
+### Upgrade note (1.9.0)
+
+- **Why a minor release.** The merged work adds functionality in a backward-compatible way (a second accepted owner
+  form and the new SubagentStart hook event), so under Semantic Versioning it is 1.9.0, not a patch.
+- **Existing locks keep their meaning.** A lock whose owner is the session name, an owner under a shared prefix
+  (`claude-code@<HOST>`, `claude-code@<HOST>:<name>`, `ELLMOS_LOCK_OWNER`), and team, user, until and condition locks are
+  decided exactly as in 1.8.3. The only new path in the decision is the exact worker owner
+  `<session name>:<agent_id>`; no lock that was "own" or "team" before turns into a block. The form `<agent>@<HOST>`
+  for a worker is still not accepted (it is foreign, as in 1.8.3).
+- **One more hook after the plugin update.** `SubagentStart` runs `hooks/run.sh subagent`; it reads only the payload
+  (no files, no network, 20 s timeout).
+- **Live check still due after the update.** The `agent_id` in the PreToolUse payload must equal the one at
+  SubagentStart (protocol in the description of #41).
+
+### Added (1.8.3 - 2026-11-07)
+
+- **Plugin option `lease_store` (`userConfig`, `sensitive: true`).** The lease-store URL can hold a database password,
+  so Claude Code now asks for it when the plugin is enabled and keeps it in the system's credential store instead of
+  an environment variable. The hook reads it as `CLAUDE_PLUGIN_OPTION_LEASE_STORE` through the new `lease_url()`;
+  `ELLMOS_LOCK_LEASES` still works when the option is empty, and the option wins when both are set. Leaving it empty
+  keeps leases off as before. Raised by the Claude directory review of 1.8.1 ("Uses a credential from the user's
+  machine"). Tests: option before variable, fallback, fail-closed without `roshambo`, password scrubbed from errors.
+
+### Fixed (1.8.3 - 2026-11-07)
+
+- **Lease tests were order dependent.** `test_configured_leases_without_roshambo_fail_closed` blocked only the
+  `roshambo` package; once an earlier test had imported the real `roshambo.lease_store`, the import still succeeded.
+  It now blocks the submodule too. The plugin test fixtures also clear the new option variable.
+
+### Changed (1.8.2 - 2026-11-07)
+
+- **`check_deployment.py` moved from `bin/` to `tools/`.** It is a maintainer tool that compares a partial deploy of
+  this clone (on our system `<OneDrive>/_scripts`) with its manifest; plugin users never run it. In a Claude Code plugin
+  `bin/` is the folder for programs the plugin ships to users, so the file was listed as a shipped executable in the
+  Claude directory review of 1.8.1. Call it now as `python tools/check_deployment.py <target>`.
+
+### Added (1.8.2 - 2026-11-07)
+
+- **Twin status `pointer-dataless`.** A mirror `REPO.pointer.json` that is a cloud placeholder (macOS `SF_DATALESS`,
+  read fails with `EDEADLK`; Windows recall/offline attributes) no longer hides behind the generic `index-unresolved`
+  / `pointer-unreadable`. It stays fail-closed (exit 1, never "free"); `--check-dir` now names the repair: keep the
+  pointer on this device. Found 06.11.2026 on the Mac Studio, where 20 of 50 mirror pointers were dehydrated and two
+  BACH workers returned every task (PB-1, BACH #3985).
+
+### Fixed (1.8.1 - 2026-11-06)
+
+- **`lock-board` MCP server failed to connect on Windows** (`CONNECTION_CLOSED`) when Claude Code was started outside
+  Git Bash: `.mcp.json` called `sh`, which is usually not on the Windows PATH (only `Git\cmd` is). Hooks were not
+  affected because Claude Code runs hook commands through Git Bash; MCP servers it spawns directly. The server now
+  starts as `git -c alias.lock-board=!sh lock-board ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh mcp`: git is required by
+  Claude Code on Windows and runs `!` aliases in its own sh, elsewhere in the system sh (checked on macOS). Test
+  `test_mcp_json_starts_the_server_without_sh_on_path` starts the configured command with a PATH that holds no sh.
+
 ### Added (1.8.0 - 2026-10-31)
 
 - **Fencing in the plugin hook.** For a lock whose owner is a shared prefix (`claude-code@<HOST>`, `ELLMOS_LOCK_OWNER`)

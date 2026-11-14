@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lock-master"
-version = "1.8.0"
+version = "1.9.0"
 description = "Portable, zero-dependency multi-agent file-lock system — Exclusive and Team Locks (LOCK*.txt)"
 readme = "README.md"
 authors = [
@@ -84,6 +84,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra -v --basetemp=.pytest_temp"
 norecursedirs = [".git", ".pytest_cache", ".ruff_cache", "build", "dist", ".pytest_temp", ".hypothesis", ".turbo", ".nyc_output", ".tox"]
+tmp_path_retention_policy = "none"
 
 [tool.ruff]
 line-length = 120

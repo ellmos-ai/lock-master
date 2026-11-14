@@ -8,6 +8,8 @@ Modes (first argument):
                  messages of this host's team locks, and name this session.
   sessionend  -- release this session's leases (only when leases are on), its
                  team-board claims and its fence memory.
+  subagent    -- (SubagentStart) tell a delegated worker the owner name of its
+                 own locks, `<session name>:<agent_id>` (see worker_owner()).
   (--actor <name> after the mode: claude-code (default), codex or kimi. Other
    actors than claude-code get a denial as exit code 2 plus the reason on stderr,
    which is the contract Codex and Kimi Code both honour.)
@@ -15,7 +17,8 @@ Modes (first argument):
 All lock semantics come from pure-locking/lock_utils.py and team-lock/ (no
 second implementation). Local files only, unless leases are switched on.
 
-Leases (optional): with ELLMOS_LOCK_LEASES set to a roshambo lease-store URL
+Leases (optional): with a roshambo lease-store URL in the plugin option
+`lease_store` or in ELLMOS_LOCK_LEASES (see lease_url())
 (`sqlite:///path` for one computer, `postgresql://...` for several), every
 edit also takes a per-file lease for this session (TTL ELLMOS_LOCK_LEASE_TTL,
 default 900 s). A file whose lease another session holds is denied. The key is
@@ -34,7 +37,11 @@ the host, so it is fence-checked: the first time a session relies on such a lock
 the hook remembers its fence number; if the lock later carries another one (or
 none, or the file was restored), the grant moved on -- possibly to a parallel
 session with the same owner string -- and the lock is no longer treated as the
-session's own (lu.fence_status, fail-closed). Team locks of the same host are shared
+session's own (lu.fence_status, fail-closed). Subagents and in-process teammates
+share the lead's session id and so its session name; a delegated worker's own lock
+is owned by exactly `<session name>:<agent_id>` (worker_owner(): the documented
+unique `agent_id` of the payload, narrow ASCII charset; session name part
+case-folded, agent_id exact; no prefix, no fence trust). Without `agent_id` no worker owner exists. Team locks of the same host are shared
 by that host's agents; inside them a file claim (`EDITING`) held by another agent
 name denies edits to the claimed path. User and until locks block always; condition
 locks block only the operations they name.
@@ -47,7 +54,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import socket
 import subprocess
 import sys
@@ -74,7 +80,23 @@ EDIT_TOOLS = {"Edit": _FILE_OR_PATH, "Write": _FILE_OR_PATH, "MultiEdit": _FILE_
               "MoveFile": (("source",), ("destination",))}
 PATCH_HEADERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: ")
 ACTOR = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-GIT_PUSH = re.compile(r"\bgit\b[^\n;&|]*\bpush\b")
+GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix",
+                     "--config-env"}  # git global options whose value is the next word
+ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
+MSYS_DRIVE = re.compile(r"/([A-Za-z])(/.*)?")  # Git Bash spelling of a drive: /c/Users/x
+DRIVE_RELATIVE = re.compile(r"[A-Za-z]:(?![/\\])")  # C:x, what bash leaves of an unquoted C:\x
+# The push check (push_dirs): bash operators, and the commands that only read their arguments and their input.
+OPERATORS = sorted(("&&", "||", ";;&", ";;", ";&", "|&", "<<<", "<<-", "<<", ">>", "<&", ">&", "<>", ">|", "&>>", "&>",
+                    ";", "&", "|", "<", ">", "(", ")", "\n"), key=len, reverse=True)
+REDIRECTS = {"<", ">", ">>", ">|", "<>", "<&", ">&", "&>", "&>>", "<<", "<<-", "<<<"}
+FILE_WRITES = {">", ">>", ">|", "<>", "&>", "&>>"}  # and `>&` followed by a file name
+SEPARATORS = {";", "\n", "&&", "|", "|&"}  # ||, &, ;;, ( and ) leave a found push unresolved
+DATA_COMMANDS = {"echo", "printf", "cat", "grep", "egrep", "fgrep", "head", "tail", "wc", "tee"}  # run nothing they read
+GIT_DATA = {"add", "branch", "checkout", "commit", "diff", "log", "show", "stash", "status", "switch", "tag"}  # not
+# grep: `git grep -O<pager>` runs its value through the shell
+GH_DATA = {"api", "issue", "pr"}
+LIVE = ("$(", "`", "${")  # expansions that run commands inside an unquoted heredoc body
+MENTION_NOISE = re.compile(r"\\\n|\$?['\"]|[\\`]")  # what bash removes inside a word: pu''sh, p\ush, pu\<newline>sh
 EDIT_OPS = {"edit", "write", "modify", "all", "*"}
 PUSH_OPS = {"push", "git-push", "publish", "all", "*"}
 UNRESOLVED = Path("<unresolved>")
@@ -105,9 +127,29 @@ def actor() -> str:
 
 
 def owner_prefixes() -> list[str]:
-    raw = os.environ.get("ELLMOS_LOCK_OWNER", "")
-    prefixes = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return prefixes or [f"{actor()}@{host_token().lower()}"]
+    raw = os.environ.get("ELLMOS_LOCK_OWNER")
+    if raw is not None and raw.strip():
+        owners = [p.strip().lower() for p in raw.split(",") if p.strip() and p.strip().isascii()]
+        if owners:
+            return owners
+    return [f"{actor()}@{host_token().lower()}"]
+
+
+AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")  # used with fullmatch: no ':', whitespace, control or non-ASCII
+
+
+def worker_owner(payload: dict) -> str | None:
+    """`<session name>:<agent_id>` inside a subagent or in-process teammate, else None.
+
+    Claude Code documents `agent_id` as the unique identifier of the subagent or teammate a hook fires in
+    (`agent_type` only names the agent's type, so it is no identity). Workers share the lead's session id, so the
+    session name alone cannot tell them apart; the pair can, and it is unique per session: a worker spawned anew,
+    even under the same name, gets another agent_id. The charset is narrow because the owner ends up in a
+    `key: value` line of a lock file. Anything unusable yields None, i.e. the behaviour without workers."""
+    name, agent_id = session_name(payload), payload.get("agent_id")
+    if not name or not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id):
+        return None
+    return f"{name}:{agent_id}"
 
 
 def session_name(payload: dict) -> str | None:
@@ -131,6 +173,7 @@ class Session:
 
     def __init__(self, payload: dict):
         self.name = session_name(payload)
+        self.worker = worker_owner(payload)
         sid = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("session_id") or ""))[:64]
         self.file = state_dir() / f"{sid}.json" if sid else None
         self.fences: dict[str, int | None] = {}
@@ -222,63 +265,350 @@ def targets(payload: dict) -> list[tuple[str, Path]]:
     if raws is not None:
         return [("edit", Path(r) if Path(r).is_absolute() else cwd / r) for r in raws]
     command = tool_input.get("command", "")
-    if tool == "Bash" and GIT_PUSH.search(command):
+    if tool == "Bash":
         return [("push", d) for d in push_dirs(command, cwd)]
     return []
 
 
-def push_dirs(command: str, cwd: Path) -> list[Path]:
-    """Repositories a shell command pushes from -- by allow-list, not by deny-list.
+def _name(token: str) -> str:
+    """The program a command word names: `/usr/bin/git`, `C:\\Program Files\\Git\\bin\\git.exe` and `\\git` all read `git`."""
+    return token.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
 
-    Resolved are only plain forms: segments joined by `&&` or `;`, an optional `cd <existing dir>`, and
-    `git [-C <dir>]... push ...` (each -C applied cumulatively, as git does). Everything else that could move the
-    target -- newlines, pipes, subshells, redirections, variables, `~`, backticks, env assignments, other git
-    global options, and every segment that is neither `cd <dir>` nor a `git` call -- yields UNRESOLVED, which the
-    hook denies. A command without any `git ... push` subcommand returns []."""
-    if "\n" in command or "\r" in command:
-        return [UNRESOLVED]
+
+def _mentions(text: str) -> bool:
+    """Does the text say `push`, also spelled across quotes or escapes? Only such commands are checked for a push
+    (a push spelled without the letters -- a variable, an alias in the git config, a script file -- is out of reach,
+    as it always was; the hook guards against accidental pushes, it is no sandbox)."""
+    return "push" in MENTION_NOISE.sub("", text).lower()
+
+
+class _Unsupported(ValueError):
+    """A shell construct the push check does not model; with a push mentioned, the hook denies."""
+
+
+class _Cmd:
+    """One simple command: its word values, whether each is literal (no expansion), the command substitutions inside
+    each word, its redirections (operator, target), heredoc bodies (text, expands) and the operator after it."""
+
+    def __init__(self):
+        self.words, self.literal, self.subs, self.redirects, self.bodies, self.sep = [], [], [], [], [], ""
+
+
+class _Lexer:
+    """Splits a command line the way bash does, for the part of bash the push check needs: quotes and escapes, line
+    continuations, comments, operators, redirections, heredocs (read after their line, as bash does) and `$(...)`
+    (parsed recursively). It follows bash, not Windows: an unquoted backslash escapes the next character, so
+    `cd C:\\x` reaches bash as `cd C:x` (measured with Git Bash 5.3). Whatever it does not model raises
+    _Unsupported; `odd` records operators that leave a found push unresolved."""
+
+    def __init__(self, text: str):
+        self.s, self.i, self.odd, self.comments = text, 0, False, 0  # comments: how many mention a push
+
+    def script(self, closer: bool = False) -> list[_Cmd]:
+        s, cmds, cmd, pending = self.s, [], _Cmd(), []
+        while self.i < len(s):
+            c = s[self.i]
+            if c in " \t":
+                self.i += 1
+            elif s.startswith("\\\n", self.i):
+                self.i += 2
+            elif c == "#":  # reached only where a word would start
+                end = s.find("\n", self.i)
+                end = len(s) if end < 0 else end
+                self.comments += _mentions(s[self.i:end])
+                self.i = end
+            elif closer and c == ")":
+                self.i += 1
+                if pending:
+                    raise _Unsupported("heredoc without a body inside $(...)")
+                return cmds + [cmd]
+            elif (op := next((o for o in OPERATORS if s.startswith(o, self.i)), None)) is not None:
+                self.i += len(op)
+                if op in REDIRECTS:
+                    self.redirect(op, cmd, pending)
+                    continue
+                if closer and op == "(":
+                    raise _Unsupported("subshell inside $(...)")
+                cmd.sep, self.odd = op, self.odd or op not in SEPARATORS
+                cmds.append(cmd)
+                cmd = _Cmd()
+                if op == "\n":
+                    self.heredocs(pending)
+                    pending = []
+            else:
+                value, literal, subs = self.word()
+                if value.isdigit() and literal and s[self.i:self.i + 1] in ("<", ">"):
+                    continue  # a file descriptor: 2>&1, 2>file
+                if closer and value == "case":
+                    raise _Unsupported("case inside $(...)")  # its patterns end in an unbalanced )
+                cmd.words.append(value)
+                cmd.literal.append(literal)
+                cmd.subs.append(subs)
+        if closer or pending:
+            raise _Unsupported("unterminated $(...) or heredoc")
+        return cmds + [cmd]
+
+    def redirect(self, op: str, cmd: _Cmd, pending: list) -> None:
+        s = self.s
+        if s.startswith("(", self.i):
+            raise _Unsupported("process substitution")
+        while self.i < len(s) and s[self.i] in " \t":
+            self.i += 1
+        start = self.i
+        value, literal, subs = self.word()
+        if self.i == start or subs or (not literal and op in ("<<", "<<-")):
+            raise _Unsupported("redirection without a plain target")
+        if op in ("<<", "<<-"):
+            pending.append((value, not any(q in s[start:self.i] for q in "'\"\\"), cmd))
+        else:
+            cmd.redirects.append((op, value))
+
+    def heredocs(self, pending: list) -> None:
+        """Read the bodies of the heredocs started on the line just ended. A body ends at the first line that is the
+        delimiter once blanks and a carriage return are stripped -- never later than bash ends it, so nothing bash
+        runs as a command is taken for data."""
+        s = self.s
+        for delimiter, expands, cmd in pending:
+            lines, delimiter = [], delimiter.strip(" \t\r")
+            while True:
+                if self.i >= len(s):
+                    raise _Unsupported("unterminated heredoc")
+                end = s.find("\n", self.i)
+                end = len(s) if end < 0 else end
+                line, self.i = s[self.i:end], end + 1
+                if line.strip(" \t\r") == delimiter:
+                    break
+                if expands and line.endswith("\\"):
+                    raise _Unsupported("line continuation in a heredoc")  # bash joins it, the end line may move
+                lines.append(line)
+            cmd.bodies.append(("\n".join(lines), expands))
+
+    def word(self) -> tuple[str, bool, list]:
+        s, out, literal, subs = self.s, [], True, []
+        while self.i < len(s) and s[self.i] not in " \t\n;&|()<>":
+            c = s[self.i]
+            if c == "\\":
+                out.append(s[self.i + 1:self.i + 2].replace("\n", ""))  # backslash-newline: a line continuation
+                self.i += 2
+            elif c == "'":
+                end = s.find("'", self.i + 1)
+                if end < 0:
+                    raise _Unsupported("unterminated quote")
+                out.append(s[self.i + 1:end])
+                self.i = end + 1
+            elif c == '"':
+                self.i += 1
+                while s[self.i:self.i + 1] != '"':
+                    if self.i >= len(s):
+                        raise _Unsupported("unterminated quote")
+                    c = s[self.i]
+                    if c == "\\" and s[self.i + 1:self.i + 2] in ("$", "`", '"', "\\", "\n"):
+                        out.append(s[self.i + 1].replace("\n", ""))
+                        self.i += 2
+                    elif c in "$`":
+                        literal = self.expansion(out, subs, quoted=True) and literal
+                    else:
+                        out.append(c)
+                        self.i += 1
+                self.i += 1
+            elif c in "$`":
+                literal = self.expansion(out, subs, quoted=False) and literal
+            else:
+                literal = literal and c not in "*?[]{}~"  # globs, brace and tilde expansion
+                out.append(c)
+                self.i += 1
+        return "".join(out), literal, subs
+
+    def expansion(self, out: list, subs: list, quoted: bool) -> bool:
+        """At `$` or a backtick. True only for a `$` that stays a literal character."""
+        s, i = self.s, self.i
+        nxt = s[i + 1:i + 2]
+        if s[i] == "`" or s.startswith("$((", i):
+            raise _Unsupported("backticks or arithmetic")
+        if not quoted and nxt == "'":  # $'...': escapes decoded at run time, so the text stays raw and not literal
+            end = i + 2
+            while end < len(s) and s[end] != "'":
+                end += 2 if s[end] == "\\" else 1
+            if end >= len(s):
+                raise _Unsupported("unterminated $'...'")
+            out.append(s[i + 2:end])
+            self.i = end + 1
+        elif not quoted and nxt == '"':  # $"...": a translated "...", the quotes follow
+            self.i += 1
+        elif nxt == "(":
+            self.i += 2
+            subs.append(self.script(closer=True))
+            out.append("$(...)")
+        elif nxt == "{":
+            end = s.find("}", i)
+            if end < 0 or any(ch in s[i + 2:end] for ch in "$`'\"\\{("):
+                raise _Unsupported("nested parameter expansion")
+            out.append(s[i:end + 1])
+            self.i = end + 1
+        else:
+            out.append("$")
+            self.i += 1
+            return not (nxt and (nxt.isalnum() or nxt in "_@*#?$!-"))  # else a variable: its name follows
+        return False
+
+
+def _directory(base: Path, value: str) -> Path | None:
+    """Where `cd <value>` or `git -C <value>` leads from `base`, as bash on this system goes there; None when that is
+    not certain: a missing directory, `-`, control characters, and on Windows an MSYS root path (`/tmp`) or a
+    drive-relative one (`C:x`). Git Bash drive paths (`/c/Users/x`) are understood."""
+    if not value or value.startswith("-") or CONTROL.search(value):
+        return None
+    if os.name == "nt":
+        match = MSYS_DRIVE.fullmatch(value)
+        if match:
+            value = f"{match[1].upper()}:{match[2] or '/'}"
+        elif value[:1] in ("/", "\\") or DRIVE_RELATIVE.match(value):
+            return None
+    path = Path(value)
+    path = (path if path.is_absolute() else base / path).resolve()
+    return path if path.is_dir() else None
+
+
+def _kind(cmd: _Cmd) -> tuple[int, str | None, int | None, list[str] | None, str]:
+    """(index of the command word after leading assignments, the program it names, git: the subcommand's index and
+    the `-C` values in order -- None when another global option is used --, and the kind: push, data (prints or
+    stores what it reads, runs nothing), cd, git, other or empty)."""
+    words, h = cmd.words, 0
+    while h < len(words) and ASSIGN.match(words[h]):
+        h += 1
+    if h == len(words):
+        return h, None, None, None, "empty"
+    name = _name(words[h]) if cmd.literal[h] else None
+    sub, chain, i = None, None, h + 1
+    if name == "git":
+        chain = []
+        while i < len(words) and words[i].startswith("-"):
+            plain = words[i] == "-C" and i + 1 < len(words) and cmd.literal[i + 1]
+            chain = chain + [words[i + 1]] if plain and chain is not None else None
+            i += 2 if words[i] in GIT_VALUE_OPTIONS else 1
+        sub = i if i < len(words) else None
+        if sub is not None and (words[sub].lower() == "push" or not cmd.literal[sub]):
+            return h, name, sub, chain, "push"  # a subcommand only known at run time (p{u..u}sh, $x$y) may be push
+    bare = not any(ch in words[h] for ch in "/\\")  # ./cat or /tmp/x/cat can be any script
+    assigns = name == "printf" and any(w.startswith("-v") for w in words[h + 1:])  # printf -v stores it in a variable
+    if bare and not assigns and (name in DATA_COMMANDS
+                 or (name == "git" and chain is not None and sub is not None and cmd.literal[sub]
+                     and words[sub] in GIT_DATA)
+                 or (name == "gh" and h + 1 < len(words) and cmd.literal[h + 1] and words[h + 1] in GH_DATA)):
+        return h, name, sub, chain, "data"
+    return h, name, sub, chain, name if name in ("cd", "git") else "other"
+
+
+def _tree_mentions(cmds: list[_Cmd]) -> bool:
+    return any(any(map(_mentions, c.words)) or any(_mentions(t) for _, t in c.redirects)
+               or any(_mentions(b) for b, _ in c.bodies) or any(_tree_mentions(s) for subs in c.subs for s in subs)
+               for c in cmds)
+
+
+def _inert(cmds: list[_Cmd]) -> bool:
+    """Runs nothing but data commands and cd, also inside `$(...)` and heredoc bodies -- so a file written earlier in
+    the same command line cannot run."""
+    return all((kind[4] in ("empty", "cd") or (kind[4] == "data" and kind[1] in DATA_COMMANDS))
+               and not any(live and any(x in body for x in LIVE) for body, live in c.bodies)
+               and all(_inert(s) for subs in c.subs for s in subs)
+               for c in cmds for kind in [_kind(c)])
+
+
+def _push_target(cmd: _Cmd, h: int, sub: int, chain: list[str] | None, here: Path, top: bool) -> Path:
+    """The repository a `git ... push` pushes from, or UNRESOLVED unless it is the plain form: no assignment before
+    it, only `-C` global options, literal words, no substitution or heredoc, and no further word that could run a
+    command (`--receive-pack`, `--exec`, an option or text mentioning push)."""
+    rest = cmd.words[sub + 1:]
+    if (not top or h or chain is None or cmd.bodies or not all(cmd.literal) or any(cmd.subs)
+            or any(w.startswith(("--receive-pack", "--exec")) for w in rest)
+            or any(_mentions(w) and (w.startswith("-") or not SAFE_TOKEN.match(w)) for w in rest)):
+        return UNRESOLVED
+    target = here.resolve()
+    for value in chain:
+        target = _directory(target, value)
+        if target is None:
+            return UNRESOLVED
+    return target if target.is_dir() else UNRESOLVED
+
+
+def _check(cmds: list[_Cmd], cwd: Path, top: bool, f: dict) -> None:
+    """Account for every mention of push in `cmds`. A mention is accounted for as a `git ... push` (resolved or
+    UNRESOLVED), as the path of a `cd`, as the name of a file written to, or as data: an argument, here-string,
+    heredoc or `$(...)` of a data command whose output no later pipeline stage runs. Any other mention -- an
+    interpreter's argument, a heredoc fed to a shell or to `source`, an alias in `-c`, a variable command word, a
+    pipe into `sh` or `xargs` -- appends UNRESOLVED. Only at the top level a push resolves and `cd` moves on."""
+    pipes, here = [], cwd
+    for cmd in cmds:
+        if cmd.words or cmd.redirects or cmd.bodies:
+            if pipes and pipes[-1][-1].sep in ("|", "|&"):
+                pipes[-1].append(cmd)
+            else:
+                pipes.append([cmd])
+    for pipe in pipes:
+        kinds = [_kind(cmd) for cmd in pipe]
+        for k, (cmd, (h, name, sub, chain, kind)) in enumerate(zip(pipe, kinds)):
+            if kind == "push":
+                f["found"].append(_push_target(cmd, h, sub, chain, here, top))
+                continue
+            safe = kind == "data" and all(kd[4] == "data" for kd in kinds[k + 1:])  # nothing later runs the output
+            bad = False
+            for i, (word, subs) in enumerate(zip(cmd.words, cmd.subs)):
+                for inner in subs:
+                    _check(inner, here, False, f)  # a push inside, also one with a run-time subcommand
+                    bad = bad or (not (safe and i > h) and _tree_mentions(inner))
+                bad = bad or (_mentions(word) and not (i > h and (safe or kind == "cd")))
+            bad = bad or any(_mentions(t) and not (safe or op in FILE_WRITES or op == ">&") for op, t in cmd.redirects)
+            bad = bad or any(_mentions(text) and not (safe and not (live and any(x in text for x in LIVE)))
+                             for text, live in cmd.bodies)
+            if bad:
+                f["found"].append(UNRESOLVED)
+            elif safe and _tree_mentions([cmd]) and (
+                    any(kd[1] == "tee" for kd in kinds[k:])
+                    or any(op in FILE_WRITES or (op == ">&" and not (t.isdigit() or t == "-"))
+                           for later in pipe[k:] for op, t in later.redirects)):
+                f["wrote"] = True  # a text naming a push went into a file: only fine if nothing runs files
+        if not top:
+            continue
+        h, name, _sub, _chain, kind = kinds[0]
+        if len(pipe) == 1 and kind == "cd":
+            cmd = pipe[0]
+            nxt = _directory(here, cmd.words[1]) if h == 0 and len(cmd.words) == 2 and cmd.literal[1] else None
+            f["odd"] = f["odd"] or nxt is None
+            here = nxt or here
+        elif not (len(pipe) == 1 and (name == "git" or (kind == "data" and name != "printf"))
+                  or len(pipe) > 1 and all(kd[4] != "cd" for kd in kinds)):
+            f["odd"] = True  # another command (export, npm, a function ...) could move the target; a cd in a pipe
+            # only changes its own subshell
+
+
+def push_dirs(command: str, cwd: Path) -> list[Path]:
+    """Repositories a shell command pushes from; [UNRESOLVED] when that cannot be proven; [] without a push.
+
+    Fail-closed by accounting, not by guessing: a command that mentions push (after quote removal) is split the way
+    bash splits it (_Lexer), and every mention must be accounted for (_check) -- as a plain `git [-C <dir>]... push`
+    in command position, resolved through `cd <dir>` segments joined by `&&`, `;` or newlines (a pipe into a filter
+    and `2>&1` are fine), or as data no command runs. Whatever is not proven -- subshells, `||`, `&`, assignments,
+    other git global options, wrappers, interpreters, a shell reading a heredoc or a pipe, a text written to a file
+    and a command that could run that file -- turns the result into UNRESOLVED, which the hook denies. Paths may be
+    written as `C:/...`, as Git Bash `/c/...` or quoted as `"C:\\..."`; unquoted backslashes are removed by bash.
+
+    A command that says `git` but not push is split as well, for one rule only: a git call whose subcommand word is
+    known only at run time (`git p{u..u}sh`, `git $x$y`, `git pu$(echo s)h`) may be a push and is UNRESOLVED. What
+    such a command does not let the lexer split (backticks, arithmetic) is not checked, as before."""
+    pushy = _mentions(command)
+    if not (pushy or "git" in MENTION_NOISE.sub("", command).lower()):
+        return []
+    lexer = _Lexer(command)
     try:
-        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        tokens = list(lex)
-    except ValueError:
-        return [UNRESOLVED]
-    segments, current = [], []
-    for tok in tokens:
-        if tok in ("&&", ";"):
-            segments.append(current)
-            current = []
-        elif set(tok) <= set(";&|()<>"):
-            return [UNRESOLVED]
-        else:
-            current.append(tok)
-    segments.append(current)
-    here, dirs = cwd, []
-    for seg in filter(None, segments):
-        head = seg[0]
-        if head == "cd":
-            if len(seg) != 2 or seg[1].startswith("-") or not SAFE_TOKEN.match(seg[1]):
-                return [UNRESOLVED]
-            nxt = Path(seg[1])
-            here = (nxt if nxt.is_absolute() else here / nxt).resolve()
-            if not here.is_dir():
-                return [UNRESOLVED]
-        elif head == "git":
-            target, i = here, 1
-            while i < len(seg) and seg[i].startswith("-"):
-                if seg[i] == "-C" and i + 1 < len(seg) and SAFE_TOKEN.match(seg[i + 1]):
-                    nxt = Path(seg[i + 1])
-                    target = nxt if nxt.is_absolute() else target / nxt
-                    i += 2
-                else:
-                    return [UNRESOLVED]
-            if i < len(seg) and seg[i] == "push":
-                if not all(SAFE_TOKEN.match(t) for t in seg):
-                    return [UNRESOLVED]
-                dirs.append(target.resolve())
-        else:
-            return [UNRESOLVED]  # any other segment (declare, export, sh -c, npm ...) could change the target
-    return dirs
+        cmds = lexer.script()
+        f = {"found": [], "wrote": False, "odd": lexer.odd}
+        _check(cmds, Path(cwd), True, f)
+        found = f["found"]
+        if pushy and ((f["wrote"] and not _inert(cmds)) or not (lexer.comments or _tree_mentions(cmds))):
+            found.append(UNRESOLVED)  # the second: the letters are there but no word carries them -- not understood
+    except (_Unsupported, RecursionError):  # RecursionError: $(...) nested hundreds of levels deep
+        return [UNRESOLVED] if pushy else []
+    return [UNRESOLVED] if UNRESOLVED in found or (found and f["odd"]) else found
 
 
 def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Session | None = None) -> str:
@@ -294,14 +624,27 @@ def decide(lock_path: Path, op: str, prefixes: list[str], host: str, session: Se
         return "other-operation"
     if lu.is_condition_lock(lock_path, data):
         return "block"
-    owner = (data.get("owner") or "").lower()
-    if session is not None and session.name and owner == session.name.lower():
-        return "own"  # the session's own name cannot be anybody else's: nothing to fence
+    raw_owner = data.get("owner") or ""
+    # Owner comparison is strictly ASCII: Unicode folding (e.g. Kelvin U+212A -> 'k') must never match ASCII owners.
+    if session is not None and session.name and raw_owner.isascii() and session.name.isascii():
+        if raw_owner.lower() == session.name.lower():
+            # No other session carries this name: nothing to fence. Its subagents and teammates do, though (they share
+            # the lead's session id); a worker's lock of its own is owned by `<session name>:<agent_id>`, below.
+            return "own"
+    if session is not None and session.worker and raw_owner.isascii() and session.worker.isascii():
+        # Exactly this worker of this session. isascii: no Unicode case folding onto ASCII (K -> k). The session
+        # name part compares case-folded as everywhere; the harness-issued agent_id must match exactly.
+        name_part, _, id_part = raw_owner.partition(":")
+        sess_name, _, sess_worker_id = session.worker.partition(":")
+        if name_part.lower() == sess_name.lower() and id_part == sess_worker_id:
+            return "own"
     is_team = lu.is_team_lock(lock_path.name) and (lu.lock_host(lock_path) or "").upper() == host
-    if any(owner == p or owner.startswith(p + ":") for p in prefixes):
-        if is_team:
-            return "team"  # shared by the host's agents by design: the file is the board, not one grant
-        return "own" if session is None or session.holds(lock_path) else "block"
+    if raw_owner.isascii():
+        owner = raw_owner.lower()
+        if any(p.isascii() and (owner == p or owner.startswith(p + ":")) for p in prefixes):
+            if is_team:
+                return "team"  # shared by the host's agents by design: the file is the board, not one grant
+            return "own" if session is None or session.holds(lock_path) else "block"
     return "team" if is_team else "block"
 
 
@@ -330,10 +673,14 @@ def foreign_claim(path: Path, locks: list, session: Session | None, prefixes: li
     (team.TeamLockFormatError / ValueError / OSError); the caller reports it without blocking, because the team
     lock itself still lets the host's agents in."""
     me = ((session.name if session else None) or "").lower()
+    sess_ascii = bool(session and session.name and session.name.isascii())
 
     def mine(agent: str) -> bool:
+        if not agent.isascii():
+            return False
         a = agent.lower()
-        return a == me or any(a == p or a.startswith(p + ":") for p in prefixes)
+        return (bool(me and sess_ascii and a == me) or
+                any(p.isascii() and (a == p or a.startswith(p + ":")) for p in prefixes))
 
     for name, _scope, _legacy, source_dir in locks:
         lock_path = Path(source_dir) / name
@@ -383,12 +730,19 @@ class LeaseStoreUnavailable(Exception):
     and an outage of the shared database (reboot, VPN down) must not stop every agent on the host."""
 
 
+def lease_url() -> str:
+    """URL of the lease store: the plugin option `lease_store` (userConfig, kept in the platform's credential
+    store, exported by Claude Code as CLAUDE_PLUGIN_OPTION_LEASE_STORE), else ELLMOS_LOCK_LEASES; empty = off."""
+    return (os.environ.get("CLAUDE_PLUGIN_OPTION_LEASE_STORE", "").strip()
+            or os.environ.get("ELLMOS_LOCK_LEASES", "").strip())
+
+
 def lease_store():
-    """The roshambo lease store named by ELLMOS_LOCK_LEASES, or None while leases are off.
+    """The roshambo lease store named by lease_url(), or None while leases are off.
 
     A missing roshambo package or an unknown URL scheme is a local configuration error and fails closed;
     a store that cannot be reached raises LeaseStoreUnavailable."""
-    url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
+    url = lease_url()
     if not url:
         return None
     from roshambo.lease_store import open_lease_store  # optional dependency, only with leases on
@@ -426,7 +780,7 @@ def _store_unreachable(exc: BaseException) -> bool:
 def _without_dsn(exc: Exception) -> str:
     """Error text without the configured URL or its password, also in URL-decoded form."""
     text = f"{type(exc).__name__}: {exc}"
-    url = os.environ.get("ELLMOS_LOCK_LEASES", "").strip()
+    url = lease_url()
     if not url:
         return text
     text = text.replace(url, "<lease store>")
@@ -584,12 +938,16 @@ def pretooluse(payload: dict) -> dict | None:
             reason = (f"lock-master: a foreign active lock covers this {what} {path}. "
                       "Do not work around it; coordinate with the holder or the user. "
                       + " | ".join(describe(h) for h in hits))
+            if sess.worker:  # fallback in case the SubagentStart hook did not run
+                reason += (f" This area is not yours. For areas nobody holds, create your own locks as this worker "
+                           f"with --owner {sess.worker}.")
             moved = [sess.lost[Session.key(h)] for h in hits if Session.key(h) in sess.lost]
             if moved:
                 reason += (f" -- fencing: {clean(moved[0], 300)}. This lock carried the grant your session relied on "
                            "earlier and has been granted anew since. If you re-created it yourself, release it and "
                            "set it again with /lock (named after your session, so it stays yours"
-                           + (f": {sess.name}" if sess.name else "") + "); otherwise another session took the area.")
+                           + (f": {sess.worker or sess.name}" if sess.worker or sess.name else "")
+                           + "); otherwise another session took the area.")
             return deny(reason)
         if op != "edit":
             continue
@@ -643,10 +1001,12 @@ def session(payload: dict) -> dict | None:
     for lock_name, _s, _l, src in locks:
         lock_path = Path(src) / lock_name
         lines.append(f"- {describe(lock_path)}")
-        owner = (lu.parse_lock_file(lock_path).get("owner") or "").lower()
-        if sess.file is not None and not lu.is_team_lock(lock_name) and any(
-                owner == p or owner.startswith(p + ":") for p in prefixes):
-            sess.holds(lock_path)  # remember the fence of a shared-owner lock now, not at the first edit
+        raw_owner = lu.parse_lock_file(lock_path).get("owner") or ""
+        if raw_owner.isascii():
+            owner = raw_owner.lower()
+            if sess.file is not None and not lu.is_team_lock(lock_name) and any(
+                    p.isascii() and (owner == p or owner.startswith(p + ":")) for p in prefixes):
+                sess.holds(lock_path)  # remember the fence of a shared-owner lock now, not at the first edit
         if lu.is_team_lock(lock_name) and (lu.lock_host(lock_path) or "").upper() == host:
             lines += team_board(lock_path)
             board = True
@@ -674,13 +1034,12 @@ def release_board_entries(payload: dict) -> None:
             continue
         try:
             lines = lock_path.read_text(encoding="utf-8").splitlines()
-            layout = team._section_layout(lines)
             for section in ("file_claims", "tool_claims"):
                 lines = lock_path.read_text(encoding="utf-8").splitlines()
                 start, end = team._section_layout(lines)[section]
                 bundles, _ = team._parse_claim_bundles(lines[start:end], section, lock_path.parent)
                 for bundle in bundles:
-                    if bundle.agent.lower() == name.lower():
+                    if bundle.agent.isascii() and name.isascii() and bundle.agent.lower() == name.lower():
                         team.update_team_lock(lock_path, section, "release", name, resources=bundle.resources,
                                               project_dir=lock_path.parent)
             team.update_team_lock(lock_path, "presence", "release", name, project_dir=lock_path.parent)
@@ -701,7 +1060,19 @@ def session_end(payload: dict) -> None:
     return None
 
 
-MODES = {"pretooluse": pretooluse, "session": session, "sessionend": session_end}
+def subagent(payload: dict) -> dict | None:
+    """SubagentStart: one line naming the worker's own owner. Pure function of the payload -- no files, no
+    network -- so firing again on resume and on every teammate message repeats the same text, which Claude Code
+    does not inject a second time. No agent_id: nothing to say, the worker keeps the plain session rules."""
+    owner = worker_owner(payload)
+    if not owner:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": (
+        f"lock-master: as this worker, create your own locks with --owner {owner} (yours alone: the lead and the "
+        "other workers of this session are held off).")}}
+
+
+MODES = {"pretooluse": pretooluse, "session": session, "sessionend": session_end, "subagent": subagent}
 
 
 def main(argv: list[str]) -> int:

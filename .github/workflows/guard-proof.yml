@@ -1,0 +1,26 @@
+name: guard-proof
+
+# Pull requests that change a guard file must name an adversarial probe and the instance that ran it
+# (CONTRIBUTING.md, "Guard files"). The script reads the PR text from the event file; nothing from the
+# event is interpolated into this workflow.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require an adversarial probe for guard-file changes
+        run: python3 .github/scripts/check_guard_proof.py

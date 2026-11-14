@@ -25,6 +25,7 @@ def project(tmp_path, monkeypatch):
     monkeypatch.delenv("ELLMOS_LOCK_OWNER", raising=False)
     monkeypatch.delenv("ELLMOS_LOCK_ACTOR", raising=False)
     monkeypatch.delenv("ELLMOS_LOCK_LEASES", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_LEASE_STORE", raising=False)
     monkeypatch.setenv("ELLMOS_LOCK_STATE_DIR", str(tmp_path / "_state"))
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
