@@ -45,6 +45,41 @@ git diff --check
 - Ensure all 10 governance invariants (`INV-LOCAL-01` to `INV-SLA-10`) remain VERIFIED.
 - Pull requests must target the `main` branch.
 
+### 3a. Guard files
+These files decide whether an agent may edit or push. A mistake in them opens the lock guard of every installed
+agent, and the marketplace delivers what is merged:
+the directories `plugin/`, `hooks/`, `.claude-plugin/`, `pure-locking/`, `team-lock/` and `.github/scripts/`
+(everything below them), plus `.mcp.json` and `.github/workflows/guard-proof.yml`.
+
+Whole directories, because a new file can be a guard change too. The hook runs with `plugin/` first on its
+import path and puts `pure-locking/` and `team-lock/` in front of it. A new module there with a standard-library
+name, such as `plugin/json.py`, would therefore replace that import and take over the guard. Paths are compared
+case-insensitively: on Windows and macOS, `Plugin/Lock_Guard.py` is the same file as `plugin/lock_guard.py`.
+
+A pull request that changes one of them needs, in addition to the tests:
+- **An adversarial probe**: try to make a foreign lock count as your own and an own lock fail.
+  - Use foreign actor names (`codex-cli@HOST`, `agy@HOST`, …), look-alike owners, and Unicode and case variants.
+  - Use a foreign session with the same identifiers, and malformed input (charset, line breaks, injection into the
+    `key: value` lock file).
+  - Show fail-closed behaviour when a hook does not run or a payload field is missing.
+  - Every case that should be denied must be denied. Record the command or link and the result.
+- **Two lines in the PR description**: `Adversarial-Probe:` (command or link plus result) and
+  `Probe-Ausgefuehrt-von:` (the instance that ran the probe). The `guard-proof` check fails when a guard file
+  changed and either line is empty. The PR text is only read as data.
+- **The merge** is done by an instance that ran the probe itself and is not the author. "Diff read, tests green" is
+  not enough. Background: #39 passed such a review and was fail-open; an adversarial probe found it within minutes
+  (reverted in #40).
+
+Known limits of the `guard-proof` check:
+- **Four-space indent:** a required line indented by four spaces (a Markdown code block) still counts as filled. The
+  reviewer checks what the line says.
+- **Windows 8.3 short names:** a path such as `PURE-L~1/x.py` lands in `pure-locking/` when pulled into an existing
+  Windows clone, but the gate does not see it as a guard path. Reviewers watch for `~<digit>` in path components of
+  a PR. A follow-up fix is tracked as a ticket.
+- **Required check:** the gate only binds as a required status check under branch protection. A PR that deletes
+  `guard-proof.yml` does not run it. That is why the `Probe-Ausgefuehrt-von:` review step by another instance stays
+  mandatory.
+
 ### 4. License
 By contributing to `lock-master`, you agree that your contributions will be licensed under the [MIT License](LICENSE).
 
@@ -90,6 +125,44 @@ git diff --check
 - Halten Sie API-Schlüssel, Tokens und private Zugangsdaten strikt außerhalb des Repositories.
 - Stellen Sie sicher, dass alle 10 Invarianten (`INV-LOCAL-01` bis `INV-SLA-10`) verifiziert bleiben.
 - Pull Requests müssen gegen den `main`-Branch gerichtet sein.
+
+### 3a. Guard-Dateien
+Diese Dateien entscheiden, ob ein Agent editieren oder pushen darf. Ein Fehler darin öffnet den Lock-Guard jedes
+installierten Agenten, und der Marketplace liefert aus, was gemergt ist:
+die Verzeichnisse `plugin/`, `hooks/`, `.claude-plugin/`, `pure-locking/`, `team-lock/` und `.github/scripts/`
+(alles darunter), dazu `.mcp.json` und `.github/workflows/guard-proof.yml`.
+
+Ganze Verzeichnisse, weil auch eine neue Datei eine Guard-Änderung sein kann. Der Hook läuft mit `plugin/` an
+erster Stelle des Importpfads und stellt `pure-locking/` und `team-lock/` davor. Ein neues Modul dort mit dem Namen
+eines Standardmoduls, etwa `plugin/json.py`, würde daher diesen Import ersetzen und den Guard übernehmen. Pfade werden
+ohne Groß-/Kleinunterscheidung verglichen: Unter Windows und macOS ist `Plugin/Lock_Guard.py` dieselbe Datei wie
+`plugin/lock_guard.py`.
+
+Ein Pull Request, der eine davon ändert, braucht zusätzlich zu den Tests:
+- **Eine adversariale Probe**: Versuchen, einen fremden Lock als eigenen gelten zu lassen und einen eigenen
+  scheitern zu lassen.
+  - Fremde Akteursnamen (`codex-cli@HOST`, `agy@HOST`, …), ähnlich aussehende Owner, Unicode- und
+    Groß-/Kleinvarianten.
+  - Eine fremde Sitzung mit gleichen Kennungen und fehlerhafte Eingaben (Zeichenset, Zeilenumbrüche, Injection in
+    die `key: value`-Lockdatei).
+  - Fail-closed-Verhalten, wenn ein Hook nicht läuft oder ein Payload-Feld fehlt.
+  - Jeder Fall, der abgewiesen werden soll, muss abgewiesen werden. Befehl oder Link und Ergebnis festhalten.
+- **Zwei Zeilen in der PR-Beschreibung**: `Adversarial-Probe:` (Befehl oder Link plus Ergebnis) und
+  `Probe-Ausgefuehrt-von:` (die Instanz, die die Probe ausgeführt hat). Die Prüfung `guard-proof` schlägt fehl,
+  wenn eine Guard-Datei geändert ist und eine der Zeilen leer ist. Der PR-Text wird nur als Daten gelesen.
+- **Den Merge** übernimmt eine Instanz, die die Probe selbst ausgeführt hat und nicht der Autor ist. „Diff gelesen,
+  Tests grün“ reicht nicht. Hintergrund: #39 bestand eine solche Prüfung und war fail-open; eine adversariale Probe
+  fand das in wenigen Minuten (revertiert in #40).
+
+Bekannte Grenzen der Prüfung `guard-proof`:
+- **Einzug mit vier Leerzeichen:** Eine Pflichtzeile, die mit vier Leerzeichen eingerückt ist (Markdown-Codeblock),
+  zählt weiterhin als ausgefüllt. Den Inhalt prüft der Reviewer.
+- **Windows-8.3-Kurznamen:** Ein Pfad wie `PURE-L~1/x.py` landet beim Pull in einen bestehenden Windows-Klon in
+  `pure-locking/`, das Gate erkennt ihn aber nicht als Guard-Pfad. Reviewer achten bei Pfadkomponenten eines PRs auf
+  `~<Ziffer>`. Ein Folgefix liegt als Ticket vor.
+- **Pflicht-Check:** Bindend wirkt das Gate erst als Required Status Check mit Branch-Protection. Ein PR, der
+  `guard-proof.yml` löscht, lässt es nicht laufen. Deshalb bleibt der Review-Schritt `Probe-Ausgefuehrt-von:` durch
+  eine andere Instanz verbindlich.
 
 ### 4. Lizenz
 Mit Ihrer Mitwirkung an `lock-master` erklären Sie sich damit einverstanden, dass Ihre Beiträge unter der [MIT-Lizenz](LICENSE) lizenziert werden.

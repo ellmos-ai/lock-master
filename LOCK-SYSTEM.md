@@ -649,6 +649,13 @@ but a guard hook present" as its own outcome (exit 2).
    no protection against a second creator in the same moment, and no number by
    which a displaced holder can tell it lost the lock. The template stays the
    field reference; it is not a creation procedure.
+
+   **Owner for a delegated Claude Code worker** (subagent or in-process teammate): workers share the lead's
+   session id, so the session name `claude-code@<HOST>.<sid8>` belongs to the lead and all its workers. A
+   worker's own lock uses `--owner <session name>:<agent_id>`. The plugin hook gives the worker this value
+   at SubagentStart and also names it in every denial. The hook counts this owner as the worker's own only
+   on an exact match: no prefix and no trust on first use. Without `agent_id` in the hook payload it is
+   foreign like any other owner. [C 2026-11-07 T-20261107-958032576]
 3. **RELEASE:** delete the lock file you created when done. Active release
    by the creator is required; the 24h expiry is only a safety net for
    forgotten locks. If work takes longer, renew `created` so the lock does
