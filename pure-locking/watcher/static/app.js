@@ -845,6 +845,11 @@ async function swapCentralFile() {
 async function showSettings() {
   const [s, profile] = await Promise.all([api('/api/settings'), api('/api/profile')]);
   const daemonText = formatDaemonStatus(s.daemon);
+  const hbVal = s.heartbeat_interval != null ? s.heartbeat_interval : 5;
+  const checkVal = s.check_interval != null ? s.check_interval : 20;
+  const fullVal = s.full_scan_interval != null ? s.full_scan_interval : 60;
+  const idleVal = s.full_scan_idle_factor != null ? s.full_scan_idle_factor : 4.0;
+  const staleVal = s.stale_daemon_seconds != null ? s.stale_daemon_seconds : 180;
   const html = `
     <div class="detail-section">
       <h3>Nutzerprofil</h3>
@@ -860,19 +865,52 @@ async function showSettings() {
       </div>
     </div>
     <div class="detail-section">
-      <h3>Scan-Einstellungen</h3>
-      <div class="settings-grid">
-        <span class="settings-key">Full-Scan Intervall</span><span>${s.full_scan_interval}s</span>
-        <span class="settings-key">Quick-Check Intervall</span><span>${s.check_interval}s</span>
+      <h3>Heartbeat- &amp; Scan-Einstellungen</h3>
+      <div class="form-group" style="display:grid;grid-template-columns:1fr 120px;gap:8px;align-items:center">
+        <label for="setting-heartbeat-interval">Heartbeat-Intervall (2–60 s)</label>
+        <input type="number" id="setting-heartbeat-interval" min="2" max="60" step="1" value="${esc(String(hbVal))}" />
+        <label for="setting-check-interval">Quick-Check-Intervall (5–300 s)</label>
+        <input type="number" id="setting-check-interval" min="5" max="300" step="1" value="${esc(String(checkVal))}" />
+        <label for="setting-full-scan-interval">Full-Scan-Intervall (30–900 s)</label>
+        <input type="number" id="setting-full-scan-interval" min="30" max="900" step="5" value="${esc(String(fullVal))}" />
+        <label for="setting-idle-factor">Idle-Faktor nach Full-Scan (0–10x Scandauer)</label>
+        <input type="number" id="setting-idle-factor" min="0" max="10" step="0.5" value="${esc(String(idleVal))}" />
+        <label for="setting-stale-seconds">Heartbeat-Stale-Schwelle (30–1800 s)</label>
+        <input type="number" id="setting-stale-seconds" min="30" max="1800" step="10" value="${esc(String(staleVal))}" />
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary" onclick="saveWatcherSettings()">Intervalle speichern</button>
+        <button class="btn" onclick="resetWatcherSettings()">Standardwerte</button>
+      </div>
+      <div class="settings-grid" style="margin-top:12px">
         <span class="settings-key">Daemon</span><span>${esc(daemonText)}</span>
         <span class="settings-key">Datenbank</span><span style="font-family:monospace;font-size:12px">${esc(s.db_path)}</span>
       </div>
-      <p style="margin-top:12px;font-size:12px;color:var(--text-dim)">
-        Intervalle werden in config.py konfiguriert und gelten ab dem nächsten Daemon-Start.
+      <p style="margin-top:10px;font-size:12px;color:var(--text-dim)">
+        Änderungen werden in <code>runtime_settings.json</code> gespeichert und vom laufenden Daemon ohne Neustart übernommen.
       </p>
     </div>
   `;
   openModal('Einstellungen', html);
+}
+
+async function saveWatcherSettings() {
+  const payload = {
+    heartbeat_interval: Number(document.getElementById('setting-heartbeat-interval').value),
+    check_interval: Number(document.getElementById('setting-check-interval').value),
+    full_scan_interval: Number(document.getElementById('setting-full-scan-interval').value),
+    full_scan_idle_factor: Number(document.getElementById('setting-idle-factor').value),
+    stale_daemon_seconds: Number(document.getElementById('setting-stale-seconds').value),
+  };
+  await apiPut('/api/settings', payload);
+  toast('Heartbeat- & Scan-Einstellungen gespeichert');
+  await showSettings();
+}
+
+async function resetWatcherSettings() {
+  await apiPut('/api/settings', { reset: true });
+  toast('Standardwerte wiederhergestellt');
+  await showSettings();
 }
 
 async function saveProfile() {

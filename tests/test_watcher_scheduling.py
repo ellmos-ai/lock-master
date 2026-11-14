@@ -77,3 +77,39 @@ def test_daemon_status_reports_the_next_gap():
     assert '"next_full_scan_gap_s"' in source
     assert "now - last_full_scan >= full_scan_gap" in source
     assert "now - last_full_scan >= config.FULL_SCAN_INTERVAL" not in source
+
+
+def test_runtime_settings_persist_clamp_and_reset(monkeypatch):
+    tmp_dir = Path(tempfile.mkdtemp(prefix="lockmaster-runtime-settings-"))
+    settings_file = tmp_dir / "runtime_settings.json"
+    monkeypatch.setattr(config, "RUNTIME_SETTINGS_PATH", settings_file)
+    monkeypatch.setattr(config, "_LOCAL_DATA_DIR", tmp_dir)
+
+    defaults = config.load_runtime_settings()
+    assert defaults["heartbeat_interval"] == 5
+    assert defaults["check_interval"] == 20
+    assert defaults["full_scan_interval"] == 60
+    assert defaults["full_scan_idle_factor"] == 4.0
+    assert defaults["stale_daemon_seconds"] == 180
+
+    saved = config.save_runtime_settings({
+        "heartbeat_interval": 10,
+        "check_interval": 1,  # clamped to min 5
+        "full_scan_interval": 120,
+        "full_scan_idle_factor": 2.5,
+        "stale_daemon_seconds": 300,
+    })
+    assert saved["heartbeat_interval"] == 10
+    assert saved["check_interval"] == 5
+    assert saved["full_scan_interval"] == 120
+    assert saved["full_scan_idle_factor"] == 2.5
+    assert saved["stale_daemon_seconds"] == 300
+    assert settings_file.is_file()
+
+    # Dynamic lookup in next_full_scan_gap uses runtime_settings when arguments are omitted
+    assert lock_watcher.next_full_scan_gap(100) == 250.0
+
+    # Reset removes file and restores defaults
+    reset_vals = config.save_runtime_settings({"reset": True})
+    assert reset_vals == defaults
+    assert not settings_file.exists()

@@ -56,8 +56,9 @@ def next_full_scan_gap(
     Never below the configured interval; scales with the measured scan
     duration so a slow scan (large or slow roots) does not run back to back.
     """
-    interval = config.FULL_SCAN_INTERVAL if interval is None else interval
-    idle_factor = config.FULL_SCAN_IDLE_FACTOR if idle_factor is None else idle_factor
+    rt = config.load_runtime_settings()
+    interval = float(rt["full_scan_interval"]) if interval is None else interval
+    idle_factor = float(rt["full_scan_idle_factor"]) if idle_factor is None else idle_factor
     return max(float(interval), float(idle_factor) * max(0.0, float(last_duration_s)))
 
 
@@ -69,11 +70,12 @@ def scan_stale_after_seconds(status: dict | None) -> float:
     reported as stale during its deliberate pause.
     """
     status = status or {}
+    rt = config.load_runtime_settings()
     gap = status.get("next_full_scan_gap_s")
     duration = status.get("last_scan_duration_s")
-    gap = float(gap) if isinstance(gap, (int, float)) else float(config.FULL_SCAN_INTERVAL)
+    gap = float(gap) if isinstance(gap, (int, float)) else float(rt["full_scan_interval"])
     duration = float(duration) if isinstance(duration, (int, float)) else 0.0
-    return SCAN_OVERRUN_WARN_SECONDS + gap + duration
+    return max(float(SCAN_OVERRUN_WARN_SECONDS), float(rt["full_scan_interval"]) * 5.0) + gap + duration
 
 
 def _ensure_utf8_stdio_for_stream(stream) -> None:
@@ -164,7 +166,9 @@ def _daemon_status_is_fresh(status: dict | None) -> bool:
     except (TypeError, ValueError):
         return False
     age = _status_age_seconds(status)
-    if age is None or age > STALE_DAEMON_SECONDS:
+    rt = config.load_runtime_settings()
+    stale_limit = int(rt.get("stale_daemon_seconds", STALE_DAEMON_SECONDS))
+    if age is None or age > stale_limit:
         return False
     return _pid_is_running(pid)
 
@@ -179,6 +183,7 @@ def _write_daemon_status(
     started_at: str,
     scan_info: dict | None = None,
 ) -> None:
+    rt = config.load_runtime_settings()
     status = {
         "pid": os.getpid(),
         "host": socket.gethostname(),
@@ -186,6 +191,7 @@ def _write_daemon_status(
         "last_seen": _now_iso(),
         "update_cache": update_cache,
         "db_path": str(config.DB_PATH),
+        "heartbeat_interval": int(rt.get("heartbeat_interval", HEARTBEAT_INTERVAL)),
     }
     if scan_info:
         status.update(scan_info)
@@ -328,14 +334,19 @@ def _heartbeat_loop(
     started_at: str,
     scan_state: dict,
     state_lock: threading.Lock,
-    interval: float = HEARTBEAT_INTERVAL,
+    interval: float | None = None,
 ) -> None:
     """Advance daemon health independently from potentially blocking scans."""
     while not stop_event.is_set():
         with state_lock:
             info = dict(scan_state)
         _write_daemon_status(update_cache, started_at, scan_info=info)
-        stop_event.wait(interval)
+        wait_s = (
+            float(config.load_runtime_settings().get("heartbeat_interval", HEARTBEAT_INTERVAL))
+            if interval is None
+            else float(interval)
+        )
+        stop_event.wait(wait_s)
 
 
 def run_daemon(update_cache: bool) -> None:
@@ -440,7 +451,9 @@ def run_daemon(update_cache: bool) -> None:
             elif pending_scan is None and now - last_full_scan >= full_scan_gap:
                 pending_scan = _submit_full_scan()
 
-            elif pending_scan is None and now - last_check >= config.CHECK_INTERVAL:
+            elif pending_scan is None and now - last_check >= float(
+                config.load_runtime_settings().get("check_interval", config.CHECK_INTERVAL)
+            ):
                 try:
                     _run_quick_check(db)
                 except Exception as exc:

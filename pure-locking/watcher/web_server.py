@@ -425,10 +425,16 @@ class WatcherHandler(BaseHTTPRequestHandler):
         self._json_response(_load_user_profile())
 
     def _get_settings(self, qs: dict):
+        rt = config.load_runtime_settings()
         self._json_response({
-            "full_scan_interval": config.FULL_SCAN_INTERVAL,
-            "check_interval": config.CHECK_INTERVAL,
+            "heartbeat_interval": rt["heartbeat_interval"],
+            "check_interval": rt["check_interval"],
+            "full_scan_interval": rt["full_scan_interval"],
+            "full_scan_idle_factor": rt["full_scan_idle_factor"],
+            "stale_daemon_seconds": rt["stale_daemon_seconds"],
+            "defaults": config.default_runtime_settings(),
             "db_path": str(config.DB_PATH),
+            "runtime_settings_path": str(config.RUNTIME_SETTINGS_PATH),
             "roots_file": str(config.resolve_roots_file()),
             "daemon": _daemon_status_for_api(self.server.db),
         })
@@ -869,12 +875,12 @@ class WatcherHandler(BaseHTTPRequestHandler):
         self._json_response({"updated": True, "profile": profile})
 
     def _update_settings(self, body: dict):
+        saved = config.save_runtime_settings(body if isinstance(body, dict) else {})
         self._json_response({
-            "message": "Settings are read-only at runtime. Edit config.py or restart daemon.",
-            "current": {
-                "full_scan_interval": config.FULL_SCAN_INTERVAL,
-                "check_interval": config.CHECK_INTERVAL,
-            },
+            "updated": True,
+            "message": "Einstellungen gespeichert und im laufenden Daemon aktiv.",
+            "current": saved,
+            "defaults": config.default_runtime_settings(),
         })
 
     # ── Static Files ───────────────────────────────────────────
