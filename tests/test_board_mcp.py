@@ -17,7 +17,7 @@ import _lock_master_team as team  # noqa: E402
 import lock_utils as lu  # noqa: E402
 
 ALICE, BOB = "claude-code@TESTHOST.aaaa1111", "codex@TESTHOST.bbbb2222"
-TOOLS = {"board_read", "board_post", "board_claim", "board_release", "board_presence"}
+TOOLS = {"board_read", "board_post", "board_claim", "board_release", "board_claim_tool", "board_release_tool", "board_presence"}
 
 
 @pytest.fixture
@@ -216,3 +216,43 @@ def test_hook_and_board_work_together(board):
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny" and ALICE in out["hookSpecificOutput"]["permissionDecisionReason"]
     call("board_release", paths=["src/a.py"], agent=ALICE)
     assert lock_guard.pretooluse(edit("dddd4444-0")) is None            # released: the other session may go on
+
+
+def test_tool_claim_read_release_roundtrip(board):
+    result, error = call("board_claim_tool", resources=["roblox-studio", "port:13469"], agent=ALICE, ttl=600)
+    assert not error and result["ok"] and result["your_tool_claims"][0]["state"] == "USING"
+    state, _ = call("board_read", agent=ALICE)
+    assert state["tool_claims"] == [{"order": 1, "agent": ALICE, "state": "USING",
+                                     "resources": ["roblox-studio", "port:13469"]}]
+    refused, error = call("board_claim_tool", resources=["roblox-studio"], agent=BOB)
+    assert not error and refused["ok"] is False and ALICE in refused["message"]
+    queued, _ = call("board_claim_tool", resources=["roblox-studio"], agent=BOB, queue=True)
+    assert queued["ok"] and queued["your_tool_claims"][0]["state"] == "WAITING"
+    released, _ = call("board_release_tool", resources=["roblox-studio", "port:13469"], agent=ALICE)
+    assert released["ok"] and released["your_tool_claims"] == []
+    after, _ = call("board_read", agent=BOB)
+    assert after["tool_claims"][0]["agent"] == BOB and after["tool_claims"][0]["state"] == "USING"
+
+
+def test_tool_claim_roshambo_lease_roundtrip(board, monkeypatch, tmp_path):
+    roshambo_src = Path(r"C:\_Local_DEV\repos\roshambo\src")
+    if roshambo_src.is_dir() and str(roshambo_src) not in sys.path:
+        sys.path.insert(0, str(roshambo_src))
+    pytest.importorskip("roshambo.lease_store")
+    monkeypatch.setenv("ELLMOS_LOCK_LEASES", f"sqlite:///{tmp_path / 'leases.db'}")
+    result, error = call("board_claim_tool", resources=["roblox-studio", "port:13469"], agent=ALICE, ttl=600)
+    assert not error and result["ok"]
+    refused, error = call("board_claim_tool", resources=["roblox-studio"], agent=BOB)
+    assert not error and refused["ok"] is False and ALICE in refused["message"]
+    released, _ = call("board_release_tool", resources=["roblox-studio", "port:13469"], agent=ALICE)
+    assert released["ok"]
+    ok_bob, error = call("board_claim_tool", resources=["roblox-studio"], agent=BOB)
+    assert not error and ok_bob["ok"]
+
+
+def test_session_end_releases_tool_claims_as_well_as_file_claims(board):
+    call("board_claim", paths=["src/a.py"], agent=ALICE)
+    call("board_claim_tool", resources=["roblox-studio"], agent=ALICE)
+    lock_guard.session_end({"cwd": str(board), "session_id": "aaaa1111-0"})
+    state, _ = call("board_read")
+    assert state["file_claims"] == [] and state["tool_claims"] == []
