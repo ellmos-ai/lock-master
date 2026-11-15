@@ -704,8 +704,12 @@ class WatcherHandler(BaseHTTPRequestHandler):
         # The scope regex leaves no separators, so the lexical path stays inside project_path.
         # No resolve(): a LOCK.user.* symlink must be unlinked itself, not followed.
         target = Path(project_path) / filename
-        if not target.exists():
-            self._json_error(404, f"{filename} not found")
+        try:
+            found = target.exists()
+        except OSError:  # e.g. ENAMETOOLONG for an over-long scope: answer instead of dropping the connection
+            found = False
+        if not found:
+            self._json_error(404, "user-lock not found")
             return
         try:
             target.unlink()

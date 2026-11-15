@@ -249,6 +249,14 @@ def test_remove_user_lock_rejects_traversal_and_allows_valid_scopes(monkeypatch,
         assert status in (400, 403) and "error" in body
         assert victim.exists()
 
+        # An over-long scope must be answered, not drop the connection (ENAMETOOLONG on POSIX).
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "x" * 5000}),
+        )
+        assert status in (400, 404)
+
         scoped = root / "LOCK.user.proj.txt"
         scoped.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
         status, _, _ = request(
