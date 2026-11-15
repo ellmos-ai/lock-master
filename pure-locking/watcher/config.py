@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -17,10 +18,12 @@ _LOCAL_DATA_DIR: Path = Path(os.environ.get(_DATA_ENV, Path.home() / ".lock_mast
 _LOCAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH: Path = _LOCAL_DATA_DIR / "watcher.db"
 DAEMON_STATUS_PATH: Path = _LOCAL_DATA_DIR / "daemon_status.json"
+RUNTIME_SETTINGS_PATH: Path = _LOCAL_DATA_DIR / "runtime_settings.json"
 
 # Intervalle in Sekunden
 FULL_SCAN_INTERVAL: int = 60
 CHECK_INTERVAL: int = 20
+HEARTBEAT_INTERVAL: int = 5
 # Pause nach einem Full-Scan: mindestens FULL_SCAN_INTERVAL, sonst das Vielfache der
 # gemessenen Scandauer. Ohne diese Bremse lief der Daemon pausenlos, weil ein Scan
 # über viele Roots 55-617 s dauert (LANGLAUF-PROTOKOLL) und das Intervall 60 s ist:
@@ -43,6 +46,84 @@ def _idle_factor_from_env(raw: str | None) -> float:
 
 
 FULL_SCAN_IDLE_FACTOR: float = _idle_factor_from_env(os.environ.get("LOCK_MASTER_FULL_SCAN_IDLE_FACTOR"))
+STALE_DAEMON_SECONDS: int = max(180, FULL_SCAN_INTERVAL * 3)
+
+# Laufzeit-konfigurierbare Heartbeat- und Scan-Optionen (T-20260913-477382785)
+RUNTIME_SETTINGS_BOUNDS: dict[str, tuple[type, float, float]] = {
+    "heartbeat_interval": (int, 2, 60),
+    "check_interval": (int, 5, 300),
+    "full_scan_interval": (int, 30, 900),
+    "full_scan_idle_factor": (float, 0.0, 10.0),
+    "stale_daemon_seconds": (int, 30, 1800),
+}
+
+
+def default_runtime_settings() -> dict[str, int | float]:
+    """Standardwerte für Heartbeat- und Scan-Intervalle."""
+    return {
+        "heartbeat_interval": HEARTBEAT_INTERVAL,
+        "check_interval": CHECK_INTERVAL,
+        "full_scan_interval": FULL_SCAN_INTERVAL,
+        "full_scan_idle_factor": FULL_SCAN_IDLE_FACTOR,
+        "stale_daemon_seconds": STALE_DAEMON_SECONDS,
+    }
+
+
+def _coerce_setting(key: str, raw_val: object, default_val: int | float) -> int | float:
+    spec = RUNTIME_SETTINGS_BOUNDS.get(key)
+    if spec is None or isinstance(raw_val, bool):
+        return default_val
+    kind, low, high = spec
+    try:
+        num = float(raw_val)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default_val
+    if num != num or num in (float("inf"), float("-inf")):
+        return default_val
+    clamped = max(low, min(high, num))
+    return int(round(clamped)) if kind is int else round(float(clamped), 2)
+
+
+def load_runtime_settings() -> dict[str, int | float]:
+    """Liest Laufzeit-Einstellungen aus runtime_settings.json (mit Fallback auf Standardwerte)."""
+    defaults = default_runtime_settings()
+    if not RUNTIME_SETTINGS_PATH.is_file():
+        return defaults
+    try:
+        raw = json.loads(RUNTIME_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return defaults
+    if not isinstance(raw, dict):
+        return defaults
+    result = dict(defaults)
+    for key, default_val in defaults.items():
+        if key in raw:
+            result[key] = _coerce_setting(key, raw[key], default_val)
+    return result
+
+
+def save_runtime_settings(updates: dict[str, object]) -> dict[str, int | float]:
+    """Speichert validierte Laufzeit-Einstellungen in runtime_settings.json.
+
+    Wird ``{"reset": True}`` übergeben, werden die Standardwerte wiederhergestellt.
+    """
+    if isinstance(updates, dict) and updates.get("reset") is True:
+        try:
+            RUNTIME_SETTINGS_PATH.unlink()
+        except OSError:
+            pass
+        return default_runtime_settings()
+    current = load_runtime_settings()
+    defaults = default_runtime_settings()
+    if isinstance(updates, dict):
+        for key in defaults:
+            if key in updates:
+                current[key] = _coerce_setting(key, updates[key], defaults[key])
+    _LOCAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = RUNTIME_SETTINGS_PATH.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(RUNTIME_SETTINGS_PATH)
+    return current
 
 # Repo-Root zum Python-Path hinzufügen, damit lock_utils und lock_scan importierbar sind
 if str(SCRIPTS_DIR) not in sys.path:
