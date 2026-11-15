@@ -92,10 +92,13 @@ def test_is_path_in_roots_rejects_nul_and_realpath_errors(monkeypatch, tmp_path)
         assert not rooms.is_path_in_roots(str(root) + "\x00evil")
         assert not rooms.is_path_in_roots(str(root / "sub\x00evil"))
 
-        def _failing_realpath(path):
-            raise OSError("cannot resolve")
+        # realpath of the target works, but the configured root cannot be resolved: not inside.
+        def _failing_root_realpath(path):
+            if os.path.normcase(str(path)) == os.path.normcase(str(root)):
+                raise OSError("cannot resolve root")
+            return orig_realpath(path)
 
-        monkeypatch.setattr(os.path, "realpath", _failing_realpath)
+        monkeypatch.setattr(os.path, "realpath", _failing_root_realpath)
         assert not rooms.is_path_in_roots(str(root / "sub"))
 
 

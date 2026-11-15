@@ -234,11 +234,13 @@ def is_path_in_roots(target_path: str) -> bool:
         return False
     for room in _get_rooms():
         root = os.path.normpath(room["abs_path"])
+        if not _within(normalized, root.lower()):
+            continue
         try:
             real_root = os.path.realpath(root)
         except (OSError, ValueError):
             continue
-        if _within(normalized, root.lower()) and _within(real, os.path.normcase(real_root)):
+        if _within(real, os.path.normcase(real_root)):
             return True
     return False
 

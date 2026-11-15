@@ -701,10 +701,9 @@ class WatcherHandler(BaseHTTPRequestHandler):
         if not lock_utils.is_user_lock(filename):
             self._json_error(400, "Not a user-lock filename")
             return
-        target = _resolve_within(Path(project_path), filename)
-        if target is None:
-            self._json_error(403, "Invalid user-lock path")
-            return
+        # The scope regex leaves no separators, so the lexical path stays inside project_path.
+        # No resolve(): a LOCK.user.* symlink must be unlinked itself, not followed.
+        target = Path(project_path) / filename
         if not target.exists():
             self._json_error(404, f"{filename} not found")
             return

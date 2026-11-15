@@ -10,7 +10,9 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+import pytest
+
+ROOT =Path(__file__).resolve().parent.parent
 os.environ.setdefault("LOCK_MASTER_WATCHER_DATA", tempfile.mkdtemp(prefix="lockmaster-web-hardening-"))
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 
@@ -306,5 +308,27 @@ def test_user_lock_rejects_nul_in_project_dir_with_403(monkeypatch, tmp_path):
             _json({"project_dir": str(root) + "\u0000evil"}),
         )
         assert status == 403 and "error" in body
+    finally:
+        stop()
+
+
+def test_remove_user_lock_unlinks_a_symlink_itself_not_its_target(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    victim = root / "CLAUDE.md"
+    victim.write_text("keep me", encoding="utf-8")
+    link = root / "LOCK.user.foo.txt"
+    try:
+        link.symlink_to(victim)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not available")
+    real_is_path_in_roots = rooms.is_path_in_roots
+    request, stop = _serve(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(rooms, "is_path_in_roots", real_is_path_in_roots)
+    monkeypatch.setattr(rooms, "_get_rooms", lambda: [{"key": "r", "abs_path": str(root)}])
+    try:
+        status, _, _ = request("POST", "/api/user-lock/remove", _json({"project_dir": str(root), "scope": "foo"}))
+        assert status == 200
+        assert victim.exists() and not link.is_symlink()
     finally:
         stop()
