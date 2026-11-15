@@ -121,7 +121,9 @@ def _resolve_within(root: Path, name: str, *, allow_subdirs: bool = False) -> Pa
     """Resolved *name* innerhalb von *root*. Gibt None zurück bei Traversal."""
     resolved_root = root.resolve()
     normalized_name = name.replace("\\", "/").strip()
-    if not normalized_name:
+    # NUL: some interpreter versions raise in resolve(), others hand the name back unchanged
+    # (Python 3.13 on Windows) and fail later in the file call - refuse it explicitly.
+    if not normalized_name or "\x00" in normalized_name:
         return None
     relative = PurePosixPath(normalized_name)
     if relative.is_absolute():
