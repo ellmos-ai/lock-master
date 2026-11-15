@@ -34,7 +34,8 @@ def test_gap_never_drops_below_the_interval():
 def test_gap_scales_with_a_slow_scan():
     # 127 s measured on 2026-10-02 -> about 10.5 minutes of pause, i.e. < 20 % scan share.
     assert lock_watcher.next_full_scan_gap(127, interval=60, idle_factor=4) == 508
-    assert lock_watcher.next_full_scan_gap(617, interval=60, idle_factor=4) == 2468
+    # uncapped here; the default cap (full_scan_max_gap_seconds) is covered in test_watcher_scan_protection
+    assert lock_watcher.next_full_scan_gap(617, interval=60, idle_factor=4, max_gap=1e9) == 2468
 
 
 def test_zero_factor_restores_the_fixed_interval():
