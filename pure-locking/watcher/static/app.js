@@ -1013,10 +1013,15 @@ function formatDaemonStatus(daemon) {
   if (!daemon || daemon.state === 'unknown') return 'nicht bekannt';
   const age = daemon.age_seconds == null ? 'unbekannt' : `${daemon.age_seconds}s`;
   const cache = daemon.update_cache ? 'Cache an' : 'Cache aus';
+  const warn = Array.isArray(daemon.scan_warnings) && daemon.scan_warnings.length
+    ? ` | Warnung: ${daemon.scan_warnings.join(' | ')}` : '';
   if (daemon.state === 'running') {
-    return `läuft, PID ${daemon.pid || '?'}, Heartbeat vor ${age}, ${cache}`;
+    return `läuft, PID ${daemon.pid || '?'}, Heartbeat vor ${age}, ${cache}${warn}`;
   }
-  return `nicht aktuell, PID ${daemon.pid || '?'}, letzter Heartbeat vor ${age}, ${cache}`;
+  if (daemon.state === 'degraded') {
+    return `eingeschränkt, PID ${daemon.pid || '?'}, Heartbeat vor ${age}, ${cache}${warn}`;
+  }
+  return `nicht aktuell, PID ${daemon.pid || '?'}, letzter Heartbeat vor ${age}, ${cache}${warn}`;
 }
 
 // ── Actions ──────────────────────────────────────

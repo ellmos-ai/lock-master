@@ -7,6 +7,27 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Watcher: run from a checkout, host overlay, scan protection (T-20261115-606489693)
+
+- Run the daemon from a git checkout instead of a hand-maintained copy: `LOCK_MASTER_WATCHER_CACHE_DIR` moves the
+  per-host detail cache out of the checkout (default unchanged), and a host overlay (`LOCK_MASTER_WATCHER_OVERLAY`,
+  default `<runtime data>/overlay/`) supplies room names, colors, the workspace root and icons from outside the
+  repository. The repo ships only neutral defaults and `rooms.overlay.example.json`.
+- `start_daemon_hidden.vbs`: windowless daemon start for a scheduled task, certified from the running instance and made
+  host-neutral (python, runtime directory and arguments come from the environment).
+- Scan protection after a full scan took 5608 s instead of about 60 s on one host (the next scan then started only after
+  about six hours): time budget per root (`scan_root_budget_seconds`), cap on the pause after a scan
+  (`full_scan_max_gap_seconds`), and visible warnings (`scan_warnings`, `scan_partial`, state `degraded` for an incomplete
+  scan). A scan that skipped part of a root never turns known locks into "deleted" without looking at the file.
+- API hardening (follow-ups of the ticket form review): non-object or invalid JSON bodies answer 400, bodies above 1 MiB
+  answer 413, a field of the wrong type is a 400 instead of a dropped connection, the origin is checked before the body is
+  read, and a junction or symlink inside a root that points outside is no longer treated as inside the root.
+- Optional host hook `cc_integrations` (`LOCK_MASTER_INTEGRATIONS_LIB`) for event recording and a routing hint on tickets.
+- User locks created in the UI now carry `removable_by: user` and `mode: hard`, like `lock_create.py --user`.
+- Tests of the running instance brought over (storage, daemon, daemon status, scan round trip, scanner/lock names, room
+  mapping, bulk lock, permissions, user and pruning rules), made platform-neutral; one test that relied on a fixed date
+  and one that lost its final assertion were fixed on the way.
+
 ### Watcher: runtime intervals, fork features, overrun warning (T-20261115-353226340)
 
 - The heartbeat and scan intervals are adjustable at runtime (`PUT /api/settings`, `runtime_settings.json`, clamped;

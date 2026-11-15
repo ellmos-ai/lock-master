@@ -173,12 +173,13 @@ def generate_cache(db: storage.LockDB) -> None:
 
 
 def _write_detail_cache(locks: list[dict], scanned_at: datetime) -> None:
-    """Schreibt einen Detail-Cache mit Team-Lock-Daten ins Watcher-Verzeichnis."""
+    """Schreibt einen Detail-Cache mit Team-Lock-Daten nach config.CACHE_DIR (Default: Watcher-Verzeichnis)."""
     now_iso = lock_utils.format_utc_iso(scanned_at)
     # Pro Host eine eigene Datei: der Watcher-Ordner ist synchronisiert, eine gemeinsame
     # Datei erzeugt bei mehreren Hosts Konfliktkopien.
     import lock_scan
-    cache_path = config.WATCHER_DIR / lock_scan.host_cache_name()
+    config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = config.CACHE_DIR / lock_scan.host_cache_name()
 
     lines: list[str] = [
         "# LOCK-CACHE (Lock-File-Watcher, Detail-Ansicht)",

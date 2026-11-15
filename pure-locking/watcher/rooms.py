@@ -74,7 +74,10 @@ def _build_rooms() -> list[dict]:
     """Baut die Raumliste aus lock_roots.json + gespeicherter Config."""
     scan_cfg = config.load_scan_config()
     root_entries = scan_cfg.get("roots", [])
-    workspace = _workspace_root([entry.get("path", "") for entry in root_entries])
+    overlay = config.load_rooms_overlay()
+    workspace = overlay["workspace_root"] or _workspace_root(
+        [entry.get("path", "") for entry in root_entries]
+    )
     user_cfg = _load_rooms_config()
 
     rooms = []
@@ -91,8 +94,10 @@ def _build_rooms() -> list[dict]:
             relpath = os.path.basename(abs_path)
 
         key = _key_from_relpath(relpath)
-        default_label = _DEFAULT_LABELS.get(relpath, os.path.basename(abs_path))
-        default_color = _DEFAULT_COLORS.get(relpath, "#6b7280")
+        default_label = overlay["labels"].get(
+            relpath, _DEFAULT_LABELS.get(relpath, os.path.basename(abs_path))
+        )
+        default_color = overlay["colors"].get(relpath, _DEFAULT_COLORS.get(relpath, "#6b7280"))
 
         room_user = user_cfg.get(key, {})
         rooms.append({
@@ -210,12 +215,21 @@ def get_room_abs_path(key: str) -> str | None:
     return room["abs_path"] if room else None
 
 
+def _within(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + os.sep)
+
+
 def is_path_in_roots(target_path: str) -> bool:
-    """Prüft ob ein Pfad innerhalb eines der Scan-Roots liegt."""
+    """Prüft ob ein Pfad innerhalb eines der Scan-Roots liegt.
+
+    Der Pfad muss logisch UND nach Auflösung von Junctions/Symlinks im Root liegen: ein in den
+    Root gelegter Junction auf ein Ziel ausserhalb darf keine Schreibzugriffe dorthin öffnen.
+    """
     normalized = os.path.normpath(target_path).lower()
+    real = os.path.normcase(os.path.realpath(target_path))
     for room in _get_rooms():
-        root_lower = os.path.normpath(room["abs_path"]).lower()
-        if normalized.startswith(root_lower + os.sep) or normalized == root_lower:
+        root = os.path.normpath(room["abs_path"])
+        if _within(normalized, root.lower()) and _within(real, os.path.normcase(os.path.realpath(root))):
             return True
     return False
 

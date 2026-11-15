@@ -63,16 +63,45 @@ def next_full_scan_gap(
     last_duration_s: float,
     interval: float | None = None,
     idle_factor: float | None = None,
+    max_gap: float | None = None,
 ) -> float:
     """Seconds to wait after a full scan before the next one may start.
 
     Never below the configured interval; scales with the measured scan
     duration so a slow scan (large or slow roots) does not run back to back.
+    The scaled part is capped at ``full_scan_max_gap_seconds``: one extremely slow
+    scan (5608 s measured) must not push the next one out by hours.
     """
     rt = config.load_runtime_settings()
     interval = float(rt["full_scan_interval"]) if interval is None else interval
     idle_factor = float(rt["full_scan_idle_factor"]) if idle_factor is None else idle_factor
-    return max(float(interval), float(idle_factor) * max(0.0, float(last_duration_s)))
+    max_gap = float(rt["full_scan_max_gap_seconds"]) if max_gap is None else max_gap
+    scaled = float(idle_factor) * max(0.0, float(last_duration_s))
+    return max(float(interval), min(scaled, float(max_gap)))
+
+
+def scan_warnings(stats: dict, duration_s: float, gap_s: float, settings: dict | None = None) -> list[str]:
+    """Human-readable warnings for a finished full scan (empty list = nothing to report)."""
+    rt = config.load_runtime_settings() if settings is None else settings
+    warnings: list[str] = []
+    roots = stats.get("roots") or []
+    for item in roots:
+        if item.get("timed_out"):
+            warnings.append(
+                f"Root {item.get('path')} nach {item.get('seconds')}s abgebrochen "
+                f"(Budget {rt['scan_root_budget_seconds']}s): Scan unvollstaendig"
+            )
+    if duration_s >= scan_overrun_warn_seconds(rt):
+        slowest = sorted(roots, key=lambda r: r.get("seconds", 0), reverse=True)[:3]
+        detail = ", ".join(f"{r.get('path')} {r.get('seconds')}s" for r in slowest)
+        warnings.append(
+            f"Full-Scan dauerte {duration_s:.0f}s (Warnschwelle {scan_overrun_warn_seconds(rt):.0f}s)"
+            + (f"; langsamste Roots: {detail}" if detail else "")
+        )
+    uncapped = float(rt["full_scan_idle_factor"]) * duration_s
+    if uncapped > float(rt["full_scan_max_gap_seconds"]) and gap_s < uncapped:
+        warnings.append(f"Pause auf {gap_s:.0f}s begrenzt (ungedeckelt {uncapped:.0f}s)")
+    return warnings
 
 
 def scan_stale_after_seconds(status: dict | None) -> float:
@@ -232,10 +261,15 @@ def _run_full_scan(db: storage.LockDB, cfg: dict, update_cache: bool) -> dict:
     """Führt einen Full-Scan durch, reconciled Ergebnisse mit DB.
     Gibt Stats-Dict zurück: {new, modified, expired, deleted, total}."""
     started = _now_iso()
-    scan_results = scanner.full_scan(cfg)
+    report: dict = {}
+    scan_results = scanner.full_scan(cfg, report=report)
     scanned_paths = {r["path"] for r in scan_results}
 
-    stats = {"new": 0, "modified": 0, "expired": 0, "deleted": 0, "total": len(scan_results)}
+    stats = {
+        "new": 0, "modified": 0, "expired": 0, "deleted": 0, "total": len(scan_results),
+        "roots": report.get("roots", []),
+        "roots_scanned": len(report.get("roots", [])),
+    }
 
     for lock_data in scan_results:
         path = lock_data["path"]
@@ -386,6 +420,8 @@ def run_daemon(update_cache: bool) -> None:
         "last_scan_finished_at": None,
         "last_scan_duration_s": None,
         "next_full_scan_gap_s": None,
+        "scan_partial": False,
+        "scan_warnings": [],
     }
 
     def _handle_signal(signum, frame):
@@ -436,27 +472,39 @@ def run_daemon(update_cache: bool) -> None:
             if pending_scan is not None and pending_scan.done():
                 duration = time.monotonic() - pending_scan_started_mono
                 full_scan_gap = next_full_scan_gap(duration)
+                stats = None
+                failure: str | None = None
+                try:
+                    stats = pending_scan.result()
+                except Exception as exc:
+                    failure = f"Full-Scan fehlgeschlagen: {exc}"
+                    print(f"[{_now_iso()}] {failure}", file=sys.stderr)
+                warnings = scan_warnings(stats, duration, full_scan_gap) if stats else []
+                if failure:
+                    warnings.append(failure)
                 with state_lock:
                     scan_state["scan_in_progress"] = False
                     scan_state["last_scan_finished_at"] = _now_iso()
                     scan_state["last_scan_duration_s"] = round(duration, 1)
                     scan_state["next_full_scan_gap_s"] = round(full_scan_gap, 1)
+                    # Nur ein abgebrochener Root macht die Lock-Daten unvollstaendig.
+                    scan_state["scan_partial"] = failure is not None or any(
+                        r.get("timed_out") for r in (stats or {}).get("roots", [])
+                    )
+                    scan_state["scan_warnings"] = warnings
                 if full_scan_gap > float(config.load_runtime_settings()["full_scan_interval"]):
                     print(
                         f"[{_now_iso()}] Full-Scan dauerte {duration:.0f}s; "
                         f"nächster Full-Scan frühestens in {full_scan_gap:.0f}s."
                     )
-                try:
-                    stats = pending_scan.result()
+                for warning in warnings:
+                    if warning != failure:
+                        print(f"[{_now_iso()}] WARNUNG: {warning}", file=sys.stderr)
+                if stats:
                     print(
                         f"[{_now_iso()}] Full-Scan: {stats['total']} aktiv, "
                         f"{stats['new']} neu, {stats['modified']} geändert, "
                         f"{stats['expired']} abgelaufen, {stats['deleted']} gelöscht"
-                    )
-                except Exception as exc:
-                    print(
-                        f"[{_now_iso()}] Full-Scan fehlgeschlagen: {exc}",
-                        file=sys.stderr,
                     )
                 pending_scan = None
                 last_full_scan = time.monotonic()
