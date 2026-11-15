@@ -199,3 +199,9 @@ def test_old_status_files_without_the_new_fields_still_work(monkeypatch):
         last_scan_finished_at=(datetime.now() - timedelta(seconds=5)).isoformat(timespec="seconds")))
     api = web_server._daemon_status_for_api(None)
     assert api["state"] == "running" and api["scan_partial"] is False and api["scan_warnings"] == []
+
+
+def test_the_settings_endpoint_exposes_the_new_knobs():
+    source = (ROOT / "pure-locking" / "watcher" / "web_server.py").read_text(encoding="utf-8")
+    assert '"scan_root_budget_seconds": rt["scan_root_budget_seconds"]' in source
+    assert '"full_scan_max_gap_seconds": rt["full_scan_max_gap_seconds"]' in source

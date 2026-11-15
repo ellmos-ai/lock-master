@@ -537,6 +537,8 @@ class WatcherHandler(BaseHTTPRequestHandler):
             "full_scan_interval": rt["full_scan_interval"],
             "full_scan_idle_factor": rt["full_scan_idle_factor"],
             "stale_daemon_seconds": rt["stale_daemon_seconds"],
+            "scan_root_budget_seconds": rt["scan_root_budget_seconds"],
+            "full_scan_max_gap_seconds": rt["full_scan_max_gap_seconds"],
             "defaults": config.default_runtime_settings(),
             "db_path": str(config.DB_PATH),
             "runtime_settings_path": str(config.RUNTIME_SETTINGS_PATH),
