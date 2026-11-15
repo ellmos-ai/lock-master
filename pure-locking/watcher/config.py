@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,63 @@ _LOCAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH: Path = _LOCAL_DATA_DIR / "watcher.db"
 DAEMON_STATUS_PATH: Path = _LOCAL_DATA_DIR / "daemon_status.json"
 RUNTIME_SETTINGS_PATH: Path = _LOCAL_DATA_DIR / "runtime_settings.json"
+
+
+def _dir_from_env(name: str, default: Path) -> Path:
+    """Directory named by an environment variable, else ``default`` (blank counts as unset)."""
+    raw = os.environ.get(name, "").strip()
+    return Path(os.path.expandvars(raw)).expanduser() if raw else default
+
+
+# Ziel der Cache-Dateien, die der Watcher selbst schreibt (Detail-Cache LOCK-CACHE.<host>.md).
+# Default bleibt das Watcher-Verzeichnis (abwaertskompatibel). Wird der Watcher aus einem Git-Klon
+# gestartet, zeigt LOCK_MASTER_WATCHER_CACHE_DIR auf einen Ordner ausserhalb des Klons.
+# Die Standard-Caches aus lock_scan.write_caches() haben eigene Ziele im "caches"-Block der roots-Datei.
+CACHE_DIR_ENV = "LOCK_MASTER_WATCHER_CACHE_DIR"
+CACHE_DIR: Path = _dir_from_env(CACHE_DIR_ENV, WATCHER_DIR)
+
+# Host-Overlay: Raumnamen, -farben, Icons und Workspace-Root eines Hosts. Liegt ausserhalb des Repos
+# (Default <Datenverzeichnis>/overlay), damit das oeffentliche Repo keine privaten Projektnamen
+# kennt. Beispiel: pure-locking/watcher/rooms.overlay.example.json.
+OVERLAY_DIR_ENV = "LOCK_MASTER_WATCHER_OVERLAY"
+OVERLAY_DIR: Path = _dir_from_env(OVERLAY_DIR_ENV, _LOCAL_DATA_DIR / "overlay")
+OVERLAY_FILE: Path = OVERLAY_DIR / "rooms.overlay.json"
+OVERLAY_ICONS_DIR: Path = OVERLAY_DIR / "icons"
+
+_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+
+
+def _norm_rel(key: object) -> str:
+    return str(key).replace("\\", "/").strip().strip("/")
+
+
+def load_rooms_overlay() -> dict:
+    """Read the host overlay; a missing or unusable file means "no overlay", never a failed start.
+
+    Returns ``{"workspace_root": Path | None, "labels": {relpath: str}, "colors": {relpath: "#rrggbb"}}``.
+    Keys are paths relative to the workspace root, with forward slashes. Values are validated
+    because they end up in the UI.
+    """
+    result: dict = {"workspace_root": None, "labels": {}, "colors": {}}
+    try:
+        raw = json.loads(OVERLAY_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return result
+    if not isinstance(raw, dict):
+        return result
+    root = raw.get("workspace_root")
+    if isinstance(root, str) and root.strip():
+        result["workspace_root"] = Path(os.path.expandvars(root.strip())).expanduser()
+    labels, colors = raw.get("labels"), raw.get("colors")
+    if isinstance(labels, dict):
+        for key, value in labels.items():
+            if isinstance(value, str) and value.strip():
+                result["labels"][_norm_rel(key)] = value.strip()[:80]
+    if isinstance(colors, dict):
+        for key, value in colors.items():
+            if isinstance(value, str) and _COLOR_RE.match(value.strip()):
+                result["colors"][_norm_rel(key)] = value.strip()
+    return result
 
 # Intervalle in Sekunden
 FULL_SCAN_INTERVAL: int = 60
@@ -47,6 +105,14 @@ def _idle_factor_from_env(raw: str | None) -> float:
 
 FULL_SCAN_IDLE_FACTOR: float = _idle_factor_from_env(os.environ.get("LOCK_MASTER_FULL_SCAN_IDLE_FACTOR"))
 STALE_DAEMON_SECONDS: int = max(180, FULL_SCAN_INTERVAL * 3)
+# Schutz gegen ausufernde Scans (Messung 2026-11-15 auf einem Host: ein Full-Scan dauerte 5608 s
+# statt ~60 s, mit Idle-Faktor 4 begann der naechste erst nach ~6 h):
+# - Zeitbudget je Root: ueberschreitet ein Root es, wird er abgebrochen, der Scan gilt als
+#   unvollstaendig und der Daemon meldet das sichtbar (scan_warnings, Zustand "degraded").
+# - Obergrenze fuer die Pause nach einem Scan, damit eine einzelne langsame Messung die
+#   Aktualitaet der Lock-Daten nicht auf Stunden streckt.
+SCAN_ROOT_BUDGET_SECONDS: int = 300
+FULL_SCAN_MAX_GAP_SECONDS: int = 1800
 
 # Laufzeit-konfigurierbare Heartbeat- und Scan-Optionen (T-20260913-477382785)
 RUNTIME_SETTINGS_BOUNDS: dict[str, tuple[type, float, float]] = {
@@ -55,6 +121,8 @@ RUNTIME_SETTINGS_BOUNDS: dict[str, tuple[type, float, float]] = {
     "full_scan_interval": (int, 30, 900),
     "full_scan_idle_factor": (float, 0.0, 10.0),
     "stale_daemon_seconds": (int, 30, 1800),
+    "scan_root_budget_seconds": (int, 10, 3600),
+    "full_scan_max_gap_seconds": (int, 60, 86400),
 }
 
 
@@ -66,6 +134,8 @@ def default_runtime_settings() -> dict[str, int | float]:
         "full_scan_interval": FULL_SCAN_INTERVAL,
         "full_scan_idle_factor": FULL_SCAN_IDLE_FACTOR,
         "stale_daemon_seconds": STALE_DAEMON_SECONDS,
+        "scan_root_budget_seconds": SCAN_ROOT_BUDGET_SECONDS,
+        "full_scan_max_gap_seconds": FULL_SCAN_MAX_GAP_SECONDS,
     }
 
 

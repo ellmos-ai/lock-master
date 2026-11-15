@@ -37,21 +37,27 @@ _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-. ]+$")
 
 TICKET_PRIORITIES = ("niedrig", "mittel", "hoch", "kritisch")
 TICKET_MASTER_LIB_ENV = "TICKET_MASTER_LIB"
+INTEGRATIONS_LIB_ENV = "LOCK_MASTER_INTEGRATIONS_LIB"
+MAX_BODY_BYTES = 1024 * 1024
 
 
-def _ticket_master_module(name: str):
-    """Import a ticket-master helper (`ticket_writer`, `doc_scanner`) or return None.
+class _BadRequest(Exception):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
 
-    The helpers belong to the ticket-master package, which is an optional companion of the
-    watcher: it is found on sys.path, or via the directory named by TICKET_MASTER_LIB
-    (ticket-master's ``lib`` folder). Without it the ticket form and the control-file panel
-    answer 501 instead of the watcher failing to start.
+
+def _optional_module(name: str, lib_env: str):
+    """Import an optional companion module or return None.
+
+    Found on sys.path, or via the directory named by ``lib_env``. Without it the dependent
+    feature answers 501 or is skipped instead of the watcher failing to start.
     """
     try:
         return importlib.import_module(name)
     except ImportError:
         pass
-    lib = os.environ.get(TICKET_MASTER_LIB_ENV, "").strip()
+    lib = os.environ.get(lib_env, "").strip()
     if lib and os.path.isdir(lib) and lib not in sys.path:
         sys.path.append(lib)
         try:
@@ -59,6 +65,49 @@ def _ticket_master_module(name: str):
         except ImportError:
             return None
     return None
+
+
+def _ticket_master_module(name: str):
+    """Import a ticket-master helper (`ticket_writer`, `doc_scanner`) or return None.
+
+    The helpers belong to the ticket-master package, an optional companion of the watcher:
+    found on sys.path, or via TICKET_MASTER_LIB (ticket-master's ``lib`` folder). Without it
+    the ticket form and the control-file panel answer 501.
+    """
+    return _optional_module(name, TICKET_MASTER_LIB_ENV)
+
+
+def _notify_integrations(kind: str, text: str, route_text: str | None = None):
+    """Optional host hook ``cc_integrations`` (``record_event``, ``route_task``).
+
+    Looked up on sys.path or in LOCK_MASTER_INTEGRATIONS_LIB. Records an event and returns the
+    routing hint for ``route_text`` (or None). An absent or failing hook never fails a request.
+    """
+    hook = _optional_module("cc_integrations", INTEGRATIONS_LIB_ENV)
+    if hook is None:
+        return None
+    try:
+        hook.record_event(kind, text)
+        return hook.route_task(route_text) if route_text is not None else None
+    except Exception:  # noqa: BLE001 -- optional consumer
+        return None
+
+
+_ICON_SUFFIXES = (".svg", ".png")
+
+
+def _icon_dirs() -> list[Path]:
+    """Existing icon directories: the host overlay first (it may override), then the shipped ones."""
+    return [d for d in (config.OVERLAY_ICONS_DIR, STATIC_DIR / "icons") if d.is_dir()]
+
+
+def _overlay_icon(static_name: str) -> Path | None:
+    """File for ``icons/<name>`` from the host overlay, or None (then the shipped icon is used)."""
+    prefix, _, name = static_name.partition("/")
+    if prefix != "icons" or Path(name).suffix.lower() not in _ICON_SUFFIXES:
+        return None
+    found = _resolve_within(config.OVERLAY_ICONS_DIR, name)
+    return found if found is not None and found.is_file() else None
 
 
 def _single_line(value: object, limit: int) -> str:
@@ -72,7 +121,9 @@ def _resolve_within(root: Path, name: str, *, allow_subdirs: bool = False) -> Pa
     """Resolved *name* innerhalb von *root*. Gibt None zurück bei Traversal."""
     resolved_root = root.resolve()
     normalized_name = name.replace("\\", "/").strip()
-    if not normalized_name:
+    # NUL: some interpreter versions raise in resolve(), others hand the name back unchanged
+    # (Python 3.13 on Windows) and fail later in the file call - refuse it explicitly.
+    if not normalized_name or "\x00" in normalized_name:
         return None
     relative = PurePosixPath(normalized_name)
     if relative.is_absolute():
@@ -82,7 +133,10 @@ def _resolve_within(root: Path, name: str, *, allow_subdirs: bool = False) -> Pa
         return None
     if not allow_subdirs and len(parts) != 1:
         return None
-    resolved = root.joinpath(*parts).resolve()
+    try:
+        resolved = root.joinpath(*parts).resolve()
+    except (OSError, ValueError):  # e.g. an embedded NUL in the name
+        return None
     if resolved == resolved_root:
         return resolved
     try:
@@ -177,9 +231,14 @@ def _daemon_status_for_api(db: storage.LockDB | None = None) -> dict:
         last_scan_age_seconds is not None
         and last_scan_age_seconds > _lw.scan_stale_after_seconds(status)
     )
+    # A root that hit its time budget (or a failed scan) leaves the lock data incomplete:
+    # a fresh heartbeat must not read as "all good".
+    scan_partial = bool(status.get("scan_partial"))
+    raw_warnings = status.get("scan_warnings")
+    warnings = [str(w) for w in raw_warnings] if isinstance(raw_warnings, list) else []
     if not heartbeat_fresh:
         state = "stale"
-    elif scan_stuck or scan_stale:
+    elif scan_stuck or scan_stale or scan_partial:
         state = "degraded"
     else:
         state = "running"
@@ -198,6 +257,8 @@ def _daemon_status_for_api(db: storage.LockDB | None = None) -> dict:
         "last_scan_duration_s": status.get("last_scan_duration_s"),
         "next_full_scan_gap_s": status.get("next_full_scan_gap_s"),
         "last_scan_age_seconds": last_scan_age_seconds,
+        "scan_partial": scan_partial,
+        "scan_warnings": warnings,
     }
 
 
@@ -292,7 +353,11 @@ class WatcherHandler(BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
-        body = self._read_body()
+        # Body first, origin second: answering a request whose body is still unread resets the
+        # connection on Windows, and the client then never sees the 403.
+        body = self._read_body_or_reject()
+        if body is None:
+            return
         if not self._ensure_write_origin_allowed():
             return
 
@@ -314,7 +379,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
         }
 
         if path in routes:
-            routes[path](body)
+            self._call_route(routes[path], body)
         else:
             self._json_error(404, "Unknown API endpoint")
 
@@ -323,23 +388,38 @@ class WatcherHandler(BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
-        body = self._read_body()
+        # Body first, origin second: answering a request whose body is still unread resets the
+        # connection on Windows, and the client then never sees the 403.
+        body = self._read_body_or_reject()
+        if body is None:
+            return
         if not self._ensure_write_origin_allowed():
             return
 
         if path.startswith("/api/lock/") and path.endswith("/name"):
             parts = path.split("/")
             lock_id = parts[3]
-            self._set_lock_name(lock_id, body)
+            self._call_route(self._set_lock_name, body, lock_id)
         elif path.startswith("/api/room/") and len(path.split("/")) == 4:
             room_key = path.split("/")[3]
-            self._update_room(room_key, body)
+            self._call_route(self._update_room, body, room_key)
         elif path == "/api/settings":
-            self._update_settings(body)
+            self._call_route(self._update_settings, body)
         elif path == "/api/profile":
-            self._update_profile(body)
+            self._call_route(self._update_profile, body)
         else:
             self._json_error(404, "Unknown API endpoint")
+
+    def _call_route(self, handler, body: dict, *args):
+        """Run a write route; a field of the wrong JSON type (e.g. a number where text is
+        expected) is a client error, not a dropped connection."""
+        try:
+            if args:
+                handler(*args, body)
+            else:
+                handler(body)
+        except (AttributeError, TypeError):
+            self._json_error(400, "Malformed request body")
 
     def do_OPTIONS(self):
         if not self._origin_allowed(self.headers.get("Origin")):
@@ -466,6 +546,8 @@ class WatcherHandler(BaseHTTPRequestHandler):
             "full_scan_interval": rt["full_scan_interval"],
             "full_scan_idle_factor": rt["full_scan_idle_factor"],
             "stale_daemon_seconds": rt["stale_daemon_seconds"],
+            "scan_root_budget_seconds": rt["scan_root_budget_seconds"],
+            "full_scan_max_gap_seconds": rt["full_scan_max_gap_seconds"],
             "defaults": config.default_runtime_settings(),
             "db_path": str(config.DB_PATH),
             "runtime_settings_path": str(config.RUNTIME_SETTINGS_PATH),
@@ -577,7 +659,12 @@ class WatcherHandler(BaseHTTPRequestHandler):
         host = socket.gethostname()
         now = lock_utils.created_utc_iso()
 
-        lines = [f"owner: {owner}", f"created: {now}", f"host: {host}"]
+        # removable_by/mode: same fields as `lock_create.py --user`, so the protection does not
+        # depend on the file name alone.
+        lines = [
+            f"owner: {owner}", f"created: {now}", f"host: {host}",
+            "removable_by: user", "mode: hard",
+        ]
         if purpose:
             lines.append(f"purpose: {purpose}")
         if scope and scope != "project":
@@ -593,6 +680,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
             self._json_error(500, f"Failed to write user-lock: {exc}")
             return
 
+        _notify_integrations("user-lock", f"{filename} in {project_path}")
         self._json_response({"created": lock_path, "filename": filename}, status=201)
 
     def _remove_user_lock(self, body: dict):
@@ -629,6 +717,8 @@ class WatcherHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._json_error(500, f"Bulk-lock failed: {exc}")
             return
+        if commit and res.get("locked"):
+            _notify_integrations("bulk-lock", f"{res['locked']} Roots gesperrt - {reason}")
         self._json_response(res)
 
     def _bulk_unlock(self, body: dict):
@@ -713,7 +803,11 @@ class WatcherHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._json_error(500, f"Ticket creation failed: {exc}")
             return
-        self._json_response({"created": path}, status=201)
+        payload: dict = {"created": path}
+        routing = _notify_integrations("ticket", f"{title} -> {os.path.basename(path)}", f"{title}\n{text}")
+        if routing is not None:
+            payload["routing"] = routing
+        self._json_response(payload, status=201)
 
     def _doc_dir_from(self, value: str) -> Path | None:
         project_path = self._resolve_project_dir(value) if value else None
@@ -994,15 +1088,14 @@ class WatcherHandler(BaseHTTPRequestHandler):
     # ── Static Files ───────────────────────────────────────────
 
     def _get_icons(self, qs: dict):
-        icons_dir = STATIC_DIR / "icons"
-        if not icons_dir.is_dir():
-            self._json_response([])
-            return
-        icons = sorted(
-            f.name for f in icons_dir.iterdir()
-            if f.is_file() and f.suffix.lower() in (".svg", ".png")
-        )
-        self._json_response(icons)
+        """Icons shipped with the watcher plus those of the host overlay (listed once by name)."""
+        names: set[str] = set()
+        for icons_dir in _icon_dirs():
+            names.update(
+                f.name for f in icons_dir.iterdir()
+                if f.is_file() and f.suffix.lower() in _ICON_SUFFIXES
+            )
+        self._json_response(sorted(names))
 
     def _get_room_stats(self, qs: dict):
         """GET /api/room-stats — liefert gecachte Verzeichnis-Statistiken."""
@@ -1028,7 +1121,9 @@ class WatcherHandler(BaseHTTPRequestHandler):
             path = "/index.html"
 
         static_name = urllib.parse.unquote(path.lstrip("/"))
-        safe_path = _resolve_within(STATIC_DIR, static_name, allow_subdirs=True)
+        safe_path = _overlay_icon(static_name) or _resolve_within(
+            STATIC_DIR, static_name, allow_subdirs=True
+        )
         if safe_path is None:
             self._json_error(403, "Forbidden")
             return
@@ -1067,14 +1162,38 @@ class WatcherHandler(BaseHTTPRequestHandler):
     # ── Helpers ────────────────────────────────────────────────
 
     def _read_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", 0))
+        """Parse the JSON object sent with a write request ({} when there is no body).
+
+        Raises _BadRequest: 400 for an invalid Content-Length, non-JSON or non-object body,
+        413 above MAX_BODY_BYTES.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            raise _BadRequest(400, "Invalid Content-Length") from None
+        if length < 0:
+            raise _BadRequest(400, "Invalid Content-Length")
         if length == 0:
             return {}
+        if length > MAX_BODY_BYTES:
+            raise _BadRequest(413, f"Request body too large (max {MAX_BODY_BYTES} bytes)")
         raw = self.rfile.read(length)
         try:
-            return json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return {}
+            data = json.loads(raw.decode("utf-8"))
+        except (ValueError, RecursionError):  # bad JSON, bad UTF-8, or nesting beyond the interpreter limit
+            raise _BadRequest(400, "Body must be valid JSON") from None
+        if not isinstance(data, dict):
+            raise _BadRequest(400, "Body must be a JSON object")
+        return data
+
+    def _read_body_or_reject(self) -> dict | None:
+        """_read_body, answering the error itself; None means a response was already sent."""
+        try:
+            return self._read_body()
+        except _BadRequest as exc:
+            self.close_connection = True
+            self._json_error(exc.status, str(exc))
+            return None
 
     def _json_response(self, data, status: int = 200):
         body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")

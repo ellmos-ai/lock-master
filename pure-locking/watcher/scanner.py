@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -68,39 +69,75 @@ def lock_to_record(lock_path: Path, name: str, scope: str, is_legacy: bool) -> d
     }
 
 
-def full_scan(config_data: dict, now: datetime | None = None) -> list[dict]:
+def full_scan(
+    config_data: dict,
+    now: datetime | None = None,
+    *,
+    root_budget_s: float | None = None,
+    report: dict | None = None,
+) -> list[dict]:
     """Traversiert alle konfigurierten Roots und liefert ALLE Lock-Dateien.
 
     Im Gegensatz zu lock_scan.collect_locks() werden hier auch abgelaufene
     Locks zurückgegeben. is_expired wird pro Lock separat geprüft.
+
+    Zeitbudget je Root (``root_budget_s``, Default: Laufzeit-Einstellung
+    ``scan_root_budget_seconds``, ``<= 0`` = unbegrenzt): Ein Root, der es überschreitet, wird
+    zwischen zwei Verzeichnissen abgebrochen. Ein einzelnes hängendes Verzeichnis lässt sich
+    so nicht unterbrechen (ponytail: Thread je Root, falls das je gemessen wird).
+    Mit ``report`` (leeres Dict) kommt je Root ``{path, dirs, seconds, timed_out}`` zurück,
+    damit sichtbar bleibt, welcher Root die Zeit kostet und ob der Scan unvollständig ist.
     """
     now = datetime.now(timezone.utc) if now is None else now
+    if root_budget_s is None:
+        root_budget_s = float(config.load_runtime_settings()["scan_root_budget_seconds"])
     seen: set[Path] = set()
     results: list[dict] = []
+    root_reports: list[dict] = []
 
-    for project_dir in lock_scan.iter_lock_dirs(config_data):
-        if project_dir in seen:
-            continue
-        seen.add(project_dir)
+    for entry in config_data.get("roots", []):
+        started = time.monotonic()
+        deadline = started + root_budget_s if root_budget_s > 0 else None
+        dirs = 0
+        timed_out = False
+        single_root = {**config_data, "roots": [entry]}
 
-        # find_lock_files liefert alle Lock-Dateien unabhängig vom Ablaufstatus
-        for name, scope, is_legacy in lock_utils.find_lock_files(project_dir):
-            lock_path = project_dir / name
+        for project_dir in lock_scan.iter_lock_dirs(single_root):
+            if deadline is not None and time.monotonic() > deadline:
+                timed_out = True
+                break
+            dirs += 1
+            if project_dir in seen:
+                continue
+            seen.add(project_dir)
 
-            record = lock_to_record(lock_path, name, scope, is_legacy)
+            # find_lock_files liefert alle Lock-Dateien unabhängig vom Ablaufstatus
+            for name, scope, is_legacy in lock_utils.find_lock_files(project_dir):
+                lock_path = project_dir / name
 
-            # is_expired separat prüfen (Legacy-Locks kennen kein Format → nie expired)
-            if is_legacy:
-                expired = False
-            else:
-                try:
-                    expired = lock_utils.is_expired(lock_path, now)
-                except (OSError, ValueError):
+                record = lock_to_record(lock_path, name, scope, is_legacy)
+
+                # is_expired separat prüfen (Legacy-Locks kennen kein Format → nie expired)
+                if is_legacy:
                     expired = False
+                else:
+                    try:
+                        expired = lock_utils.is_expired(lock_path, now)
+                    except (OSError, ValueError):
+                        expired = False
 
-            record["is_expired"] = expired
-            results.append(record)
+                record["is_expired"] = expired
+                results.append(record)
 
+        root_reports.append({
+            "path": str(entry.get("path", "")),
+            "dirs": dirs,
+            "seconds": round(time.monotonic() - started, 1),
+            "timed_out": timed_out,
+        })
+
+    if report is not None:
+        report["roots"] = root_reports
     return results
 
 

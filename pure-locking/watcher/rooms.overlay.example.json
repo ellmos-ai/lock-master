@@ -1,0 +1,12 @@
+{
+  "_comment": "Example host overlay. Copy to <LOCK_MASTER_WATCHER_OVERLAY>/rooms.overlay.json (default: <data dir>/overlay/rooms.overlay.json). Room icons go into <overlay dir>/icons/ (svg or png). Keys of labels/colors are root paths relative to workspace_root, with forward slashes. Everything is optional.",
+  "workspace_root": "%USERPROFILE%/Workspace",
+  "labels": {
+    "docs": "Documentation",
+    "src/backend": "Backend"
+  },
+  "colors": {
+    "docs": "#0ea5e9",
+    "src/backend": "#10b981"
+  }
+}
