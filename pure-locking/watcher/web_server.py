@@ -14,9 +14,12 @@ import importlib
 import json
 import os
 import re
+import select
 import socket
 import subprocess
 import sys
+import tempfile
+import time
 import urllib.parse
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -39,6 +42,60 @@ TICKET_PRIORITIES = ("niedrig", "mittel", "hoch", "kritisch")
 TICKET_MASTER_LIB_ENV = "TICKET_MASTER_LIB"
 INTEGRATIONS_LIB_ENV = "LOCK_MASTER_INTEGRATIONS_LIB"
 MAX_BODY_BYTES = 1024 * 1024
+_SQLITE_INT64_MIN = -(1 << 63)
+_SQLITE_INT64_MAX = (1 << 63) - 1
+
+
+def _parse_int64(
+    raw: object,
+    *,
+    min_value: int = _SQLITE_INT64_MIN,
+    max_value: int = _SQLITE_INT64_MAX,
+) -> int | None:
+    """Parse an ASCII base-10 integer bounded to SQLite signed 64-bit range."""
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text or not text.isascii():
+        return None
+    digits = text[1:] if text[0] == "-" else text
+    if not digits or not digits.isdigit():
+        return None
+    val = int(text, 10)
+    if val < min_value or val > max_value:
+        return None
+    return val
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    if path.is_symlink():
+        raise OSError(f"Refusing to overwrite symlink target: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as fh:
+            tmp_path = Path(fh.name)
+            fh.write(text)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 class _BadRequest(Exception):
@@ -188,8 +245,9 @@ def _load_user_profile() -> dict:
 
 
 def _save_user_profile(profile: dict) -> None:
-    USER_PROFILE_FILE.write_text(
-        json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
+    _atomic_write_text(
+        USER_PROFILE_FILE,
+        json.dumps(profile, ensure_ascii=False, indent=2),
     )
 
 
@@ -298,9 +356,13 @@ class WatcherHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._ensure_host_allowed():
             return
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
-        qs = dict(urllib.parse.parse_qsl(parsed.query))
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            qs = dict(urllib.parse.parse_qsl(parsed.query))
+        except (UnicodeDecodeError, ValueError):
+            self._json_error(400, "Malformed request URI")
+            return
 
         routes = {
             "/api/rooms": self._get_rooms,
@@ -314,45 +376,58 @@ class WatcherHandler(BaseHTTPRequestHandler):
             "/api/project-docs": self._get_project_docs,
         }
 
-        if path in routes:
-            routes[path](qs)
-        elif path.startswith("/api/lock/"):
-            parts = path.split("/")
-            if len(parts) == 4:
-                self._get_lock_detail(parts[3], qs)
+        try:
+            if path in routes:
+                routes[path](qs)
+            elif path.startswith("/api/lock/"):
+                parts = path.split("/")
+                if len(parts) == 4:
+                    self._get_lock_detail(parts[3], qs)
+                else:
+                    self._json_error(404, "Not found")
+            elif path.startswith("/api/room/"):
+                parts = path.split("/")
+                if len(parts) == 5 and parts[4] == "history":
+                    self._get_room_history(parts[3], qs)
+                elif len(parts) == 4:
+                    self._get_room_detail(parts[3], qs)
+                else:
+                    self._json_error(404, "Not found")
+            elif path.startswith("/api/central-file/"):
+                name = urllib.parse.unquote(path[len("/api/central-file/"):])
+                self._read_central_file(name, qs)
+            elif path.startswith("/api/room-files/"):
+                room_key = path.split("/")[3] if len(path.split("/")) > 3 else ""
+                self._list_room_files(room_key, qs)
+            elif path.startswith("/api/room-file/"):
+                parts = path.split("/", 4)
+                if len(parts) >= 5:
+                    room_key, fname = parts[3], urllib.parse.unquote(parts[4])
+                    self._read_room_file(room_key, fname, qs)
+                else:
+                    self._json_error(400, "room_key and filename required")
+            elif path.startswith("/api/"):
+                self._json_error(404, "Unknown API endpoint")
             else:
-                self._json_error(404, "Not found")
-        elif path.startswith("/api/room/"):
-            parts = path.split("/")
-            if len(parts) == 5 and parts[4] == "history":
-                self._get_room_history(parts[3], qs)
-            elif len(parts) == 4:
-                self._get_room_detail(parts[3], qs)
-            else:
-                self._json_error(404, "Not found")
-        elif path.startswith("/api/central-file/"):
-            name = urllib.parse.unquote(path[len("/api/central-file/"):])
-            self._read_central_file(name, qs)
-        elif path.startswith("/api/room-files/"):
-            room_key = path.split("/")[3] if len(path.split("/")) > 3 else ""
-            self._list_room_files(room_key, qs)
-        elif path.startswith("/api/room-file/"):
-            parts = path.split("/", 4)
-            if len(parts) >= 5:
-                room_key, fname = parts[3], urllib.parse.unquote(parts[4])
-                self._read_room_file(room_key, fname, qs)
-            else:
-                self._json_error(400, "room_key and filename required")
-        elif path.startswith("/api/"):
-            self._json_error(404, "Unknown API endpoint")
-        else:
-            self._serve_static(path)
+                self._serve_static(path)
+        except (AttributeError, TypeError, UnicodeDecodeError, ValueError, OverflowError):
+            self._json_error(400, "Malformed request")
+        except OSError:
+            self._json_error(500, "Internal I/O error")
 
     def do_POST(self):
         if not self._ensure_host_allowed():
+            self.close_connection = True
+            self._drain_unread_body()
             return
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/")
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path.rstrip("/")
+        except (UnicodeDecodeError, ValueError):
+            self.close_connection = True
+            self._json_error(400, "Malformed request URI")
+            self._drain_unread_body()
+            return
         # Body first, origin second: answering a request whose body is still unread resets the
         # connection on Windows, and the client then never sees the 403.
         body = self._read_body_or_reject()
@@ -385,9 +460,17 @@ class WatcherHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         if not self._ensure_host_allowed():
+            self.close_connection = True
+            self._drain_unread_body()
             return
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/")
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path.rstrip("/")
+        except (UnicodeDecodeError, ValueError):
+            self.close_connection = True
+            self._json_error(400, "Malformed request URI")
+            self._drain_unread_body()
+            return
         # Body first, origin second: answering a request whose body is still unread resets the
         # connection on Windows, and the client then never sees the 403.
         body = self._read_body_or_reject()
@@ -418,13 +501,18 @@ class WatcherHandler(BaseHTTPRequestHandler):
                 handler(*args, body)
             else:
                 handler(body)
-        except (AttributeError, TypeError):
+        except (AttributeError, TypeError, UnicodeDecodeError, ValueError, OverflowError):
             self._json_error(400, "Malformed request body")
+        except OSError:
+            self._json_error(500, "Internal I/O error")
 
     def do_OPTIONS(self):
         if not self._origin_allowed(self.headers.get("Origin")):
+            self.close_connection = True
             self.send_response(403)
+            self.send_header("Content-Length", "0")
             self.end_headers()
+            self._drain_unread_body()
             return
         self.send_response(200)
         self._cors_headers()
@@ -470,9 +558,8 @@ class WatcherHandler(BaseHTTPRequestHandler):
         self._json_response(result)
 
     def _get_lock_detail(self, lock_id_str: str, qs: dict):
-        try:
-            lock_id = int(lock_id_str)
-        except ValueError:
+        lock_id = _parse_int64(lock_id_str, min_value=1)
+        if lock_id is None:
             self._json_error(400, "Invalid lock ID")
             return
 
@@ -516,9 +603,8 @@ class WatcherHandler(BaseHTTPRequestHandler):
             self._json_error(404, "Room not found")
             return
 
-        try:
-            limit = int(qs.get("limit", "50"))
-        except ValueError:
+        limit = _parse_int64(qs.get("limit", "50"), min_value=0)
+        if limit is None:
             self._json_error(400, "Invalid limit")
             return
         events = self.server.db.get_events_by_prefix(room["abs_path"], limit)
@@ -748,14 +834,31 @@ class WatcherHandler(BaseHTTPRequestHandler):
         try:
             import lock_watcher as _lw
             cfg = config.load_scan_config()
+            started = time.monotonic()
             stats = _lw._run_full_scan(self.server.db, cfg, False)
+            duration = max(0.0, time.monotonic() - started)
+            roots = stats.get("roots") or []
+            scan_partial = any(
+                isinstance(r, dict) and bool(r.get("timed_out")) for r in roots
+            )
+            rt = config.load_runtime_settings()
+            uncapped_gap = float(rt["full_scan_idle_factor"]) * duration
+            warnings = _lw.scan_warnings(stats, duration, uncapped_gap, rt)
+            if scan_partial and not warnings:
+                warnings = ["Full scan incomplete (root time budget exceeded)"]
             self._json_response({
                 "locks_found": stats.get("total", 0),
                 "new": stats.get("new", 0),
                 "modified": stats.get("modified", 0),
                 "expired": stats.get("expired", 0),
                 "deleted": stats.get("deleted", 0),
-                "message": "Scan complete",
+                "scan_partial": scan_partial,
+                "scan_warnings": warnings,
+                "message": (
+                    "Scan incomplete (partial: root time budget exceeded)"
+                    if scan_partial
+                    else "Scan complete"
+                ),
             })
         except Exception as exc:
             self._json_error(500, f"Scan failed: {exc}")
@@ -873,9 +976,8 @@ class WatcherHandler(BaseHTTPRequestHandler):
     # ── API: PUT ───────────────────────────────────────────────
 
     def _set_lock_name(self, lock_id_str: str, body: dict):
-        try:
-            lock_id = int(lock_id_str)
-        except ValueError:
+        lock_id = _parse_int64(lock_id_str, min_value=1)
+        if lock_id is None:
             self._json_error(400, "Invalid lock ID")
             return
 
@@ -896,10 +998,15 @@ class WatcherHandler(BaseHTTPRequestHandler):
         if not updates:
             self._json_error(400, "No valid fields")
             return
+        try:
+            validated = rooms.validate_room_updates(updates)
+        except ValueError as exc:
+            self._json_error(400, str(exc))
+            return
 
-        ok = rooms.update_room(room_key, **updates)
+        ok = rooms.update_room(room_key, **validated)
         if ok:
-            if "notes" in updates or "goals" in updates:
+            if "notes" in validated or "goals" in validated:
                 rooms.write_user_notes(room_key)
             self._json_response({"updated": True})
         else:
@@ -932,15 +1039,23 @@ class WatcherHandler(BaseHTTPRequestHandler):
         if safe is None:
             self._json_error(403, "Forbidden")
             return
-        if not safe.exists():
+        if not safe.is_file():
             self._json_error(404, "File not found")
             return
-        content = safe.read_text(encoding="utf-8")
+        try:
+            content = safe.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            self._json_error(500, "Read error")
+            return
         self._json_response({"name": safe.stem, "filename": safe.name, "content": content})
 
     def _write_central_file(self, body: dict):
-        name = _safe_md_filename(body.get("name", ""))
+        raw_name = body.get("name", "")
         content = body.get("content", "")
+        if not isinstance(raw_name, str) or not isinstance(content, str):
+            self._json_error(400, "name and content must be strings")
+            return
+        name = _safe_md_filename(raw_name)
         if not name:
             self._json_error(400, "name required")
             return
@@ -950,7 +1065,11 @@ class WatcherHandler(BaseHTTPRequestHandler):
         if safe is None:
             self._json_error(403, "Forbidden")
             return
-        safe.write_text(content, encoding="utf-8")
+        try:
+            safe.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            self._json_error(500, f"Write failed: {exc}")
+            return
         self._json_response({"saved": name})
 
     def _swap_central_file(self, body: dict):
@@ -986,7 +1105,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
             self._json_error(403, "source_name traversal blocked")
             return
 
-        if not source_path.exists():
+        if not source_path.is_file():
             self._json_error(404, f"Library file {source_name} not found")
             return
 
@@ -998,14 +1117,14 @@ class WatcherHandler(BaseHTTPRequestHandler):
                 return
             try:
                 backup_path.write_text(target_path.read_text(encoding="utf-8"), encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeDecodeError) as exc:
                 self._json_error(500, f"Backup failed: {exc}")
                 return
 
         try:
             content = source_path.read_text(encoding="utf-8")
             target_path.write_text(content, encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             self._json_error(500, f"Swap failed: {exc}")
             return
 
@@ -1057,13 +1176,16 @@ class WatcherHandler(BaseHTTPRequestHandler):
         try:
             content = safe.read_text(encoding="utf-8")
             self._json_response({"name": safe.name, "content": content})
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             self._json_error(500, "Read error")
 
     def _write_room_file(self, body: dict):
         room_key = _safe_room_key(body.get("room_key", ""))
         filename = _safe_md_filename(body.get("filename", ""))
         content = body.get("content", "")
+        if not isinstance(content, str):
+            self._json_error(400, "content must be a string")
+            return
         if not room_key or not filename:
             self._json_error(400, "room_key and filename required")
             return
@@ -1084,8 +1206,16 @@ class WatcherHandler(BaseHTTPRequestHandler):
     def _update_profile(self, body: dict):
         profile = _load_user_profile()
         if "name" in body:
-            profile["name"] = body["name"].strip()
-        _save_user_profile(profile)
+            raw_name = body["name"]
+            if not isinstance(raw_name, str) or any(ord(c) < 32 or ord(c) == 127 for c in raw_name):
+                self._json_error(400, "Invalid profile name")
+                return
+            profile["name"] = raw_name.strip()[:200]
+        try:
+            _save_user_profile(profile)
+        except OSError as exc:
+            self._json_error(500, f"Profile save failed: {exc}")
+            return
         self._json_response({"updated": True, "profile": profile})
 
     def _update_settings(self, body: dict):
@@ -1173,23 +1303,41 @@ class WatcherHandler(BaseHTTPRequestHandler):
 
     # ── Helpers ────────────────────────────────────────────────
 
+    def _header_values(self, name: str) -> list[str]:
+        get_all = getattr(self.headers, "get_all", None)
+        if callable(get_all):
+            vals = get_all(name)
+            return list(vals) if vals is not None else []
+        if isinstance(self.headers, dict):
+            target = name.lower()
+            return [str(v) for k, v in self.headers.items() if str(k).lower() == target]
+        val = self.headers.get(name)
+        return [val] if val is not None else []
+
     def _read_body(self) -> dict:
         """Parse the JSON object sent with a write request ({} when there is no body).
 
-        Raises _BadRequest: 400 for an invalid Content-Length, non-JSON or non-object body,
-        413 above MAX_BODY_BYTES.
+        Raises _BadRequest: 400 for Transfer-Encoding, duplicate or invalid Content-Length,
+        incomplete, non-JSON or non-object body; 413 above MAX_BODY_BYTES.
         """
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-        except ValueError:
-            raise _BadRequest(400, "Invalid Content-Length") from None
-        if length < 0:
+        if self._header_values("Transfer-Encoding"):
+            raise _BadRequest(400, "Transfer-Encoding is not supported")
+        cl_values = self._header_values("Content-Length")
+        if len(cl_values) > 1:
+            raise _BadRequest(400, "Multiple Content-Length headers are not allowed")
+        if not cl_values:
+            return {}
+        raw_cl = str(cl_values[0]).strip()
+        if not raw_cl or not raw_cl.isascii() or not raw_cl.isdigit():
             raise _BadRequest(400, "Invalid Content-Length")
+        length = int(raw_cl, 10)
         if length == 0:
             return {}
         if length > MAX_BODY_BYTES:
             raise _BadRequest(413, f"Request body too large (max {MAX_BODY_BYTES} bytes)")
         raw = self.rfile.read(length)
+        if len(raw) != length:
+            raise _BadRequest(400, "Incomplete request body")
         try:
             data = json.loads(raw.decode("utf-8"))
         except (ValueError, RecursionError):  # bad JSON, bad UTF-8, or nesting beyond the interpreter limit
@@ -1198,6 +1346,58 @@ class WatcherHandler(BaseHTTPRequestHandler):
             raise _BadRequest(400, "Body must be a JSON object")
         return data
 
+    def _drain_unread_body(self, max_bytes: int = 65536, max_wait_s: float = 0.05) -> None:
+        """Best-effort bounded drain of buffered client payload before socket close.
+
+        On Windows Winsock, closing a socket while unread request body bytes sit in the
+        kernel receive buffer sends an abortive TCP RST instead of FIN, causing the client
+        to lose the 4xx HTTP response with ConnectionResetError / ConnectionAbortedError.
+        """
+        try:
+            self.wfile.flush()
+        except OSError:
+            return
+        conn = getattr(self, "connection", None)
+        if conn is None or not hasattr(conn, "fileno") or not hasattr(conn, "recv"):
+            return
+        try:
+            conn.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        deadline = time.monotonic() + max_wait_s
+        remaining = max_bytes
+        first = True
+        prev_timeout = None
+        has_timeout = hasattr(conn, "gettimeout") and hasattr(conn, "settimeout")
+        if has_timeout:
+            try:
+                prev_timeout = conn.gettimeout()
+                conn.settimeout(0.0)
+            except OSError:
+                return
+        try:
+            while remaining > 0:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                wait = min(left, 0.02 if first else 0.003)
+                first = False
+                ready, _, _ = select.select([conn], [], [], wait)
+                if not ready:
+                    break
+                chunk = conn.recv(min(16384, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except (OSError, ValueError):
+            pass
+        finally:
+            if has_timeout:
+                try:
+                    conn.settimeout(prev_timeout)
+                except OSError:
+                    pass
+
     def _read_body_or_reject(self) -> dict | None:
         """_read_body, answering the error itself; None means a response was already sent."""
         try:
@@ -1205,6 +1405,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
         except _BadRequest as exc:
             self.close_connection = True
             self._json_error(exc.status, str(exc))
+            self._drain_unread_body()
             return None
 
     def _json_response(self, data, status: int = 200):

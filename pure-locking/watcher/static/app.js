@@ -101,20 +101,20 @@ function buildRoomCardInner(room, locks) {
   const roomLocks = locks.filter(l => l.room === room.key);
   const dots = roomLocks.map(l => {
     const name = l.display_name || l.filename;
-    return `<div class="lock-dot ${l.lock_type}" onclick="event.stopPropagation(); showLockDetail(${l.id})" title="${esc(name)}">
+    return `<div class="lock-dot ${esc(l.lock_type)}" onclick="event.stopPropagation(); showLockDetail(${Number(l.id)})" title="${esc(name)}">
       <span class="lock-dot-tooltip">${esc(name)}</span>
     </div>`;
   }).join('');
 
   const iconFile = room.icon || '';
   const iconHtml = iconFile
-    ? `<div class="room-icon"><img src="/icons/${esc(iconFile)}" alt="" /></div>`
+    ? `<div class="room-icon"><img src="/icons/${esc(encodeURIComponent(iconFile))}" alt="" /></div>`
     : '';
 
   const stats = roomStatsData[room.key];
 
   return `
-    <div class="room-card-accent" style="background:${room.color}"></div>
+    <div class="room-card-accent" style="background:${esc(room.color)}"></div>
     <div class="room-header">
       <div class="room-header-left">
         ${iconHtml}
@@ -221,7 +221,7 @@ function renderRoomMap(rooms, locks) {
     container.classList.remove('treemap-mode');
     container.style.height = '';
     container.innerHTML = rooms.map(room =>
-      `<div class="room-card" onclick="showRoomDetail('${room.key}')">${buildRoomCardInner(room, locks)}</div>`
+      `<div class="room-card" data-room-key="${esc(room.key)}" onclick="showRoomDetail(this.dataset.roomKey)">${buildRoomCardInner(room, locks)}</div>`
     ).join('');
     return;
   }
@@ -248,7 +248,7 @@ function renderRoomMap(rooms, locks) {
     const tH = Math.max(t.h - GAP * 2, 0);
     const sizeClass = tW < 100 || tH < 80 ? 'tile-small'
       : tW < 180 || tH < 120 ? 'tile-medium' : 'tile-large';
-    return `<div class="room-card ${sizeClass}" onclick="showRoomDetail('${t.room.key}')"
+    return `<div class="room-card ${sizeClass}" data-room-key="${esc(t.room.key)}" onclick="showRoomDetail(this.dataset.roomKey)"
       style="left:${t.x + GAP}px;top:${t.y + GAP}px;width:${tW}px;height:${tH}px"
       title="${esc(t.room.label)}: ${(roomStatsData[t.room.key] || {})[metricKey] || 0}">${buildRoomCardInner(t.room, locks)}</div>`;
   }).join('');
@@ -321,8 +321,8 @@ function initViewSwitcher() {
 
 // ── Room Detail ──────────────────────────────────
 async function showRoomDetail(key) {
-  const room = await api(`/api/room/${key}`);
-  const history = await api(`/api/room/${key}/history?limit=30`);
+  const room = await api(`/api/room/${encodeURIComponent(key)}`);
+  const history = await api(`/api/room/${encodeURIComponent(key)}/history?limit=30`);
 
   let html = '';
 
@@ -342,7 +342,7 @@ async function showRoomDetail(key) {
       <div class="form-group" style="display:flex;gap:12px;align-items:end">
         <div style="flex:1">
           <label>Farbe</label>
-          <input type="color" id="room-color" value="${room.color}" />
+          <input type="color" id="room-color" value="${esc(room.color)}" />
         </div>
         <div style="flex:1">
           <label>Notiz-Ziel</label>
@@ -365,7 +365,7 @@ async function showRoomDetail(key) {
         <textarea id="room-notes" rows="3">${esc(room.notes || '')}</textarea>
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" onclick="saveRoomSettings('${key}')">Speichern</button>
+        <button class="btn btn-primary" data-room-key="${esc(key)}" onclick="saveRoomSettings(this.dataset.roomKey)">Speichern</button>
       </div>
     </div>
   `;
@@ -378,10 +378,10 @@ async function showRoomDetail(key) {
       const name = l.display_name || l.filename;
       const rem = l.remaining || '';
       html += `
-        <div class="lock-item" onclick="showLockDetail(${l.id})">
+        <div class="lock-item" onclick="showLockDetail(${Number(l.id)})">
           <div class="lock-item-header">
             <span class="lock-item-name">${esc(name)}</span>
-            <span class="lock-item-type ${l.lock_type}">${l.lock_type}</span>
+            <span class="lock-item-type ${esc(l.lock_type)}">${esc(l.lock_type)}</span>
           </div>
           <div class="lock-item-meta">
             ${l.owner ? `<span>Owner: ${esc(l.owner)}</span>` : ''}
@@ -455,7 +455,7 @@ async function showRoomDetail(key) {
     for (const e of history) {
       html += `
         <div class="event-row">
-          <span class="event-type ${e.event_type}">${e.event_type}</span>
+          <span class="event-type ${esc(e.event_type)}">${esc(e.event_type)}</span>
           <span class="event-time">${formatTime(e.timestamp)}</span>
           <span class="event-file">${esc(e.filename || e.display_name || '')}</span>
         </div>
@@ -519,13 +519,13 @@ async function loadIconPicker(currentIcon) {
   }
   const noneSelected = !currentIcon ? 'selected' : '';
   let html = `<div class="icon-picker">
-    <div class="icon-option ${noneSelected}" onclick="selectIcon(this, '')" title="Kein Icon">
+    <div class="icon-option ${noneSelected}" data-icon="" onclick="selectIcon(this, this.dataset.icon)" title="Kein Icon">
       <span style="color:var(--text-muted);font-size:16px">—</span>
     </div>`;
   for (const icon of icons) {
     const sel = icon === currentIcon ? 'selected' : '';
-    html += `<div class="icon-option ${sel}" onclick="selectIcon(this, '${esc(icon)}')" title="${esc(icon)}">
-      <img src="/icons/${esc(icon)}" alt="${esc(icon)}" />
+    html += `<div class="icon-option ${sel}" data-icon="${esc(icon)}" onclick="selectIcon(this, this.dataset.icon)" title="${esc(icon)}">
+      <img src="/icons/${esc(encodeURIComponent(icon))}" alt="${esc(icon)}" />
     </div>`;
   }
   html += '</div>';
@@ -539,7 +539,7 @@ function selectIcon(el, icon) {
 }
 
 async function loadRoomFiles(key) {
-  const files = await api(`/api/room-files/${key}`);
+  const files = await api(`/api/room-files/${encodeURIComponent(key)}`);
   const el = document.getElementById('room-files-list');
   if (!el) return;
   if (files.length === 0) {
@@ -547,7 +547,7 @@ async function loadRoomFiles(key) {
     return;
   }
   el.innerHTML = '<div class="file-list">' + files.map(f => `
-    <div class="file-item" onclick="editRoomFile('${key}', '${esc(f.name)}')">
+    <div class="file-item" data-room-key="${esc(key)}" data-filename="${esc(f.name)}" onclick="editRoomFile(this.dataset.roomKey, this.dataset.filename)">
       <span class="file-item-name">${esc(f.name)}</span>
       <span class="file-item-meta">${formatBytes(f.size)} &middot; ${formatTime(f.modified)}</span>
     </div>
@@ -555,14 +555,14 @@ async function loadRoomFiles(key) {
 }
 
 async function editRoomFile(roomKey, filename) {
-  const data = await api(`/api/room-file/${roomKey}/${encodeURIComponent(filename)}`);
+  const data = await api(`/api/room-file/${encodeURIComponent(roomKey)}/${encodeURIComponent(filename)}`);
   const html = `
     <div class="form-group">
       <textarea id="edit-file-content" rows="20" style="font-family:'Cascadia Code','Fira Code',monospace;font-size:12px">${esc(data.content)}</textarea>
     </div>
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="saveRoomFile('${roomKey}', '${esc(filename)}')">Speichern</button>
-      <button class="btn btn-ghost" onclick="showRoomDetail('${roomKey}')">Zurück</button>
+      <button class="btn btn-primary" data-room-key="${esc(roomKey)}" data-filename="${esc(filename)}" onclick="saveRoomFile(this.dataset.roomKey, this.dataset.filename)">Speichern</button>
+      <button class="btn btn-ghost" data-room-key="${esc(roomKey)}" onclick="showRoomDetail(this.dataset.roomKey)">Zurück</button>
     </div>
   `;
   openModal(filename, html);
@@ -584,7 +584,7 @@ async function saveRoomSettings(key) {
     notes_target: document.getElementById('room-notes-target').value,
     notes_filename: document.getElementById('room-notes-filename').value,
   };
-  const result = await apiPut(`/api/room/${key}`, updates);
+  const result = await apiPut(`/api/room/${encodeURIComponent(key)}`, updates);
   if (!result.error) {
     document.getElementById('modal-overlay').classList.add('hidden');
     toast('Raum gespeichert');
@@ -625,13 +625,13 @@ async function showLockDetail(lockId) {
         <label>Anzeigename</label>
         <div style="display:flex;gap:8px">
           <input type="text" id="lock-display-name" value="${esc(l.display_name || '')}" placeholder="${esc(l.filename)}" style="flex:1" />
-          <button class="btn btn-ghost" onclick="saveLockName(${l.id})">Speichern</button>
+          <button class="btn btn-ghost" onclick="saveLockName(${Number(l.id)})">Speichern</button>
         </div>
       </div>
       <div class="lock-detail-grid">
         <span class="lock-detail-key">Datei</span><span class="lock-detail-value">${esc(l.filename)}</span>
         <span class="lock-detail-key">Pfad</span><span class="lock-detail-value">${esc(l.path)}</span>
-        <span class="lock-detail-key">Typ</span><span class="lock-detail-value"><span class="lock-item-type ${l.lock_type}">${l.lock_type}</span></span>
+        <span class="lock-detail-key">Typ</span><span class="lock-detail-value"><span class="lock-item-type ${esc(l.lock_type)}">${esc(l.lock_type)}</span></span>
         <span class="lock-detail-key">Scope</span><span class="lock-detail-value">${esc(l.scope || '-')}</span>
         <span class="lock-detail-key">Status</span><span class="lock-detail-value">${esc(l.status)}</span>
         <span class="lock-detail-key">Owner</span><span class="lock-detail-value">${esc(l.owner || '-')}</span>
@@ -672,7 +672,7 @@ async function showLockDetail(lockId) {
     for (const e of l.events) {
       html += `
         <div class="event-row">
-          <span class="event-type ${e.event_type}">${e.event_type}</span>
+          <span class="event-type ${esc(e.event_type)}">${esc(e.event_type)}</span>
           <span class="event-time">${formatTime(e.timestamp)}</span>
         </div>
       `;
@@ -800,7 +800,7 @@ async function showCentralFiles() {
       <h3>Gespeicherte Dateien</h3>
       <div class="file-list">
         ${files.length > 0 ? files.map(f => `
-          <div class="file-item" onclick="editCentralFile('${esc(f.filename)}')">
+          <div class="file-item" data-filename="${esc(f.filename)}" onclick="editCentralFile(this.dataset.filename)">
             <span class="file-item-name">${esc(f.name)}</span>
             <span class="file-item-meta">${formatBytes(f.size)} &middot; ${formatTime(f.modified)}</span>
           </div>
@@ -825,11 +825,11 @@ async function showCentralFiles() {
       <h3>Datei in Raum einsetzen</h3>
       <div class="form-group">
         <label>Raum</label>
-        <select id="swap-room">${roomsData.map(r => `<option value="${r.key}">${esc(r.label)}</option>`).join('')}</select>
+        <select id="swap-room">${roomsData.map(r => `<option value="${esc(r.key)}">${esc(r.label)}</option>`).join('')}</select>
       </div>
       <div class="form-group">
         <label>Quelldatei (aus Bibliothek)</label>
-        <select id="swap-source">${files.map(f => `<option value="${f.name}">${esc(f.name)}</option>`).join('')}</select>
+        <select id="swap-source">${files.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('')}</select>
       </div>
       <div class="form-group">
         <label>Zieldatei im Raum</label>
@@ -850,7 +850,7 @@ async function editCentralFile(filename) {
       <textarea id="edit-central-content" rows="20" style="font-family:'Cascadia Code','Fira Code',monospace;font-size:12px">${esc(data.content)}</textarea>
     </div>
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="updateCentralFile('${esc(filename)}')">Speichern</button>
+      <button class="btn btn-primary" data-filename="${esc(filename)}" onclick="updateCentralFile(this.dataset.filename)">Speichern</button>
       <button class="btn btn-ghost" onclick="showCentralFiles()">Zurück</button>
     </div>
   `;
@@ -1031,7 +1031,13 @@ async function triggerScan() {
   toast('Scan läuft...');
   const result = await apiPost('/api/scan', {});
   if (!result.error) {
-    toast(`Scan: ${result.locks_found} Locks, ${result.new || 0} neu`);
+    const warnings = Array.isArray(result.scan_warnings) ? result.scan_warnings : [];
+    const suffix = warnings.length ? ` — ${warnings[0]}` : '';
+    if (result.scan_partial) {
+      toast(`Teilscan (unvollständig): ${result.locks_found} Locks, ${result.new || 0} neu${suffix}`);
+    } else {
+      toast(`Scan: ${result.locks_found} Locks, ${result.new || 0} neu${suffix}`);
+    }
   }
   if (btn) { btn.disabled = false; btn.textContent = 'Scan'; }
   loadRoomMap();
@@ -1071,10 +1077,13 @@ document.addEventListener('keydown', e => {
 
 // ── Util ─────────────────────────────────────────
 function esc(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = String(str);
-  return div.innerHTML;
+  if (str == null || str === '') return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function formatTime(iso) {

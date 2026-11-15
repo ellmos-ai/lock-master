@@ -137,13 +137,28 @@ def _format_daemon_status(scanned_at: datetime) -> list[str]:
 
     fresh = age is not None and age <= _daemon_fresh_limit_seconds()
     running = _pid_is_running(pid_int)
-    state = "läuft" if fresh and running else "nicht aktuell"
+    scan_partial = bool(status.get("scan_partial"))
+    raw_warnings = status.get("scan_warnings")
+    warnings = (
+        [" ".join(str(w).split()) for w in raw_warnings if str(w).strip()]
+        if isinstance(raw_warnings, list)
+        else []
+    )
+    if fresh and running:
+        state = "eingeschränkt (scan_partial)" if scan_partial else "läuft"
+    else:
+        state = "nicht aktuell (scan_partial)" if scan_partial else "nicht aktuell"
     age_text = f"{age}s" if age is not None else "unbekannt"
-    return [
+    lines = [
         f"Daemon: {state}",
         f"Daemon-PID: {pid or '?'}",
         f"Daemon-Heartbeat: {last_seen_raw or '?'} (Alter: {age_text})",
     ]
+    if scan_partial or warnings:
+        detail = " | ".join(warnings) if warnings else "Letzter Full-Scan unvollständig (scan_partial)"
+        label = "Daemon-Warnung (scan_partial)" if scan_partial else "Daemon-Warnung"
+        lines.append(f"{label}: {detail}")
+    return lines
 
 
 def generate_cache(db: storage.LockDB) -> None:
