@@ -223,3 +223,88 @@ def test_scope_and_name_regexes_reject_traversal():
     assert all(web_server._SCOPE_RE.match(s) for s in ["desktop", "my-component", "v2_beta", "TEST"])
     assert not any(web_server._SCOPE_RE.match(s) for s in ["../evil", "a/b", "a\\b", "a b", ".."])
     assert not any(web_server._SAFE_NAME_RE.match(s) for s in ["../evil.md", "C:\\Windows\\x", "a/b.md"])
+
+
+def test_remove_user_lock_rejects_traversal_and_allows_valid_scopes(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    (root / "a").mkdir(parents=True)
+    (root / "LOCK.user.a").mkdir(parents=True)
+    outside.mkdir()
+    victim = outside / "LOCK.user.y.txt"
+    victim.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+
+    real_is_path_in_roots = rooms.is_path_in_roots
+    request, stop = _serve(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(rooms, "is_path_in_roots", real_is_path_in_roots)
+    monkeypatch.setattr(rooms, "_get_rooms", lambda: [{"key": "r", "abs_path": str(root)}])
+    try:
+        status, body, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "a/../../outside/LOCK.user.y"}),
+        )
+        assert status in (400, 403) and "error" in body
+        assert victim.exists()
+
+        scoped = root / "LOCK.user.proj.txt"
+        scoped.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "proj"}),
+        )
+        assert status == 200 and not scoped.exists()
+
+        project_lock = root / "LOCK.user.txt"
+        project_lock.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "project"}),
+        )
+        assert status == 200 and not project_lock.exists()
+
+        project_lock.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": ""}),
+        )
+        assert status == 200 and not project_lock.exists()
+    finally:
+        stop()
+
+
+def test_user_lock_rejects_nul_in_project_dir_with_403(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    real_is_path_in_roots = rooms.is_path_in_roots
+    request, stop = _serve(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(rooms, "is_path_in_roots", real_is_path_in_roots)
+    monkeypatch.setattr(rooms, "_get_rooms", lambda: [{"key": "r", "abs_path": str(root)}])
+    try:
+        status, body, _ = request(
+            "POST",
+            "/api/user-lock",
+            _json({"project_dir": str(root / "sub\u0000evil")}),
+        )
+        assert status == 403 and "error" in body
+
+        # Simulate POSIX os.path.realpath raising ValueError on NUL bytes (Windows returns it unchanged).
+        orig_realpath = os.path.realpath
+
+        def _posix_realpath(path):
+            if "\x00" in str(path):
+                raise ValueError("embedded null byte")
+            return orig_realpath(path)
+
+        monkeypatch.setattr(os.path, "realpath", _posix_realpath)
+        status, body, _ = request(
+            "POST",
+            "/api/user-lock",
+            _json({"project_dir": str(root) + "\u0000evil"}),
+        )
+        assert status == 403 and "error" in body
+    finally:
+        stop()

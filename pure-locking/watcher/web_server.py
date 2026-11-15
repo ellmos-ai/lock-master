@@ -691,11 +691,20 @@ class WatcherHandler(BaseHTTPRequestHandler):
             self._json_error(403, "Path outside allowed roots")
             return
         scope = body.get("scope", "").strip()
-        filename = f"LOCK.user.{scope}.txt" if scope and scope != "project" else "LOCK.user.txt"
+        if scope and scope != "project":
+            if not _SCOPE_RE.fullmatch(scope):
+                self._json_error(400, "Invalid scope (only A-Z, a-z, 0-9, _, -)")
+                return
+            filename = f"LOCK.user.{scope}.txt"
+        else:
+            filename = "LOCK.user.txt"
         if not lock_utils.is_user_lock(filename):
             self._json_error(400, "Not a user-lock filename")
             return
-        target = Path(project_path) / filename
+        target = _resolve_within(Path(project_path), filename)
+        if target is None:
+            self._json_error(403, "Invalid user-lock path")
+            return
         if not target.exists():
             self._json_error(404, f"{filename} not found")
             return
