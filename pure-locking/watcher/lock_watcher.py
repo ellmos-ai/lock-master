@@ -39,7 +39,20 @@ sys.path.insert(0, str(config.SCRIPTS_DIR))
 STATS_SCAN_INTERVAL: int = 900  # 15 Minuten
 HEARTBEAT_INTERVAL: int = 5
 STALE_DAEMON_SECONDS: int = max(180, config.FULL_SCAN_INTERVAL * 3)
-SCAN_OVERRUN_WARN_SECONDS: int = config.FULL_SCAN_INTERVAL * 5
+# Default only: the live threshold follows the runtime interval (scan_overrun_warn_seconds()).
+SCAN_OVERRUN_FACTOR: int = 5
+SCAN_OVERRUN_WARN_SECONDS: int = config.FULL_SCAN_INTERVAL * SCAN_OVERRUN_FACTOR
+
+
+def scan_overrun_warn_seconds(settings: dict | None = None) -> float:
+    """Seconds a full scan may run before it counts as an overrun.
+
+    Follows the runtime `full_scan_interval` (PUT /api/settings, runtime_settings.json), so
+    the warning, the degraded state of the API and the stale threshold stay consistent with
+    the interval actually in force instead of the import-time constant.
+    """
+    rt = config.load_runtime_settings() if settings is None else settings
+    return float(rt["full_scan_interval"]) * SCAN_OVERRUN_FACTOR
 
 
 def _now_iso() -> str:
@@ -75,7 +88,7 @@ def scan_stale_after_seconds(status: dict | None) -> float:
     duration = status.get("last_scan_duration_s")
     gap = float(gap) if isinstance(gap, (int, float)) else float(rt["full_scan_interval"])
     duration = float(duration) if isinstance(duration, (int, float)) else 0.0
-    return max(float(SCAN_OVERRUN_WARN_SECONDS), float(rt["full_scan_interval"]) * 5.0) + gap + duration
+    return scan_overrun_warn_seconds(rt) + gap + duration
 
 
 def _ensure_utf8_stdio_for_stream(stream) -> None:
@@ -391,15 +404,16 @@ def run_daemon(update_cache: bool) -> None:
     )
     heartbeat_thread.start()
 
+    rt_start = config.load_runtime_settings()
     print(
         f"[{_now_iso()}] Lock-Watcher gestartet. "
-        f"Full-Scan frühestens alle {config.FULL_SCAN_INTERVAL}s "
-        f"(Pause mindestens {config.FULL_SCAN_IDLE_FACTOR:g}x Scandauer), "
-        f"Quick-Check alle {config.CHECK_INTERVAL}s."
+        f"Full-Scan frühestens alle {rt_start['full_scan_interval']}s "
+        f"(Pause mindestens {rt_start['full_scan_idle_factor']:g}x Scandauer), "
+        f"Quick-Check alle {rt_start['check_interval']}s."
     )
 
     last_full_scan: float = 0.0
-    full_scan_gap: float = float(config.FULL_SCAN_INTERVAL)
+    full_scan_gap: float = float(rt_start["full_scan_interval"])
     last_check: float = 0.0
     last_stats_scan: float = 0.0
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lock-watcher-scan")
@@ -427,7 +441,7 @@ def run_daemon(update_cache: bool) -> None:
                     scan_state["last_scan_finished_at"] = _now_iso()
                     scan_state["last_scan_duration_s"] = round(duration, 1)
                     scan_state["next_full_scan_gap_s"] = round(full_scan_gap, 1)
-                if full_scan_gap > config.FULL_SCAN_INTERVAL:
+                if full_scan_gap > float(config.load_runtime_settings()["full_scan_interval"]):
                     print(
                         f"[{_now_iso()}] Full-Scan dauerte {duration:.0f}s; "
                         f"nächster Full-Scan frühestens in {full_scan_gap:.0f}s."
@@ -465,9 +479,10 @@ def run_daemon(update_cache: bool) -> None:
 
             if pending_scan is not None:
                 running_for = time.monotonic() - pending_scan_started_mono
+                overrun_warn_s = scan_overrun_warn_seconds()
                 if (
-                    running_for >= SCAN_OVERRUN_WARN_SECONDS
-                    and now - last_overrun_warning >= SCAN_OVERRUN_WARN_SECONDS
+                    running_for >= overrun_warn_s
+                    and now - last_overrun_warning >= overrun_warn_s
                 ):
                     print(
                         f"[{_now_iso()}] WARNING: full scan has run for "

@@ -36,6 +36,11 @@ def _timestamp_for_cache(value: str | None, *, timespec: str) -> str:
     return lock_utils.format_utc_iso(parsed, timespec=timespec)
 
 
+def _daemon_fresh_limit_seconds() -> float:
+    """Heartbeat age beyond which the daemon counts as not current (runtime setting)."""
+    return float(config.load_runtime_settings()["stale_daemon_seconds"])
+
+
 def _format_remaining(expires_at: str | None) -> str:
     """Gibt den absoluten Ablaufzeitpunkt in UTC zurueck, stabil ohne Countdown."""
     if not expires_at:
@@ -130,7 +135,7 @@ def _format_daemon_status(scanned_at: datetime) -> list[str]:
     except (TypeError, ValueError):
         pid_int = 0
 
-    fresh = age is not None and age <= max(180, config.FULL_SCAN_INTERVAL * 3)
+    fresh = age is not None and age <= _daemon_fresh_limit_seconds()
     running = _pid_is_running(pid_int)
     state = "läuft" if fresh and running else "nicht aktuell"
     age_text = f"{age}s" if age is not None else "unbekannt"

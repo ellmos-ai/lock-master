@@ -440,6 +440,14 @@ async function showRoomDetail(key) {
     </div>
   `;
 
+  // Steuerdateien (Doku-Scanner, needs ticket-master): TODO/AUFGABEN/DONE/DECISIONS
+  html += `
+    <div class="detail-section">
+      <h3>Steuerdateien</h3>
+      <div id="project-docs-list" data-abspath="${esc(room.abs_path || '')}">Lade...</div>
+    </div>
+  `;
+
   // History
   html += `<div class="detail-section"><h3>Verlauf</h3>`;
   if (history.length > 0) {
@@ -461,7 +469,45 @@ async function showRoomDetail(key) {
 
   openModal(room.label, html);
   loadRoomFiles(key);
+  loadProjectDocs();
   loadIconPicker(room.icon || '');
+}
+
+// ── Doku-Scanner: Steuerdateien je Raum ──────────
+const DOC_LABELS = { todo: 'TODO.md', aufgaben: 'AUFGABEN.txt', done: 'DONE.md', decisions: 'DECISIONS.md' };
+
+function projectDocsBox() {
+  return document.getElementById('project-docs-list');
+}
+
+async function loadProjectDocs() {
+  const box = projectDocsBox();
+  if (!box) return;
+  const absPath = box.dataset.abspath || '';
+  if (!absPath) { box.innerHTML = '<p style="color:var(--text-dim);font-size:13px">Kein Pfad</p>'; return; }
+  const res = await api('/api/project-docs?project_dir=' + encodeURIComponent(absPath));
+  if (res.error) { box.innerHTML = '<p style="color:var(--text-dim);font-size:13px">' + esc(res.error) + '</p>'; return; }
+  let html = '<div class="doc-list">';
+  for (const kind of Object.keys(DOC_LABELS)) {
+    const d = res[kind] || { exists: false };
+    if (d.exists) {
+      html += `<div class="doc-row"><span class="doc-name">${DOC_LABELS[kind]}</span>`
+            + `<span class="doc-meta">${esc(String(d.lines))} Zeilen</span></div>`;
+    } else {
+      html += `<div class="doc-row"><span class="doc-name doc-missing">${DOC_LABELS[kind]}</span>`
+            + `<button class="btn btn-ghost" data-kind="${kind}" onclick="ensureDoc(this.dataset.kind)">anlegen</button></div>`;
+    }
+  }
+  html += '</div>';
+  box.innerHTML = html;
+}
+
+async function ensureDoc(kind) {
+  const box = projectDocsBox();
+  if (!box) return;
+  const res = await apiPost('/api/project-docs', { project_dir: box.dataset.abspath || '', kind, action: 'ensure' });
+  if (res.error) { toast('Fehler: ' + res.error); }
+  else { toast(DOC_LABELS[kind] + ' angelegt'); loadProjectDocs(); }
 }
 
 async function loadIconPicker(currentIcon) {
@@ -842,6 +888,49 @@ async function swapCentralFile() {
 }
 
 // ── Settings ─────────────────────────────────────
+// ── Tickets: asynchron anlegen (needs ticket-master) ──
+function showTicketForm() {
+  openModal('Ticket anlegen', `
+    <div class="detail-section">
+      <p class="permission-hint">Legt ein unclaimed Ticket in der ticket-master-Queue an
+        &ndash; auch wenn gerade keine ticket-master-Sitzung läuft.</p>
+      <div class="form-group">
+        <label for="tk-title">Titel</label>
+        <input type="text" id="tk-title" placeholder="Kurztitel" />
+      </div>
+      <div class="form-group">
+        <label for="tk-body">Beschreibung</label>
+        <textarea id="tk-body" rows="5" placeholder="Was ist zu tun?"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="tk-project">Projekt (optional)</label>
+        <input type="text" id="tk-project" />
+      </div>
+      <div class="form-group">
+        <label for="tk-priority">Priorität</label>
+        <select id="tk-priority">
+          <option value="niedrig">niedrig</option>
+          <option value="mittel" selected>mittel</option>
+          <option value="hoch">hoch</option>
+          <option value="kritisch">kritisch</option>
+        </select>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="submitTicket()">Ticket anlegen</button></div>
+    </div>
+  `);
+}
+
+async function submitTicket() {
+  const result = await apiPost('/api/ticket', {
+    title: document.getElementById('tk-title').value,
+    body: document.getElementById('tk-body').value,
+    project: document.getElementById('tk-project').value,
+    priority: document.getElementById('tk-priority').value,
+  });
+  if (result.error) { toast('Fehler: ' + result.error); }
+  else { toast('Ticket angelegt'); closeModal(); }
+}
+
 async function showSettings() {
   const [s, profile] = await Promise.all([api('/api/settings'), api('/api/profile')]);
   const daemonText = formatDaemonStatus(s.daemon);

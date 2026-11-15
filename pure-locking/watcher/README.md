@@ -87,7 +87,8 @@ Windows callers do not need to set `PYTHONIOENCODING` for Unicode lock data.
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/stats` | database summary |
-| `GET /api/settings` | intervals, DB path, daemon status |
+| `GET /api/settings` | intervals (runtime values and defaults), DB path, daemon status |
+| `PUT /api/settings` | change heartbeat/scan intervals at runtime (clamped, stored in `runtime_settings.json`; `{"reset": true}` restores the defaults) |
 | `GET /api/locks?status=active|all` | lock list |
 | `GET /api/lock/<id>` | lock detail with events |
 | `GET /api/rooms` | configured roots as rooms |
@@ -101,8 +102,17 @@ Windows callers do not need to set `PYTHONIOENCODING` for Unicode lock data.
 | `POST /api/bulk-unlock` | preview or commit removal of bulk-created locks |
 | `GET /api/room-stats` | cached directory statistics |
 | `POST /api/room-stats/refresh` | refresh directory statistics |
+| `POST /api/ticket` | create an unclaimed ticket (needs ticket-master, see below) |
+| `GET/POST /api/project-docs` | state of / create / append to a room's `TODO.md`, `AUFGABEN.txt`, `DONE.md`, `DECISIONS.md` (needs ticket-master) |
 
 Write endpoints are intended for local browser use and validate local origins.
+
+The `Ticket` button and the `Steuerdateien` panel of a room use two helpers of the optional
+ticket-master package (`ticket_writer`, `doc_scanner`). They are imported when ticket-master is on
+`sys.path` or when `TICKET_MASTER_LIB` names its `lib` folder; otherwise both endpoints answer 501 and
+the rest of the watcher is unaffected. The ticket queue is resolved by ticket-master itself
+(`TICKET_MASTER_TICKETS_DIR`, then its config). Room control files are only touched inside the
+configured roots.
 The `Sperren/Rechte` button in the browser UI exposes the user-lock and guarded
 bulk-lock endpoints. Bulk actions show a dry-run first; committing requires an
 explicit confirmation and never touches user locks.

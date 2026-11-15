@@ -7,6 +7,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Watcher: runtime intervals, fork features, overrun warning (T-20261115-353226340)
+
+- The heartbeat and scan intervals are adjustable at runtime (`PUT /api/settings`, `runtime_settings.json`, clamped;
+  settings dialog in the browser UI), certified from an uncommitted working-tree change (#56).
+- The overrun warning, the `degraded` state of the daemon API and the scan staleness threshold now follow the runtime
+  `full_scan_interval` (`lock_watcher.scan_overrun_warn_seconds()`) instead of the import-time constant
+  `SCAN_OVERRUN_WARN_SECONDS`; the startup message, the first scan gap and the cache writer's daemon-freshness limit read
+  the runtime settings too. Before, a changed interval produced wrong or missing overrun warnings.
+- Features of the running (previously unversioned) watcher instance, ported into the repo without private paths:
+  the `Ticket` form (`POST /api/ticket`) and the per-room `Steuerdateien` panel (`GET/POST /api/project-docs`). Both use
+  `ticket_writer` / `doc_scanner` from the optional ticket-master package (`TICKET_MASTER_LIB`) and answer 501 without it.
+  Ticket form values are collapsed to one line and the priority is checked against a fixed set; control files are only
+  touched inside the configured roots. The inline `onclick` with a file path of the old panel was replaced by a data
+  attribute (a Windows path in a JS string literal lost its backslashes).
+
 ## [1.9.0] - 2026-11-07
 
 Everything merged after the tag `v1.8.3`. Releases 1.6.4 to 1.8.3 are listed below under their own version
