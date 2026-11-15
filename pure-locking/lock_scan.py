@@ -35,6 +35,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -530,12 +531,46 @@ def _volatile(line: str) -> bool:
     return line.startswith(("As of:", "Stand:", "Daemon-Heartbeat", "*Generiert:"))
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write UTF-8 text atomically via a sibling temporary file and os.replace."""
+    if path.is_symlink():
+        raise OSError(f"Refusing to overwrite symlink target: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as fh:
+            tmp_path = Path(fh.name)
+            fh.write(text)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 def write_if_changed(path: Path, text: str, refresh_seconds: int = CACHE_REFRESH_SECONDS) -> bool:
     """Write `text` to `path` unless the content (ignoring the timestamp line)
     is unchanged and the file is younger than `refresh_seconds`.
 
     Every rewrite is a sync event for the cloud folder; rewriting identical
     content every few minutes is pure load. Returns True if written."""
+    if path.is_symlink():
+        raise OSError(f"Refusing to overwrite symlink target: {path}")
     try:
         if path.exists():
             old = path.read_text(encoding="utf-8")
@@ -547,7 +582,7 @@ def write_if_changed(path: Path, text: str, refresh_seconds: int = CACHE_REFRESH
                 return False
     except OSError:
         pass
-    path.write_text(text, encoding="utf-8")
+    _atomic_write_text(path, text)
     return True
 
 

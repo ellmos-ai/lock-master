@@ -10,11 +10,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 
 import config
 
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_\-. ]+\.md$")
+_SAFE_ICON_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-. ]*\.(?:svg|png)$", re.IGNORECASE)
+_MAX_ROOM_LABEL_LEN = 120
+_MAX_ROOM_FILENAME_LEN = 120
+_ALLOWED_ROOM_FIELDS = {"label", "color", "notes", "goals", "notes_target", "notes_filename", "icon"}
 
 _ROOMS_FILE: Path = config._LOCAL_DATA_DIR / "rooms.json"
 
@@ -48,10 +53,100 @@ def _load_rooms_config() -> dict:
     return {}
 
 
+def _has_control_chars(value: str) -> bool:
+    return any(ord(c) < 32 or ord(c) == 127 for c in value)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    if path.is_symlink():
+        raise OSError(f"Refusing to overwrite symlink target: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as fh:
+            tmp_path = Path(fh.name)
+            fh.write(text)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
+def validate_room_updates(updates: dict) -> dict:
+    """Validates room update fields; raises ValueError on invalid input."""
+    validated: dict = {}
+    for field, value in updates.items():
+        if field not in _ALLOWED_ROOM_FIELDS:
+            continue
+        if field == "color":
+            if not isinstance(value, str) or _has_control_chars(value):
+                raise ValueError("Invalid color")
+            cleaned = value.strip()
+            if not config._COLOR_RE.fullmatch(cleaned):
+                raise ValueError("Invalid color (expected #RGB to #RRGGBBAA)")
+            validated["color"] = cleaned
+        elif field == "label":
+            if not isinstance(value, str) or _has_control_chars(value):
+                raise ValueError("Invalid label")
+            cleaned = value.strip()
+            if not cleaned or len(cleaned) > _MAX_ROOM_LABEL_LEN:
+                raise ValueError("Invalid label")
+            validated["label"] = cleaned
+        elif field == "icon":
+            if not isinstance(value, str) or _has_control_chars(value):
+                raise ValueError("Invalid icon")
+            cleaned = value.strip()
+            if cleaned:
+                if (
+                    len(cleaned) > _MAX_ROOM_FILENAME_LEN
+                    or ".." in cleaned
+                    or not _SAFE_ICON_RE.fullmatch(cleaned)
+                ):
+                    raise ValueError("Invalid icon")
+            validated["icon"] = cleaned
+        elif field in ("notes", "goals"):
+            if not isinstance(value, str) or "\x00" in value:
+                raise ValueError(f"Invalid {field}")
+            validated[field] = value
+        elif field == "notes_target":
+            if not isinstance(value, str) or value not in ("own_file", "claude_md"):
+                raise ValueError("Invalid notes_target")
+            validated["notes_target"] = value
+        elif field == "notes_filename":
+            if not isinstance(value, str) or _has_control_chars(value):
+                raise ValueError("Invalid notes_filename")
+            cleaned = value.strip()
+            if (
+                not cleaned
+                or len(cleaned) > _MAX_ROOM_FILENAME_LEN
+                or ".." in cleaned
+                or not _SAFE_FILENAME_RE.fullmatch(cleaned)
+            ):
+                raise ValueError("Invalid notes_filename")
+            validated["notes_filename"] = cleaned
+    return validated
+
+
 def _save_rooms_config(cfg: dict) -> None:
-    _ROOMS_FILE.write_text(
+    _atomic_write_text(
+        _ROOMS_FILE,
         json.dumps(cfg, ensure_ascii=False, indent=2),
-        encoding="utf-8",
     )
 
 
@@ -100,17 +195,60 @@ def _build_rooms() -> list[dict]:
         default_color = overlay["colors"].get(relpath, _DEFAULT_COLORS.get(relpath, "#6b7280"))
 
         room_user = user_cfg.get(key, {})
+        if not isinstance(room_user, dict):
+            room_user = {}
+        raw_color = room_user.get("color", default_color)
+        safe_color = (
+            raw_color.strip()
+            if isinstance(raw_color, str)
+            and not _has_control_chars(raw_color)
+            and config._COLOR_RE.fullmatch(raw_color.strip())
+            else default_color
+        )
+        raw_icon = room_user.get("icon", "")
+        safe_icon = (
+            raw_icon.strip()
+            if isinstance(raw_icon, str)
+            and not _has_control_chars(raw_icon)
+            and (
+                raw_icon.strip() == ""
+                or (
+                    len(raw_icon.strip()) <= _MAX_ROOM_FILENAME_LEN
+                    and ".." not in raw_icon
+                    and _SAFE_ICON_RE.fullmatch(raw_icon.strip())
+                )
+            )
+            else ""
+        )
+        raw_label = room_user.get("label", default_label)
+        safe_label = (
+            raw_label.strip()
+            if isinstance(raw_label, str)
+            and not _has_control_chars(raw_label)
+            and 0 < len(raw_label.strip()) <= _MAX_ROOM_LABEL_LEN
+            else default_label
+        )
         rooms.append({
             "key": key,
             "dir_name": os.path.basename(abs_path),
-            "label": room_user.get("label", default_label),
-            "color": room_user.get("color", default_color),
-            "notes": room_user.get("notes", ""),
-            "goals": room_user.get("goals", ""),
-            "notes_target": room_user.get("notes_target", "own_file"),
-            "notes_filename": room_user.get("notes_filename", "USER-NOTES.md"),
-            "icon": room_user.get("icon", ""),
-            "objects": room_user.get("objects", []),
+            "label": safe_label,
+            "color": safe_color,
+            "notes": room_user.get("notes", "") if isinstance(room_user.get("notes", ""), str) else "",
+            "goals": room_user.get("goals", "") if isinstance(room_user.get("goals", ""), str) else "",
+            "notes_target": (
+                room_user.get("notes_target")
+                if room_user.get("notes_target") in ("own_file", "claude_md")
+                else "own_file"
+            ),
+            "notes_filename": (
+                room_user.get("notes_filename")
+                if isinstance(room_user.get("notes_filename"), str)
+                and ".." not in room_user.get("notes_filename", "")
+                and _SAFE_FILENAME_RE.fullmatch(room_user.get("notes_filename", ""))
+                else "USER-NOTES.md"
+            ),
+            "icon": safe_icon,
+            "objects": room_user.get("objects", []) if isinstance(room_user.get("objects", []), list) else [],
             "abs_path": abs_path,
             "rel_path": relpath,
         })
@@ -172,21 +310,20 @@ def room_for_path(lock_path: str) -> str:
     return "other"
 
 
-def update_room(key: str, **kwargs: str) -> bool:
-    """Aktualisiert Raum-Einstellungen (label, color, notes, goals).
-    Gibt True zurück wenn erfolgreich."""
+def update_room(key: str, **kwargs: object) -> bool:
+    """Aktualisiert Raum-Einstellungen (label, color, notes, goals, icon, ...).
+    Wirft ValueError bei ungültigen Feldern; gibt True zurück wenn Raum existiert."""
+    validated = validate_room_updates(kwargs)
     room = get_room(key)
     if room is None:
         return False
 
     cfg = _load_rooms_config()
-    if key not in cfg:
+    if key not in cfg or not isinstance(cfg[key], dict):
         cfg[key] = {}
 
-    allowed = {"label", "color", "notes", "goals", "notes_target", "notes_filename", "icon"}
-    for field, value in kwargs.items():
-        if field in allowed:
-            cfg[key][field] = value
+    for field, value in validated.items():
+        cfg[key][field] = value
 
     _save_rooms_config(cfg)
     invalidate_cache()
@@ -283,8 +420,11 @@ def write_user_notes(key: str) -> None:
     root = Path(room["abs_path"])
 
     try:
+        resolved_root = root.resolve()
         if target == "claude_md":
             claude_md = root / "CLAUDE.md"
+            if claude_md.is_symlink() or claude_md.resolve().parent != resolved_root:
+                return
             marker = "<!-- LOCK-WATCHER-NOTES START -->"
             end_marker = "<!-- LOCK-WATCHER-NOTES END -->"
             wrapped = f"\n{marker}\n{block}\n{end_marker}\n"
@@ -306,10 +446,10 @@ def write_user_notes(key: str) -> None:
                 claude_md.write_text(wrapped, encoding="utf-8")
         else:
             filename = room.get("notes_filename", "USER-NOTES.md")
-            if not _SAFE_FILENAME_RE.fullmatch(filename):
+            if ".." in filename or not _SAFE_FILENAME_RE.fullmatch(filename):
                 return
             notes_path = root / filename
-            if notes_path.resolve() != (root / filename).resolve():
+            if notes_path.is_symlink() or notes_path.resolve().parent != resolved_root:
                 return
             full = f"# {room['label']} — User-Notizen\n\n" + block
             notes_path.write_text(full, encoding="utf-8")
