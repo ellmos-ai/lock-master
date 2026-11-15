@@ -31,7 +31,8 @@ class TestFullScanReconciliation(unittest.TestCase):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         self.tmp.close()
         self.db = storage.LockDB(Path(self.tmp.name))
-        self.cfg = config.load_scan_config()
+        # hermetic: scanner.full_scan is patched in these tests, the config is only passed through
+        self.cfg = {"default_max_depth": 4, "shallow_depth": 2, "skip_dirs": [], "roots": []}
 
     def tearDown(self):
         self.db.close()

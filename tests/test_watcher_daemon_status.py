@@ -102,7 +102,10 @@ class TestHeartbeatIndependentOfScan(unittest.TestCase):
                     daemon=True,
                 )
                 thread.start()
-                time.sleep(0.3)
+                # wait for a few beats instead of a fixed sleep: a loaded host writes them slower
+                deadline = time.monotonic() + 5
+                while counter["n"] <= 3 and time.monotonic() < deadline:
+                    time.sleep(0.02)
                 stop_event.set()
                 thread.join(timeout=2)
 
