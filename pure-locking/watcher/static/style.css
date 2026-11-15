@@ -901,3 +901,10 @@ input[type="color"] {
   .view-switcher { display: none; }
   .view-legend { display: none; }
 }
+
+/* Doku-Scanner: Steuerdateien je Raum */
+.doc-list { display: flex; flex-direction: column; gap: 4px; }
+.doc-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,0.03); }
+.doc-name { font-size: 13px; font-family: monospace; }
+.doc-name.doc-missing { color: var(--text-dim, #888); }
+.doc-meta { font-size: 12px; color: var(--text-dim, #888); }

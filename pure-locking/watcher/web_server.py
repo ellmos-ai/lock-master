@@ -10,6 +10,7 @@ Aufruf:
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import re
@@ -33,6 +34,36 @@ DEFAULT_PORT = 8095
 USER_PROFILE_FILE = config._LOCAL_DATA_DIR / "user_profile.json"
 
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-. ]+$")
+
+TICKET_PRIORITIES = ("niedrig", "mittel", "hoch", "kritisch")
+TICKET_MASTER_LIB_ENV = "TICKET_MASTER_LIB"
+
+
+def _ticket_master_module(name: str):
+    """Import a ticket-master helper (`ticket_writer`, `doc_scanner`) or return None.
+
+    The helpers belong to the ticket-master package, which is an optional companion of the
+    watcher: it is found on sys.path, or via the directory named by TICKET_MASTER_LIB
+    (ticket-master's ``lib`` folder). Without it the ticket form and the control-file panel
+    answer 501 instead of the watcher failing to start.
+    """
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        pass
+    lib = os.environ.get(TICKET_MASTER_LIB_ENV, "").strip()
+    if lib and os.path.isdir(lib) and lib not in sys.path:
+        sys.path.append(lib)
+        try:
+            return importlib.import_module(name)
+        except ImportError:
+            return None
+    return None
+
+
+def _single_line(value: object, limit: int) -> str:
+    """Collapse whitespace/newlines so a form value cannot add fields to a ticket file."""
+    return " ".join(str(value or "").split())[:limit]
 _SAFE_MD_FILENAME_RE = re.compile(r"^[A-Za-z0-9_\-. ]+\.md$")
 _SCOPE_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
@@ -140,7 +171,7 @@ def _daemon_status_for_api(db: storage.LockDB | None = None) -> dict:
     scan_started_age = _iso_age_seconds(scan_started_at) if scan_in_progress else None
     scan_stuck = (
         scan_started_age is not None
-        and scan_started_age > _lw.SCAN_OVERRUN_WARN_SECONDS
+        and scan_started_age > _lw.scan_overrun_warn_seconds()
     )
     scan_stale = (
         last_scan_age_seconds is not None
@@ -219,6 +250,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
             "/api/central-files": self._get_central_files,
             "/api/icons": self._get_icons,
             "/api/room-stats": self._get_room_stats,
+            "/api/project-docs": self._get_project_docs,
         }
 
         if path in routes:
@@ -277,6 +309,8 @@ class WatcherHandler(BaseHTTPRequestHandler):
             "/api/user-lock/remove": self._remove_user_lock,
             "/api/bulk-lock": self._bulk_lock,
             "/api/bulk-unlock": self._bulk_unlock,
+            "/api/ticket": self._create_ticket,
+            "/api/project-docs": self._project_docs_action,
         }
 
         if path in routes:
@@ -655,6 +689,80 @@ class WatcherHandler(BaseHTTPRequestHandler):
             return
         rooms.write_user_notes(room_key)
         self._json_response({"written": True, "room": room_key})
+
+    def _create_ticket(self, body: dict):
+        """Create an unclaimed ticket in the ticket-master queue (needs ticket-master)."""
+        title = _single_line(body.get("title"), 200)
+        text = str(body.get("body") or "").strip()
+        if not title:
+            self._json_error(400, "title required")
+            return
+        priority = _single_line(body.get("priority") or "mittel", 20).lower()
+        if priority not in TICKET_PRIORITIES:
+            self._json_error(400, f"priority must be one of {list(TICKET_PRIORITIES)}")
+            return
+        project = _single_line(body.get("project"), 200) or None
+        writer = _ticket_master_module("ticket_writer")
+        if writer is None:
+            self._json_error(501, "ticket-master is not available (set TICKET_MASTER_LIB)")
+            return
+        try:
+            # tickets_dir stays unset on purpose: the writer resolves it itself
+            # (argument > TICKET_MASTER_TICKETS_DIR > ticket-master config).
+            path = writer.create(title, text, project=project, priority=priority)
+        except Exception as exc:
+            self._json_error(500, f"Ticket creation failed: {exc}")
+            return
+        self._json_response({"created": path}, status=201)
+
+    def _doc_dir_from(self, value: str) -> Path | None:
+        project_path = self._resolve_project_dir(value) if value else None
+        if project_path is None or not os.path.isdir(project_path):
+            return None
+        return Path(project_path)
+
+    def _get_project_docs(self, qs: dict):
+        """GET /api/project-docs?project_dir=... -- state of the four control files."""
+        scanner_mod = _ticket_master_module("doc_scanner")
+        if scanner_mod is None:
+            self._json_error(501, "ticket-master is not available (set TICKET_MASTER_LIB)")
+            return
+        d = self._doc_dir_from(qs.get("project_dir", ""))
+        if d is None:
+            self._json_error(403, "Path outside allowed roots or not found")
+            return
+        self._json_response(scanner_mod.scan_docs(d))
+
+    def _project_docs_action(self, body: dict):
+        """POST /api/project-docs -- action 'ensure' (create the file) or 'append' (add an entry)."""
+        scanner_mod = _ticket_master_module("doc_scanner")
+        if scanner_mod is None:
+            self._json_error(501, "ticket-master is not available (set TICKET_MASTER_LIB)")
+            return
+        d = self._doc_dir_from(body.get("project_dir", ""))
+        if d is None:
+            self._json_error(403, "Path outside allowed roots or not found")
+            return
+        kind = str(body.get("kind", "")).strip().lower()
+        if kind not in scanner_mod.DOC_KINDS:
+            self._json_error(400, f"Invalid kind (one of {list(scanner_mod.DOC_KINDS)})")
+            return
+        action = str(body.get("action", "ensure")).strip().lower()
+        if action not in ("ensure", "append"):
+            self._json_error(400, "action must be 'ensure' or 'append'")
+            return
+        text = str(body.get("text", "")).strip()
+        if action == "append" and not text:
+            self._json_error(400, "text required for append")
+            return
+        try:
+            path = scanner_mod.ensure_doc(d, kind)
+            if action == "append":
+                scanner_mod.append_entry(Path(path), text)
+        except Exception as exc:
+            self._json_error(500, f"Doc action failed: {exc}")
+            return
+        self._json_response({"ok": True, "path": path, "action": action})
 
     # ── API: PUT ───────────────────────────────────────────────
 
