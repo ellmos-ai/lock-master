@@ -73,6 +73,35 @@ def test_junction_or_symlink_out_of_the_root_is_not_inside(tmp_path):
         assert not rooms.is_path_in_roots(str(link / "sub"))
 
 
+def test_is_path_in_roots_rejects_nul_and_realpath_errors(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    with patch.object(rooms, "_get_rooms", return_value=[{"key": "r", "abs_path": str(root)}]):
+        assert not rooms.is_path_in_roots(str(root / "sub\x00evil"))
+        assert not rooms.is_path_in_roots(str(root) + "\x00evil")
+
+        # Simulate POSIX os.path.realpath raising ValueError on NUL bytes (Windows returns it unchanged).
+        orig_realpath = os.path.realpath
+
+        def _posix_realpath(path):
+            if "\x00" in str(path):
+                raise ValueError("embedded null byte")
+            return orig_realpath(path)
+
+        monkeypatch.setattr(os.path, "realpath", _posix_realpath)
+        assert not rooms.is_path_in_roots(str(root) + "\x00evil")
+        assert not rooms.is_path_in_roots(str(root / "sub\x00evil"))
+
+        # realpath of the target works, but the configured root cannot be resolved: not inside.
+        def _failing_root_realpath(path):
+            if os.path.normcase(str(path)) == os.path.normcase(str(root)):
+                raise OSError("cannot resolve root")
+            return orig_realpath(path)
+
+        monkeypatch.setattr(os.path, "realpath", _failing_root_realpath)
+        assert not rooms.is_path_in_roots(str(root / "sub"))
+
+
 def test_safe_filename_regex():
     for name in ["USER-NOTES.md", "CLAUDE.md", "my_file.md", "Test 1.md"]:
         assert rooms._SAFE_FILENAME_RE.match(name), name

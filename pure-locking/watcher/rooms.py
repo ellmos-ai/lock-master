@@ -225,11 +225,22 @@ def is_path_in_roots(target_path: str) -> bool:
     Der Pfad muss logisch UND nach Auflösung von Junctions/Symlinks im Root liegen: ein in den
     Root gelegter Junction auf ein Ziel ausserhalb darf keine Schreibzugriffe dorthin öffnen.
     """
-    normalized = os.path.normpath(target_path).lower()
-    real = os.path.normcase(os.path.realpath(target_path))
+    if "\x00" in target_path:
+        return False
+    try:
+        normalized = os.path.normpath(target_path).lower()
+        real = os.path.normcase(os.path.realpath(target_path))
+    except (OSError, ValueError):
+        return False
     for room in _get_rooms():
         root = os.path.normpath(room["abs_path"])
-        if _within(normalized, root.lower()) and _within(real, os.path.normcase(os.path.realpath(root))):
+        if not _within(normalized, root.lower()):
+            continue
+        try:
+            real_root = os.path.realpath(root)
+        except (OSError, ValueError):
+            continue
+        if _within(real, os.path.normcase(real_root)):
             return True
     return False
 

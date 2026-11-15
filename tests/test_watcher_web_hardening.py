@@ -10,7 +10,9 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+import pytest
+
+ROOT =Path(__file__).resolve().parent.parent
 os.environ.setdefault("LOCK_MASTER_WATCHER_DATA", tempfile.mkdtemp(prefix="lockmaster-web-hardening-"))
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 
@@ -223,3 +225,118 @@ def test_scope_and_name_regexes_reject_traversal():
     assert all(web_server._SCOPE_RE.match(s) for s in ["desktop", "my-component", "v2_beta", "TEST"])
     assert not any(web_server._SCOPE_RE.match(s) for s in ["../evil", "a/b", "a\\b", "a b", ".."])
     assert not any(web_server._SAFE_NAME_RE.match(s) for s in ["../evil.md", "C:\\Windows\\x", "a/b.md"])
+
+
+def test_remove_user_lock_rejects_traversal_and_allows_valid_scopes(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    (root / "a").mkdir(parents=True)
+    (root / "LOCK.user.a").mkdir(parents=True)
+    outside.mkdir()
+    victim = outside / "LOCK.user.y.txt"
+    victim.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+
+    real_is_path_in_roots = rooms.is_path_in_roots
+    request, stop = _serve(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(rooms, "is_path_in_roots", real_is_path_in_roots)
+    monkeypatch.setattr(rooms, "_get_rooms", lambda: [{"key": "r", "abs_path": str(root)}])
+    try:
+        status, body, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "a/../../outside/LOCK.user.y"}),
+        )
+        assert status in (400, 403) and "error" in body
+        assert victim.exists()
+
+        # An over-long scope must be answered, not drop the connection (ENAMETOOLONG on POSIX).
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "x" * 5000}),
+        )
+        assert status in (400, 404)
+
+        scoped = root / "LOCK.user.proj.txt"
+        scoped.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "proj"}),
+        )
+        assert status == 200 and not scoped.exists()
+
+        project_lock = root / "LOCK.user.txt"
+        project_lock.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": "project"}),
+        )
+        assert status == 200 and not project_lock.exists()
+
+        project_lock.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+        status, _, _ = request(
+            "POST",
+            "/api/user-lock/remove",
+            _json({"project_dir": str(root), "scope": ""}),
+        )
+        assert status == 200 and not project_lock.exists()
+    finally:
+        stop()
+
+
+def test_user_lock_rejects_nul_in_project_dir_with_403(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    real_is_path_in_roots = rooms.is_path_in_roots
+    request, stop = _serve(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(rooms, "is_path_in_roots", real_is_path_in_roots)
+    monkeypatch.setattr(rooms, "_get_rooms", lambda: [{"key": "r", "abs_path": str(root)}])
+    try:
+        status, body, _ = request(
+            "POST",
+            "/api/user-lock",
+            _json({"project_dir": str(root / "sub\u0000evil")}),
+        )
+        assert status == 403 and "error" in body
+
+        # Simulate POSIX os.path.realpath raising ValueError on NUL bytes (Windows returns it unchanged).
+        orig_realpath = os.path.realpath
+
+        def _posix_realpath(path):
+            if "\x00" in str(path):
+                raise ValueError("embedded null byte")
+            return orig_realpath(path)
+
+        monkeypatch.setattr(os.path, "realpath", _posix_realpath)
+        status, body, _ = request(
+            "POST",
+            "/api/user-lock",
+            _json({"project_dir": str(root) + "\u0000evil"}),
+        )
+        assert status == 403 and "error" in body
+    finally:
+        stop()
+
+
+def test_remove_user_lock_unlinks_a_symlink_itself_not_its_target(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    victim = root / "CLAUDE.md"
+    victim.write_text("keep me", encoding="utf-8")
+    link = root / "LOCK.user.foo.txt"
+    try:
+        link.symlink_to(victim)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not available")
+    real_is_path_in_roots = rooms.is_path_in_roots
+    request, stop = _serve(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(rooms, "is_path_in_roots", real_is_path_in_roots)
+    monkeypatch.setattr(rooms, "_get_rooms", lambda: [{"key": "r", "abs_path": str(root)}])
+    try:
+        status, _, _ = request("POST", "/api/user-lock/remove", _json({"project_dir": str(root), "scope": "foo"}))
+        assert status == 200
+        assert victim.exists() and not link.is_symlink()
+    finally:
+        stop()
