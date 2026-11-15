@@ -143,8 +143,7 @@ Windows callers do not need to set `PYTHONIOENCODING` for Unicode lock data.
 | `POST /api/ticket` | create an unclaimed ticket (needs ticket-master, see below) |
 | `GET/POST /api/project-docs` | state of / create / append to a room's `TODO.md`, `AUFGABEN.txt`, `DONE.md`, `DECISIONS.md` (needs ticket-master) |
 
-Write endpoints are intended for local browser use and validate local origins (before the body is
-read). Bodies must be a JSON object of at most 1 MiB; anything else is answered with 400 or 413, as is a
+Write endpoints are intended for local browser use and validate local origins. Bodies must be a JSON object of at most 1 MiB; anything else is answered with 400 or 413, as is a
 field of the wrong JSON type. Project paths must lie inside a configured root after junctions and
 symlinks are resolved.
 

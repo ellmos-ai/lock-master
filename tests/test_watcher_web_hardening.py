@@ -84,7 +84,8 @@ def _json(value) -> bytes:
 def test_malformed_bodies_get_a_clean_400(monkeypatch, tmp_path):
     request, stop = _serve(monkeypatch, tmp_path, {"ticket_writer": _Writer()})
     try:
-        for raw in (b"[1, 2]", b'"text"', b"42", b"null", b"{not json", b"\xff\xfe"):
+        # b"[" * 5000: nesting beyond the interpreter limit raised RecursionError and dropped the connection
+        for raw in (b"[1, 2]", b'"text"', b"42", b"null", b"{not json", b"\xff\xfe", b"[" * 5000):
             status, body, _ = request("POST", "/api/ticket", raw)
             assert status == 400, raw
             assert "error" in body
@@ -124,11 +125,12 @@ def test_content_length_is_validated_and_capped(monkeypatch, tmp_path):
         stop()
 
 
-def test_the_origin_check_comes_before_the_body_is_read(monkeypatch, tmp_path):
-    request, stop = _serve(monkeypatch, tmp_path, {})
+def test_a_foreign_origin_is_refused_for_every_write_route(monkeypatch, tmp_path):
+    request, stop = _serve(monkeypatch, tmp_path, {"ticket_writer": _Writer()})
     try:
-        status, _body, _ = request("POST", "/api/ticket", b"{not json", {"Origin": "https://evil.example"})
-        assert status == 403
+        for method, path in (("POST", "/api/ticket"), ("POST", "/api/user-lock"), ("PUT", "/api/settings")):
+            status, _body, _ = request(method, path, _json({"title": "x"}), {"Origin": "https://evil.example"})
+            assert status == 403, (method, path)
     finally:
         stop()
 
@@ -196,11 +198,17 @@ def test_overlay_icons_are_listed_and_served(monkeypatch, tmp_path):
         assert status == 200 and data == b"<svg id='a'/>" and resp.getheader("Content-Type") == "image/svg+xml"
         # not in the overlay and not shipped: falls back to the index page, never to a path outside
         assert request("GET", "/icons/..%2F..%2Fapp.py")[0] in (200, 403, 404)
+        assert request("GET", "/icons/room_a.svg%00.txt")[0] in (200, 403, 404)  # NUL: answered, not dropped
     finally:
         stop()
 
 
 # --- helpers that had no test --------------------------------------------------------------------
+
+
+def test_a_nul_in_a_path_is_refused_not_a_crash(tmp_path):
+    assert web_server._resolve_within(tmp_path, "a\x00b.md") is None
+    assert web_server._resolve_within(tmp_path, "icons/ok.svg\x00.txt", allow_subdirs=True) is None
 
 
 def test_calc_remaining():

@@ -131,7 +131,10 @@ def _resolve_within(root: Path, name: str, *, allow_subdirs: bool = False) -> Pa
         return None
     if not allow_subdirs and len(parts) != 1:
         return None
-    resolved = root.joinpath(*parts).resolve()
+    try:
+        resolved = root.joinpath(*parts).resolve()
+    except (OSError, ValueError):  # e.g. an embedded NUL in the name
+        return None
     if resolved == resolved_root:
         return resolved
     try:
@@ -348,10 +351,12 @@ class WatcherHandler(BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
-        if not self._ensure_write_origin_allowed():
-            return
+        # Body first, origin second: answering a request whose body is still unread resets the
+        # connection on Windows, and the client then never sees the 403.
         body = self._read_body_or_reject()
         if body is None:
+            return
+        if not self._ensure_write_origin_allowed():
             return
 
         routes = {
@@ -381,10 +386,12 @@ class WatcherHandler(BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
-        if not self._ensure_write_origin_allowed():
-            return
+        # Body first, origin second: answering a request whose body is still unread resets the
+        # connection on Windows, and the client then never sees the 403.
         body = self._read_body_or_reject()
         if body is None:
+            return
+        if not self._ensure_write_origin_allowed():
             return
 
         if path.startswith("/api/lock/") and path.endswith("/name"):
@@ -1171,7 +1178,7 @@ class WatcherHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         try:
             data = json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (ValueError, RecursionError):  # bad JSON, bad UTF-8, or nesting beyond the interpreter limit
             raise _BadRequest(400, "Body must be valid JSON") from None
         if not isinstance(data, dict):
             raise _BadRequest(400, "Body must be a JSON object")

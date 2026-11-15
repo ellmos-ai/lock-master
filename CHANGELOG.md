@@ -20,8 +20,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   (`full_scan_max_gap_seconds`), and visible warnings (`scan_warnings`, `scan_partial`, state `degraded` for an incomplete
   scan). A scan that skipped part of a root never turns known locks into "deleted" without looking at the file.
 - API hardening (follow-ups of the ticket form review): non-object or invalid JSON bodies answer 400, bodies above 1 MiB
-  answer 413, a field of the wrong type is a 400 instead of a dropped connection, the origin is checked before the body is
-  read, and a junction or symlink inside a root that points outside is no longer treated as inside the root.
+  answer 413, a field of the wrong type, a NUL in a path or a deeply nested body is a 400/404 instead of a dropped connection, and
+  a junction or symlink inside a root that points outside is no longer treated as inside the root.
 - Optional host hook `cc_integrations` (`LOCK_MASTER_INTEGRATIONS_LIB`) for event recording and a routing hint on tickets.
 - User locks created in the UI now carry `removable_by: user` and `mode: hard`, like `lock_create.py --user`.
 - Tests of the running instance brought over (storage, daemon, daemon status, scan round trip, scanner/lock names, room
