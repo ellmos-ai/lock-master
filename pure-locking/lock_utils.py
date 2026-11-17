@@ -1331,6 +1331,12 @@ def read_repo_pointer(directory: Path) -> dict | None:
 # that truly cannot be parsed or says nothing about its clone.
 _CLONE_PATH_FIELDS = ("windows_default", "canonical_path", "local_clone",
                       "clone_path", "source_of_truth")
+_MACOS_CLONE_PATH_FIELD = "macos_default"
+_MACOS_CLONE_PATH_FIELDS = (
+    _MACOS_CLONE_PATH_FIELD, "canonical_path", "local_clone", "clone_path",
+    "source_of_truth",
+)
+_ALL_CLONE_PATH_FIELDS = (*_CLONE_PATH_FIELDS, _MACOS_CLONE_PATH_FIELD)
 _REPO_NAME_FIELDS = ("repo_name", "project", "module", "name")
 _REPO_ID_FIELDS = ("repo_id", "canonical_remote", "git_remote", "remote",
                    "repository")
@@ -1349,7 +1355,7 @@ def _pointer_fields_valid(pointer: object) -> bool:
     if locator is not None and not isinstance(locator, dict):
         return False
     for source in (pointer, locator or {}):
-        fields = (*_CLONE_PATH_FIELDS, *_REPO_NAME_FIELDS, *_REPO_ID_FIELDS)
+        fields = (*_ALL_CLONE_PATH_FIELDS, *_REPO_NAME_FIELDS, *_REPO_ID_FIELDS)
         if any(key in source and source[key] is not None
                and not isinstance(source[key], str) for key in fields):
             return False
@@ -1370,12 +1376,39 @@ def _pointer_clone_path(pointer: dict) -> Path | None:
     if not _pointer_fields_valid(pointer):
         return None
     sources = (pointer.get("local_locator") or {}, pointer)
+    if platform.system().casefold() == "darwin":
+        # A macOS path is selected explicitly. Never reinterpret a Windows
+        # drive path as a local path on Darwin. Conflicting declarations of
+        # the active-platform locator are ambiguous and fail closed.
+        macos_values = [src[_MACOS_CLONE_PATH_FIELD].strip()
+                        for src in sources
+                        if isinstance(src.get(_MACOS_CLONE_PATH_FIELD), str)
+                        and src[_MACOS_CLONE_PATH_FIELD].strip()]
+        if len(set(macos_values)) > 1:
+            return None
+        if macos_values:
+            return Path(macos_values[0])
+        fields = _MACOS_CLONE_PATH_FIELDS[1:]
+    else:
+        # Preserve the established Windows and non-Darwin legacy ordering.
+        fields = _CLONE_PATH_FIELDS
     for src in sources:
-        for field in _CLONE_PATH_FIELDS:
+        for field in fields:
             raw = src.get(field)
             if raw:
                 return Path(raw)
     return None
+
+
+def _pointer_has_clone_locator(pointer: dict) -> bool:
+    """Whether a valid pointer names a clone for any supported platform."""
+    if not _pointer_fields_valid(pointer):
+        return False
+    sources = (pointer.get("local_locator") or {}, pointer)
+    return any(
+        isinstance(src.get(field), str) and bool(src[field].strip())
+        for src in sources for field in _ALL_CLONE_PATH_FIELDS
+    )
 
 
 def _pointer_repo_name(pointer: dict) -> str | None:
@@ -1470,7 +1503,9 @@ def twin_dirs_for_path(path: Path, twin_config: dict | None):
         if not _pointer_is_no_mirror(pointer):
             clone = _pointer_clone_path(pointer)
             if clone is None:
-                return [], "pointer-unreadable"
+                status = ("pointer-unresolved" if _pointer_has_clone_locator(pointer)
+                          else "pointer-unreadable")
+                return [], status
             return ([clone], "ok") if clone.is_absolute() and clone.is_dir() else (
                 [], "pointer-unresolved")
 

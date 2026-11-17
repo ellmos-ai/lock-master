@@ -848,6 +848,11 @@ already existing, declared `REPO.pointer.json` — never from guessing names:
 | mirror → clone | `REPO.pointer.json` sits in the checked directory |
 | clone → mirror | `TWIN-INDEX.<HOST>.json`, written by `lock_scan.py --write-cache` from the very directories the full scan walks anyway |
 
+In `local_locator`, `windows_default` is selected on Windows and
+`macos_default` on macOS. Existing platform-neutral locator fields remain
+fallbacks. A locator for another platform is not treated as a local path; a
+missing or conflicting active-platform declaration remains unresolved.
+
 Configured through the `twin_resolution` block in `lock_roots.json` (`clone_roots` +
 `index_path`); set `index_path` to `.../TWIN-INDEX.{host}.json` (or
 `%COMPUTERNAME%` instead of `{host}`). Writer and reader resolve the same local
