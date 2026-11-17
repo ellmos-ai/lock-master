@@ -28,6 +28,7 @@ import lock_utils
 import lock_create
 import lock_scan
 from lock_scan import _check_dir
+from tests.locator_fixtures import same_host_locator
 
 
 def _git(*args, cwd: Path):
@@ -65,8 +66,7 @@ def write_twin_index(index: Path, clone: Path, mirrors: list[Path]) -> None:
         (mirror / lock_utils.REPO_POINTER_NAME).write_text(json.dumps({
             "schema": "ellmos-repo-pointer-v1",
             "repo_id": f"ellmos-ai/{clone.name}",
-            "local_locator": {"repo_name": clone.name,
-                              "windows_default": str(clone)},
+            "local_locator": same_host_locator(clone.name, clone),
         }), encoding="utf-8")
     index.write_text(json.dumps(lock_utils.build_twin_index(mirrors)),
                      encoding="utf-8")
@@ -246,8 +246,7 @@ class TestActiveLocksForPath:
             (mirror / lock_utils.REPO_POINTER_NAME).write_text(json.dumps({
                 "schema": "ellmos-repo-pointer-v1",
                 "repo_id": f"ellmos-ai/{clone_name}",
-                "local_locator": {"repo_name": clone_name,
-                                  "windows_default": str(clone)},
+                "local_locator": same_host_locator(clone_name, clone),
             }, ensure_ascii=False), encoding="utf-8")
             assert lock_create.main([
                 str(mirror), "--scope", "secret", "--path", relative.as_posix(),
