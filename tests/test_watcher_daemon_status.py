@@ -121,6 +121,59 @@ class TestHeartbeatIndependentOfScan(unittest.TestCase):
         self.assertTrue(status["scan_in_progress"])
         self.assertEqual(status["scan_started_at"], "2026-07-14T04:00:00")
 
+    def test_write_daemon_status_retries_transient_permission_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status_path = Path(tmp) / "daemon_status.json"
+            orig_replace = Path.replace
+            attempts = {"n": 0}
+
+            def flaky_replace(self_path: Path, target: Path):
+                attempts["n"] += 1
+                if attempts["n"] <= 2:
+                    raise PermissionError("simulated WinError 5")
+                return orig_replace(self_path, target)
+
+            with patch.object(lock_watcher.config, "DAEMON_STATUS_PATH", status_path), \
+                 patch.object(Path, "replace", flaky_replace):
+                lock_watcher._write_daemon_status(False, "2026-11-18T03:17:28")
+
+            self.assertEqual(attempts["n"], 3)
+            data = json.loads(status_path.read_text(encoding="utf-8"))
+            self.assertFalse(data["update_cache"])
+
+    def test_heartbeat_loop_survives_permission_error(self):
+        orig_write = lock_watcher._write_daemon_status
+        calls = {"n": 0, "ok": 0}
+        stop_event = threading.Event()
+        state_lock = threading.Lock()
+        scan_state = {"scan_in_progress": False}
+
+        def flaky_write(update_cache, started_at, scan_info=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise PermissionError("persistent WinError 5")
+            calls["ok"] += 1
+            return orig_write(update_cache, started_at, scan_info=scan_info)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            status_path = Path(tmp) / "daemon_status.json"
+            with patch.object(lock_watcher.config, "DAEMON_STATUS_PATH", status_path), \
+                 patch.object(lock_watcher, "_write_daemon_status", side_effect=flaky_write):
+                thread = threading.Thread(
+                    target=lock_watcher._heartbeat_loop,
+                    args=(stop_event, False, "2026-11-18T03:17:28", scan_state, state_lock, 0.02),
+                    daemon=True,
+                )
+                thread.start()
+                deadline = time.monotonic() + 5
+                while calls["ok"] < 2 and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                stop_event.set()
+                thread.join(timeout=2)
+
+            self.assertGreaterEqual(calls["ok"], 2)
+            self.assertTrue(status_path.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
