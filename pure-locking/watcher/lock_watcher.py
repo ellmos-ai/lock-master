@@ -239,7 +239,15 @@ def _write_daemon_status(
         status.update(scan_info)
     tmp_path = config.DAEMON_STATUS_PATH.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp_path.replace(config.DAEMON_STATUS_PATH)
+    # Windows readers/scanners briefly hold share-mode locks that fail os.replace with WinError 5.
+    for attempt in range(5):
+        try:
+            tmp_path.replace(config.DAEMON_STATUS_PATH)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def _clear_daemon_status(pid: int) -> None:
@@ -387,7 +395,10 @@ def _heartbeat_loop(
     while not stop_event.is_set():
         with state_lock:
             info = dict(scan_state)
-        _write_daemon_status(update_cache, started_at, scan_info=info)
+        try:
+            _write_daemon_status(update_cache, started_at, scan_info=info)
+        except OSError as exc:
+            print(f"[{_now_iso()}] Heartbeat-Schreibfehler (wird wiederholt): {exc}", file=sys.stderr)
         wait_s = (
             float(config.load_runtime_settings().get("heartbeat_interval", HEARTBEAT_INTERVAL))
             if interval is None
@@ -492,6 +503,11 @@ def run_daemon(update_cache: bool) -> None:
                         r.get("timed_out") for r in (stats or {}).get("roots", [])
                     )
                     scan_state["scan_warnings"] = warnings
+                    snapshot = dict(scan_state)
+                try:
+                    _write_daemon_status(update_cache, started_at, scan_info=snapshot)
+                except OSError as exc:
+                    print(f"[{_now_iso()}] Status-Flush nach Scan fehlgeschlagen: {exc}", file=sys.stderr)
                 if full_scan_gap > float(config.load_runtime_settings()["full_scan_interval"]):
                     print(
                         f"[{_now_iso()}] Full-Scan dauerte {duration:.0f}s; "
