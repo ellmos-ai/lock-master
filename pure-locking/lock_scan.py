@@ -28,6 +28,7 @@ Format/expiry logic: lock_utils.py.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import platform
@@ -364,7 +365,10 @@ def load_config(roots_file: Path) -> dict:
                 "skip_dirs": [
                     ".git", ".venv", "venv", "env", "node_modules",
                     "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache",
-                    "build", "dist", "releases", "_archive",
+                    ".pytest_temp", ".pytest_tmp*", ".tox", ".hypothesis",
+                    ".turbo", ".nyc_output", "build", "dist", "releases",
+                    "wheelhouse", ".wheel-smoke", "htmlcov", "*.egg-info",
+                    "_archive",
                 ],
                 "roots": [],
                 "caches": [],
@@ -394,23 +398,38 @@ def load_config(roots_file: Path) -> dict:
     return config
 
 
+def _root_max_depth(entry: dict, default_depth: int, shallow_depth: int) -> int:
+    raw = entry.get("max_depth")
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+        return raw
+    return shallow_depth if entry.get("shallow") else default_depth
+
+
 def iter_lock_dirs(config: dict):
     """Generator over all directories to check across all roots,
     respecting depth limits and skip-lists from the configuration.
     Yields Path objects (directories) in which LOCK*.txt files are searched."""
     default_depth = int(config.get("default_max_depth", 4))
     shallow_depth = int(config.get("shallow_depth", 2))
-    skip_dirs = {d.lower() for d in config.get("skip_dirs", [])}
+    raw_skips = [str(d).casefold() for d in config.get("skip_dirs", [])]
+    skip_dirs = {d for d in raw_skips if not any(ch in d for ch in "*?[")}
+    glob_skips = tuple(d for d in raw_skips if any(ch in d for ch in "*?["))
 
     for entry in config.get("roots", []):
         root = Path(entry["path"])
         if not root.exists() or not root.is_dir():
             continue
-        max_depth = shallow_depth if entry.get("shallow") else default_depth
-        yield from _walk(root, root, max_depth, skip_dirs)
+        max_depth = _root_max_depth(entry, default_depth, shallow_depth)
+        yield from _walk(root, root, max_depth, skip_dirs, glob_skips)
 
 
-def _walk(current: Path, root: Path, max_depth: int, skip_dirs: set):
+def _walk(
+    current: Path,
+    root: Path,
+    max_depth: int,
+    skip_dirs: set,
+    glob_skips: tuple[str, ...] = (),
+):
     yield current
     depth = len(current.relative_to(root).parts)
     if depth >= max_depth:
@@ -420,8 +439,12 @@ def _walk(current: Path, root: Path, max_depth: int, skip_dirs: set):
         with os.scandir(current) as it:
             child_dirs = []
             for entry in it:
-                if (entry.name.casefold() in skip_dirs
-                        or _is_excluded_child_dir(parent_name, entry.name)):
+                name_low = entry.name.casefold()
+                if (
+                    name_low in skip_dirs
+                    or (glob_skips and any(fnmatch.fnmatchcase(name_low, pat) for pat in glob_skips))
+                    or _is_excluded_child_dir(parent_name, entry.name)
+                ):
                     continue
                 try:
                     if entry.is_dir():
@@ -431,7 +454,7 @@ def _walk(current: Path, root: Path, max_depth: int, skip_dirs: set):
     except OSError:
         return
     for child in child_dirs:
-        yield from _walk(child, root, max_depth, skip_dirs)
+        yield from _walk(child, root, max_depth, skip_dirs, glob_skips)
 
 
 def _format_remaining(delta: timedelta) -> str:

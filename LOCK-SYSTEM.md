@@ -817,8 +817,11 @@ python prune_stale_locks.py --roots-file /path/to/my_roots.json
 
 **Scan performance:** `lock_roots.json` controls `default_max_depth` (default 4),
 `shallow_depth` (default 2, for roots with `"shallow": true` for large trees),
-and `skip_dirs` (directories skipped including their subtrees, e.g.
-`node_modules`, `.venv`, `.git`, `build`, `releases`).
+optional per-root `"max_depth"` (non-negative integer overriding `shallow`/`default_max_depth`,
+e.g. `"max_depth": 1` for repository-root-only clone trees),
+and `skip_dirs` (directories skipped including their subtrees; exact names or
+glob patterns such as `node_modules`, `.venv`, `.git`, `.pytest_temp`, `.pytest_tmp*`,
+`build`, `releases`).
 
 ---
 

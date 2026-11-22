@@ -12,9 +12,19 @@
     ".mypy_cache",
     ".ruff_cache",
     ".pytest_cache",
+    ".pytest_temp",
+    ".pytest_tmp*",
+    ".tox",
+    ".hypothesis",
+    ".turbo",
+    ".nyc_output",
     "build",
     "dist",
     "releases",
+    "wheelhouse",
+    ".wheel-smoke",
+    "htmlcov",
+    "*.egg-info",
     "_archive",
     ".gradle",
     "android",
@@ -27,7 +37,8 @@
     { "path": "/path/to/project-a" },
     { "path": "/path/to/project-b" },
     { "path": "/path/to/workspace" },
-    { "path": "/path/to/large-tree", "shallow": true }
+    { "path": "/path/to/large-tree", "shallow": true },
+    { "path": "/path/to/local/clones", "shallow": true, "max_depth": 1 }
   ],
   "caches": [
     {

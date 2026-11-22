@@ -210,3 +210,93 @@ def test_the_settings_endpoint_exposes_the_new_knobs():
     source = (ROOT / "pure-locking" / "watcher" / "web_server.py").read_text(encoding="utf-8")
     assert '"scan_root_budget_seconds": rt["scan_root_budget_seconds"]' in source
     assert '"full_scan_max_gap_seconds": rt["full_scan_max_gap_seconds"]' in source
+
+
+# --- pruning and fast lock discovery -----------------------------------------------------------
+
+
+def test_per_root_max_depth_limits_clone_trees_without_shrinking_shallow_roots(tmp_path):
+    repos_root = tmp_path / "repos"
+    topics_root = tmp_path / "topics"
+    repo_lock = _young_lock(repos_root / "repo-a")
+    _young_lock(repos_root / "repo-a" / "nested")  # depth 2: skipped when max_depth=1
+    topic_lock = _young_lock(topics_root / "cat" / "proj")  # depth 2: kept by shallow_depth=2
+
+    cfg = {
+        "default_max_depth": 4,
+        "shallow_depth": 2,
+        "skip_dirs": [],
+        "roots": [
+            {"path": str(repos_root), "shallow": True, "max_depth": 1},
+            {"path": str(topics_root), "shallow": True},
+        ],
+    }
+    report: dict = {}
+    found = scanner.full_scan(cfg, root_budget_s=0, report=report)
+    assert {r["path"] for r in found} == {str(repo_lock), str(topic_lock)}
+    by_path = {r["path"]: r for r in report["roots"]}
+    assert by_path[str(repos_root)]["dirs"] == 2  # root + repo-a only
+
+
+def test_per_root_max_depth_zero_and_invalid_values_behave_conservatively(tmp_path):
+    root = tmp_path / "r"
+    top_lock = _young_lock(root)
+    sub_lock = _young_lock(root / "sub")
+
+    cfg_zero = {"default_max_depth": 4, "shallow_depth": 2, "skip_dirs": [], "roots": [{"path": str(root), "max_depth": 0}]}
+    assert [r["path"] for r in scanner.full_scan(cfg_zero, root_budget_s=0)] == [str(top_lock)]
+
+    for bad_depth in (-1, True, "1", None):
+        cfg_bad = {
+            "default_max_depth": 2,
+            "shallow_depth": 1,
+            "skip_dirs": [],
+            "roots": [{"path": str(root), "shallow": True, "max_depth": bad_depth}],
+        }
+        found = {r["path"] for r in scanner.full_scan(cfg_bad, root_budget_s=0)}
+        assert found == {str(top_lock), str(sub_lock)}
+
+
+def test_skip_dirs_supports_glob_patterns_case_insensitively_and_honors_empty_list(tmp_path):
+    root = tmp_path / "r"
+    kept_lock = _young_lock(root / "repo" / "src")
+    _young_lock(root / "repo" / ".pytest_tmp_run123")
+    _young_lock(root / "repo" / "Pkg.EGG-INFO")
+
+    cfg_pruned = {
+        "default_max_depth": 4,
+        "shallow_depth": 2,
+        "skip_dirs": [".pytest_tmp*", "*.egg-info"],
+        "roots": [{"path": str(root)}],
+    }
+    assert [r["path"] for r in scanner.full_scan(cfg_pruned, root_budget_s=0)] == [str(kept_lock)]
+
+    cfg_unpruned = {
+        "default_max_depth": 4,
+        "shallow_depth": 2,
+        "skip_dirs": [],
+        "roots": [{"path": str(root)}],
+    }
+    assert len(scanner.full_scan(cfg_unpruned, root_budget_s=0)) == 3
+
+
+def test_find_lock_files_scandir_preserves_contract_and_handles_missing_dir(tmp_path):
+    assert lock_utils.find_lock_files(tmp_path / "does-not-exist") == []
+
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    (tmp_path / "LOCK.dir.txt").mkdir()  # directory with a lock name must not count as a file
+    _young_lock(tmp_path)
+    (tmp_path / "LOCK.api.txt").write_text("owner: a\n", encoding="utf-8")
+    (tmp_path / "TEST.txt").write_text("legacy\n", encoding="utf-8")
+
+    with_legacy = lock_utils.find_lock_files(tmp_path, include_legacy=True)
+    assert with_legacy == [
+        ("LOCK.api.txt", "api", False),
+        ("LOCK.txt", "project", False),
+        ("TEST.txt", "project", True),
+    ]
+    without_legacy = lock_utils.find_lock_files(tmp_path, include_legacy=False)
+    assert without_legacy == [
+        ("LOCK.api.txt", "api", False),
+        ("LOCK.txt", "project", False),
+    ]
