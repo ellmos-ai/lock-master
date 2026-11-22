@@ -802,6 +802,9 @@ vorhandenen, deklarierten `REPO.pointer.json` — kein Namensraten:
 Bestehende plattformneutrale Locator-Felder bleiben Rückfallwerte. Ein Pfad
 einer anderen Plattform wird nicht als lokaler Pfad verwendet; eine fehlende
 oder widersprüchliche Deklaration für die aktive Plattform bleibt unbestimmt.
+**Mac-Rollout-Hinweis:** Macs mit nur `windows_default` im
+`REPO.pointer.json` brauchen vor dem Rollout `macos_default` bzw.
+`canonical_path`.
 
 Konfiguriert wird das im Block `twin_resolution` in `lock_roots.json` (`clone_roots` +
 `index_path`); für `index_path` gilt `.../TWIN-INDEX.{host}.json` (alternativ
