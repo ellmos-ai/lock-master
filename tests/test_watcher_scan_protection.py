@@ -23,6 +23,7 @@ if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 
 import config  # noqa: E402
+import dir_stats  # noqa: E402
 import lock_scan  # noqa: E402
 import lock_utils  # noqa: E402
 import lock_watcher  # noqa: E402
@@ -300,3 +301,19 @@ def test_find_lock_files_scandir_preserves_contract_and_handles_missing_dir(tmp_
         ("LOCK.api.txt", "api", False),
         ("LOCK.txt", "project", False),
     ]
+
+
+def test_dir_stats_scan_room_applies_glob_skips_case_insensitively(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print(1)\n", encoding="utf-8")
+    (tmp_path / ".pytest_tmp_run1").mkdir()
+    (tmp_path / ".pytest_tmp_run1" / "junk.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "Pkg.EGG-INFO").mkdir()
+    (tmp_path / "Pkg.EGG-INFO" / "PKG-INFO").write_text("Name: p\n", encoding="utf-8")
+    (tmp_path / ".GIT").mkdir()
+    (tmp_path / ".GIT" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+    stats = dir_stats.scan_room(str(tmp_path), {".git", ".pytest_tmp*", "*.egg-info"})
+    assert stats["folder_count"] == 1
+    assert stats["file_count"] == 1
+    assert stats["type_code"] == 1
