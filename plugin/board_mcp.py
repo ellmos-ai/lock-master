@@ -173,7 +173,7 @@ def tool_board_claim_tool(args: dict) -> dict:
     except lg.LeaseStoreUnavailable as exc:
         denial = None
         lease_note = f"lease store unreachable ({plain(exc, 200)}); tool claim recorded on board only"
-    if denial and not queue:
+    if denial:
         return {"ok": False, "message": denial, "lock": lock_path.name, "agent": agent,
                 "your_tool_claims": own_tool_claims(lock_path, agent)}
     ok, message = team.update_team_lock(lock_path, "tool_claims", "claim", agent, resources=resources,

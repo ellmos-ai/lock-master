@@ -256,3 +256,70 @@ def test_session_end_releases_tool_claims_as_well_as_file_claims(board):
     lock_guard.session_end({"cwd": str(board), "session_id": "aaaa1111-0"})
     state, _ = call("board_read")
     assert state["file_claims"] == [] and state["tool_claims"] == []
+
+
+def test_tool_claim_lease_queue_rollback_partial_release_and_session_end(board, monkeypatch):
+    """Regressions for PR #54 review: queue=True respects foreign lease, rollback uses release(claim_id),
+    single-resource release keeps sibling tool leases, and session_end releases board-agent tool leases."""
+    import types
+
+    class HoldersStore:
+        def __init__(self):
+            self.active, self.released_all, self.seq = {}, [], 0
+
+        def acquire(self, resource, agent_id, intent, ttl_seconds, host=""):
+            cur = self.active.get(resource)
+            if cur is None or cur["holder"] == agent_id:
+                self.seq += 1
+                cid = cur["claim_id"] if cur else f"cid-{self.seq}"
+                self.active[resource] = {"claim_id": cid, "holder": agent_id, "intent": intent, "host": host}
+                return types.SimpleNamespace(claim_id=cid)
+            return types.SimpleNamespace(holder=cur["holder"], intent=cur["intent"], host=cur["host"], expires_at=0.0)
+
+        def holders(self, resource):
+            cur = self.active.get(resource)
+            slots = ([types.SimpleNamespace(holder=cur["holder"], claim_id=cur["claim_id"])] if cur else [])
+            return types.SimpleNamespace(slots=slots)
+
+        def release(self, claim_id, note="", with_receipt=False):
+            for k, v in list(self.active.items()):
+                if v["claim_id"] == claim_id:
+                    del self.active[k]
+                    return True
+            return False
+
+        def release_all(self, agent_id):
+            self.released_all.append(agent_id)
+            n = 0
+            for k, v in list(self.active.items()):
+                if v["holder"].lower() == agent_id.lower():
+                    del self.active[k]
+                    n += 1
+            return n
+
+        def close(self):
+            pass
+
+    store = HoldersStore()
+    monkeypatch.setattr(lock_guard, "lease_store", lambda: store)
+
+    # Foreign external lease blocks queue=True (no USING on board) + rollback releases prior acquired lease
+    store.acquire(lock_guard.tool_lease_key("port:13469", "TESTHOST"), BOB, "foreign", 600, host="TESTHOST")
+    res_q, err_q = call("board_claim_tool", resources=["roblox-studio", "port:13469"], agent=ALICE, queue=True)
+    assert not err_q and res_q["ok"] is False
+    assert call("board_read", agent=ALICE)[0]["tool_claims"] == []
+    assert lock_guard.tool_lease_key("roblox-studio", "TESTHOST") not in store.active
+
+    # Single-resource release preserves Alice's other tool lease
+    store.active.clear()
+    assert call("board_claim_tool", resources=["roblox-studio"], agent=ALICE)[0]["ok"]
+    assert call("board_claim_tool", resources=["port:13469"], agent=ALICE)[0]["ok"]
+    assert call("board_release_tool", resources=["roblox-studio"], agent=ALICE)[0]["ok"]
+    assert lock_guard.tool_lease_key("roblox-studio", "TESTHOST") not in store.active
+    assert lock_guard.tool_lease_key("port:13469", "TESTHOST") in store.active
+    assert store.released_all == []
+
+    # session_end releases board tool claims and remaining board-agent tool lease via claim_id
+    lock_guard.session_end({"cwd": str(board), "session_id": "aaaa1111-0"})
+    assert call("board_read", agent=ALICE)[0]["tool_claims"] == []
+    assert lock_guard.tool_lease_key("port:13469", "TESTHOST") not in store.active

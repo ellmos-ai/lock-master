@@ -842,7 +842,7 @@ def tool_lease_denial(agent: str, resources: list[str], intent: str = "claim-too
         return None
     host = my_host()
     ttl_sec = int(ttl if ttl is not None else os.environ.get("ELLMOS_LOCK_LEASE_TTL", "900"))
-    acquired: list[tuple[str, str]] = []
+    acquired: list[str] = []
     try:
         for res in resources:
             key = tool_lease_key(res, host)
@@ -853,11 +853,11 @@ def tool_lease_denial(agent: str, resources: list[str], intent: str = "claim-too
                     raise LeaseStoreUnavailable(_without_dsn(exc)) from exc
                 raise
             if hasattr(got, "claim_id"):
-                acquired.append((key, got.claim_id))
+                acquired.append(got.claim_id)
                 continue
-            for held_key, claim_id in acquired:
+            for claim_id in acquired:
                 try:
-                    store.release(held_key, claim_id)
+                    store.release(claim_id)
                 except Exception:
                     pass
             until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(got.expires_at))
@@ -869,25 +869,39 @@ def tool_lease_denial(agent: str, resources: list[str], intent: str = "claim-too
     return None
 
 
+def _release_tool_leases_in_store(store, agent: str, resources: list[str] | None = None) -> None:
+    if resources is None:
+        store.release_all(agent)
+        return
+    if not (isinstance(agent, str) and agent.isascii()):
+        return
+    host = my_host()
+    wanted = {tool_lease_key(r, host) for r in resources}
+    if hasattr(store, "holders"):
+        for key in wanted:
+            status = store.holders(key)
+            for slot in getattr(status, "slots", ()):
+                holder = getattr(slot, "holder", "")
+                claim_id = getattr(slot, "claim_id", None)
+                if claim_id and isinstance(holder, str) and holder.isascii() and holder.lower() == agent.lower():
+                    store.release(claim_id)
+    elif hasattr(store, "list_active"):
+        for lease in store.list_active():
+            holder = getattr(lease, "holder", "")
+            if (getattr(lease, "resource", "") in wanted and isinstance(holder, str)
+                    and holder.isascii() and holder.lower() == agent.lower()):
+                store.release(lease.claim_id)
+    else:
+        store.release_all(agent)
+
+
 def release_tool_leases(agent: str, resources: list[str] | None = None) -> None:
     """Best-effort release of `agent`'s tool leases (or all leases of `agent` when `resources` is None)."""
     store = lease_store()
     if store is None:
         return
     try:
-        if resources is None:
-            store.release_all(agent)
-            return
-        host = my_host()
-        wanted = {tool_lease_key(r, host) for r in resources}
-        if hasattr(store, "list_active"):
-            for lease in store.list_active():
-                holder = getattr(lease, "holder", "")
-                if (getattr(lease, "resource", "") in wanted and isinstance(holder, str)
-                        and holder.isascii() and agent.isascii() and holder.lower() == agent.lower()):
-                    store.release(lease.resource, lease.claim_id)
-        else:
-            store.release_all(agent)
+        _release_tool_leases_in_store(store, agent, resources)
     except Exception:
         pass
     finally:
@@ -1023,40 +1037,46 @@ def session(payload: dict) -> dict | None:
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
 
 
-def release_board_entries(payload: dict) -> None:
+def release_board_entries(payload: dict) -> list[str]:
     """Release the file claims, tool claims and the presence this session holds on the team locks of its working
     directory, so a finished session does not keep others out. Claims have no TTL of their own; a crashed session
-    leaves them until the team lock expires or somebody removes the lines by hand."""
+    leaves them until the team lock expires or somebody removes the lines by hand. Returns released tool resources."""
     name, host = session_name(payload), my_host()
     if not name:
-        return
+        return []
+    released_tools: list[str] = []
     for lock_name, _s, _l, src in lu.active_locks_for_path(Path(payload.get("cwd") or os.getcwd())):
         lock_path = Path(src) / lock_name
         if not (lu.is_team_lock(lock_name) and (lu.lock_host(lock_path) or "").upper() == host):
             continue
         try:
-            lines = lock_path.read_text(encoding="utf-8").splitlines()
             for section in ("file_claims", "tool_claims"):
                 lines = lock_path.read_text(encoding="utf-8").splitlines()
                 start, end = team._section_layout(lines)[section]
                 bundles, _ = team._parse_claim_bundles(lines[start:end], section, lock_path.parent)
                 for bundle in bundles:
                     if bundle.agent.isascii() and name.isascii() and bundle.agent.lower() == name.lower():
-                        team.update_team_lock(lock_path, section, "release", name, resources=bundle.resources,
-                                              project_dir=lock_path.parent)
+                        ok, _ = team.update_team_lock(lock_path, section, "release", name,
+                                                      resources=bundle.resources, project_dir=lock_path.parent)
+                        if ok and section == "tool_claims":
+                            released_tools.extend(bundle.resources)
             team.update_team_lock(lock_path, "presence", "release", name, project_dir=lock_path.parent)
         except (OSError, UnicodeDecodeError, ValueError, TimeoutError) as exc:  # best effort, never loud
             print(f"lock-master: could not release board entries of {name} ({clean(exc, 200)})", file=sys.stderr)
+    return released_tools
 
 
 def session_end(payload: dict) -> None:
-    release_board_entries(payload)
+    released_tools = release_board_entries(payload)
     Session(payload).forget()
     store = lease_store()
     if store is None or not payload.get("session_id"):
         return None
     try:
         store.release_all(lease_agent(payload))
+        board_agent = session_name(payload)
+        if released_tools and board_agent:
+            _release_tool_leases_in_store(store, board_agent, released_tools)
     finally:
         store.close()
     return None
