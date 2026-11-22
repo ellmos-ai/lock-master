@@ -16,9 +16,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_DATA_DIR = tempfile.mkdtemp(prefix="lockmaster-followup-")
-atexit.register(shutil.rmtree, _DEFAULT_DATA_DIR, True)
-os.environ.setdefault("LOCK_MASTER_WATCHER_DATA", _DEFAULT_DATA_DIR)
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _DEFAULT_DATA_DIR = tempfile.mkdtemp(prefix="lockmaster-followup-")
+    atexit.register(shutil.rmtree, _DEFAULT_DATA_DIR, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _DEFAULT_DATA_DIR
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 sys.path.insert(0, str(ROOT / "pure-locking"))
 

@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 """Tests: Sofortsperrung (bulk_lock/bulk_unlock) — guard, idempotent, reversibel,
 User-Locks unantastbar."""
+import atexit
+import shutil
 import os
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-os.environ.setdefault("LOCK_MASTER_WATCHER_DATA", tempfile.mkdtemp(prefix="lockmaster-core-bulk-lock-"))
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _WATCHER_TMP = tempfile.mkdtemp(prefix="lockmaster-core-bulk-lock-")
+    atexit.register(shutil.rmtree, _WATCHER_TMP, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _WATCHER_TMP
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 sys.path.insert(0, str(ROOT / "pure-locking"))
 sys.path.insert(0, str(ROOT))

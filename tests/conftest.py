@@ -7,11 +7,14 @@ Provides:
 """
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
+
+_MANAGED_WATCHER_DATA: Path | None = None
 
 
 def _is_cloud_or_onedrive(path: Path | str) -> bool:
@@ -22,6 +25,7 @@ def _is_cloud_or_onedrive(path: Path | str) -> bool:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Enforce safe basetemp locations outside cloud storage sync roots."""
+    global _MANAGED_WATCHER_DATA
     root = Path(config.rootpath).resolve()
 
     # Fail closed in git-less mirror trees that link to canonical clones
@@ -47,10 +51,26 @@ def pytest_configure(config: pytest.Config) -> None:
         safe_temp.mkdir(parents=True, exist_ok=True)
         config.option.basetemp = str(safe_temp)
 
+    resolved_bt = (
+        Path(getattr(config.option, "basetemp", None) or (root / ".pytest_temp")).resolve()
+    )
+    if not os.environ.get("LOCK_MASTER_WATCHER_DATA"):
+        watcher_data = resolved_bt / "watcher-data"
+        watcher_data.mkdir(parents=True, exist_ok=True)
+        os.environ["LOCK_MASTER_WATCHER_DATA"] = str(watcher_data)
+        _MANAGED_WATCHER_DATA = watcher_data
+
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Clean up basetemp and guarantee no LOCK* test fixture files remain on disk."""
+    global _MANAGED_WATCHER_DATA
     try:
+        if _MANAGED_WATCHER_DATA is not None:
+            if os.environ.get("LOCK_MASTER_WATCHER_DATA") == str(_MANAGED_WATCHER_DATA):
+                os.environ.pop("LOCK_MASTER_WATCHER_DATA", None)
+            shutil.rmtree(_MANAGED_WATCHER_DATA, ignore_errors=True)
+            _MANAGED_WATCHER_DATA = None
+
         basetemp_val = getattr(session.config.option, "basetemp", None)
         if not basetemp_val:
             return

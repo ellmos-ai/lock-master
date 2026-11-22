@@ -38,13 +38,17 @@ def test_root_paths_expand_environment_variables(tmp_path: Path, monkeypatch):
     assert "LOCKMASTER_TEST_HOME" not in expanded
 
 
-def test_root_paths_expand_user_home(tmp_path: Path):
+def test_root_paths_expand_user_home(tmp_path: Path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
     roots_file = _write_config(tmp_path, {"roots": [{"path": os.path.join("~", "work")}]})
     config = lock_scan.load_config(roots_file)
 
     expanded = config["roots"][0]["path"]
     assert not expanded.startswith("~")
-    assert str(Path.home()) in expanded
+    assert str(fake_home) in expanded
 
 
 def test_cache_paths_and_filter_prefix_expand(tmp_path: Path, monkeypatch):

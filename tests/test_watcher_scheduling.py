@@ -7,18 +7,20 @@ with the measured duration.
 """
 from __future__ import annotations
 
+import atexit
 import importlib
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WATCHER = ROOT / "pure-locking" / "watcher"
-os.environ.setdefault(
-    "LOCK_MASTER_WATCHER_DATA",
-    str(Path(tempfile.mkdtemp(prefix="lockmaster-scheduling-"))),
-)
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _WATCHER_TMP = tempfile.mkdtemp(prefix="lockmaster-scheduling-")
+    atexit.register(shutil.rmtree, _WATCHER_TMP, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _WATCHER_TMP
 sys.path.insert(0, str(WATCHER))
 
 import config  # noqa: E402
@@ -80,8 +82,9 @@ def test_daemon_status_reports_the_next_gap():
     assert "now - last_full_scan >= config.FULL_SCAN_INTERVAL" not in source
 
 
-def test_runtime_settings_persist_clamp_and_reset(monkeypatch):
-    tmp_dir = Path(tempfile.mkdtemp(prefix="lockmaster-runtime-settings-"))
+def test_runtime_settings_persist_clamp_and_reset(monkeypatch, tmp_path: Path):
+    tmp_dir = tmp_path / "runtime-settings"
+    tmp_dir.mkdir()
     settings_file = tmp_dir / "runtime_settings.json"
     monkeypatch.setattr(config, "RUNTIME_SETTINGS_PATH", settings_file)
     monkeypatch.setattr(config, "_LOCAL_DATA_DIR", tmp_dir)

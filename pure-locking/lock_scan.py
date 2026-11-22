@@ -69,6 +69,29 @@ CHECK_DIR_EXCLUDED_DESCENDANT_DIRS = frozenset({
     "build",
 })
 
+# Contextual (parent, child) directory pairs whose subtrees hold transient
+# agent scratchpad or session-transcript state rather than project governance
+# locks. Unlike CHECK_DIR_EXCLUDED_DESCENDANT_DIRS, names like "tmp" or
+# "sessions" may be legitimate project subdirectories elsewhere (for example
+# <repo>/sessions/LOCK.txt), so they are skipped ONLY directly beneath ".codex".
+# Governance locks in ".codex" itself or in ".codex/automations", ".codex/hooks",
+# etc. continue to block strictly fail-closed.
+EXCLUDED_PARENT_CHILD_DIRS = frozenset({
+    (".codex", "tmp"),
+    (".codex", "sessions"),
+    (".codex", "archived_sessions"),
+})
+
+
+def _dir_basename(path: Path) -> str:
+    """Return the directory basename even when `path` is '.'."""
+    return path.name or path.resolve().name
+
+
+def _is_excluded_child_dir(parent_name: str, child_name: str) -> bool:
+    """True if `child_name` directly beneath `parent_name` is an excluded transient subtree."""
+    return (parent_name.casefold(), child_name.casefold()) in EXCLUDED_PARENT_CHILD_DIRS
+
 
 class DescendantResult(tuple):
     """2-tuple (hits, complete) with optional .undetermined_reason.
@@ -229,10 +252,12 @@ def _descendant_locks(target: Path, now: datetime, limit: int | None = None,
         try:
             if _is_directory_redirect(current):
                 return DescendantResult(hits, False, "directory-redirect")
+            parent_name = _dir_basename(current)
             children = []
             with os.scandir(current) as it:
                 for entry in it:
-                    if entry.name.lower() in CHECK_DIR_EXCLUDED_DESCENDANT_DIRS:
+                    if (entry.name.casefold() in CHECK_DIR_EXCLUDED_DESCENDANT_DIRS
+                            or _is_excluded_child_dir(parent_name, entry.name)):
                         continue
                     try:
                         child_path = Path(entry.path)
@@ -390,11 +415,13 @@ def _walk(current: Path, root: Path, max_depth: int, skip_dirs: set):
     depth = len(current.relative_to(root).parts)
     if depth >= max_depth:
         return
+    parent_name = _dir_basename(current)
     try:
         with os.scandir(current) as it:
             child_dirs = []
             for entry in it:
-                if entry.name.lower() in skip_dirs:
+                if (entry.name.casefold() in skip_dirs
+                        or _is_excluded_child_dir(parent_name, entry.name)):
                     continue
                 try:
                     if entry.is_dir():

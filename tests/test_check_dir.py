@@ -1021,3 +1021,221 @@ class TestFastPathExclusionsAndFiles:
         payload = json.loads(capsys.readouterr().out)
         assert payload["descendants_complete"] is False
         assert payload["undetermined_reason"] == "walk-timeout"
+
+
+class TestCodexTransientSubtreeExclusions:
+    """T-20261116-818605502: skip transient .codex/{tmp,sessions,archived_sessions} subtrees
+    while keeping .codex itself and .codex/{automations,hooks,...} strictly fail-closed."""
+
+    def test_codex_tmp_and_sessions_locks_are_skipped(self, tmp_path, monkeypatch, capsys):
+        codex_dir = tmp_path / ".codex"
+        for rel in (
+            Path("tmp") / "run1",
+            Path("tmp") / "lock-master2044-fixture" / "sub",
+            Path("sessions") / "2026" / "11" / "rollout-1",
+            Path("archived_sessions") / "2026-10",
+        ):
+            d = codex_dir / rel
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "LOCK.user.txt").write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+            (d / "LOCK.txt").write_text("owner: codex@OTHERHOST\n", encoding="utf-8")
+            (d / "TEST.txt").write_text("legacy\n", encoding="utf-8")
+
+        # Legitimate sibling directories without locks
+        (codex_dir / "automations" / "daily").mkdir(parents=True)
+        (codex_dir / "hooks").mkdir(parents=True)
+
+        # 1. Direct --check-dir on <root>/.codex -> Exit 0
+        assert _check_dir(codex_dir, as_json=True, strict=False) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["locks"] == []
+        assert payload["descendants_complete"] is True
+
+        # 2. Subprocess CLI invocation on <root>/.codex -> Exit 0
+        cli = subprocess.run(
+            [sys.executable, "-X", "utf8", str(Path(lock_scan.__file__)), "--check-dir", str(codex_dir), "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+        )
+        assert cli.returncode == 0, cli.stderr
+        cli_payload = json.loads(cli.stdout)
+        assert cli_payload["locks"] == []
+        assert cli_payload["descendants_complete"] is True
+
+        # 3. Parent <root> --check-dir -> Exit 0
+        assert _check_dir(tmp_path, as_json=True, strict=False) == 0
+        parent_payload = json.loads(capsys.readouterr().out)
+        assert parent_payload["locks"] == []
+        assert parent_payload["descendants_complete"] is True
+
+        # 4. Relative '.' when CWD is <root>/.codex -> Exit 0
+        monkeypatch.chdir(codex_dir)
+        assert _check_dir(Path("."), as_json=True, strict=False) == 0
+        dot_payload = json.loads(capsys.readouterr().out)
+        assert dot_payload["locks"] == []
+        assert dot_payload["descendants_complete"] is True
+
+        # 5. Full root scan (iter_lock_dirs / collect_locks) also skips transient subtrees
+        cfg = {
+            "default_max_depth": 6,
+            "shallow_depth": 2,
+            "skip_dirs": [],
+            "roots": [{"path": str(tmp_path)}, {"path": str(codex_dir)}],
+        }
+        assert lock_scan.collect_locks(cfg) == []
+
+    def test_codex_case_variants_and_descendant_budget_not_consumed(self, tmp_path, monkeypatch, capsys):
+        codex_upper = tmp_path / ".CODEX"
+        for sub in ("TMP", "Sessions", "Archived_Sessions"):
+            for idx in range(5):
+                leaf = codex_upper / sub / f"item-{idx}"
+                leaf.mkdir(parents=True)
+                (leaf / "LOCK.user.txt").write_text("owner: user\n", encoding="utf-8")
+
+        # Even with descendant limit = 2, excluded transient subtrees consume 0 visits.
+        monkeypatch.setattr(lock_scan, "CHECK_DIR_MAX_DESCENDANTS", 2)
+        assert _check_dir(codex_upper, as_json=True, strict=False) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["locks"] == []
+        assert payload["descendants_complete"] is True
+
+    @pytest.mark.parametrize(
+        "locked_rel",
+        [
+            Path("."),
+            Path("automations"),
+            Path("automations") / "daily-sync",
+            Path("hooks"),
+        ],
+    )
+    def test_real_locks_in_codex_root_automations_and_hooks_block_fail_closed(
+        self, tmp_path, capsys, locked_rel
+    ):
+        codex_dir = tmp_path / ".codex"
+        (codex_dir / "tmp" / "run1").mkdir(parents=True)
+        (codex_dir / "sessions" / "s1").mkdir(parents=True)
+        target_lock_dir = codex_dir / locked_rel
+        target_lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_file = target_lock_dir / "LOCK.user.txt"
+        lock_file.write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+
+        # Scanning <root>/.codex blocks fail-closed (Exit 1)
+        assert _check_dir(codex_dir, as_json=True, strict=False) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert any(Path(row["path"]).resolve() == lock_file.resolve() for row in payload["locks"])
+
+        # Scanning <root> blocks fail-closed (Exit 1)
+        assert _check_dir(tmp_path, as_json=True, strict=False) == 1
+        root_payload = json.loads(capsys.readouterr().out)
+        assert any(Path(row["path"]).resolve() == lock_file.resolve() for row in root_payload["locks"])
+
+        # Full scan collect_locks finds the governance lock as well
+        cfg = {
+            "default_max_depth": 6,
+            "shallow_depth": 2,
+            "skip_dirs": [],
+            "roots": [{"path": str(codex_dir)}],
+        }
+        collected = lock_scan.collect_locks(cfg)
+        assert [Path(r["path"]).resolve() for r in collected] == [lock_file.resolve()]
+
+    @pytest.mark.parametrize(
+        "non_excluded_rel, lock_body",
+        [
+            (Path("project") / "tmp", "owner: codex-cli@OTHERHOST\ncreated: not-a-valid-date\n"),
+            (Path("project") / "sessions", "owner: agy@OTHERHOST\nremovable_by: user\n"),
+            (Path("project") / "archived_sessions", "owner: user\n"),
+            (Path(".codex") / "tmp_locks", "owner: codex@OTHERHOST\n"),
+            (Path(".codex") / "sessions_active", "owner: claude-code@OTHERHOST\n"),
+            (Path(".codex_other") / "tmp", "owner: kimi@OTHERHOST\n"),
+        ],
+    )
+    def test_lookalike_paths_and_malformed_foreign_locks_stay_fail_closed(
+        self, tmp_path, capsys, non_excluded_rel, lock_body
+    ):
+        d = tmp_path / non_excluded_rel
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "LOCK.user.txt").write_text(lock_body, encoding="utf-8")
+
+        assert _check_dir(tmp_path, as_json=True, strict=False) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload["locks"]) == 1
+
+    def test_adversarial_probe_codex_skip_cannot_bypass_lock_guard(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Adversarial probe (CONTRIBUTING.md §3a): verify foreign actors, look-alike owners,
+        Unicode/case variants, foreign sessions, header/newline injection, and missing payload
+        fields all fail closed on .codex and .codex/automations while own session lock works."""
+        plugin_dir = str(Path(__file__).resolve().parents[1] / "plugin")
+        if plugin_dir not in sys.path:
+            sys.path.insert(0, plugin_dir)
+        import lock_guard
+
+        monkeypatch.setenv("COMPUTERNAME", "TESTHOST")
+        monkeypatch.setenv("ELLMOS_LOCK_ACTOR", "codex")
+        monkeypatch.delenv("ELLMOS_LOCK_OWNER", raising=False)
+        monkeypatch.delenv("ELLMOS_LOCK_LEASES", raising=False)
+        monkeypatch.setenv("ELLMOS_LOCK_STATE_DIR", str(tmp_path / "_guard_state"))
+
+        codex_dir = tmp_path / ".codex"
+        auto_dir = codex_dir / "automations"
+        auto_dir.mkdir(parents=True)
+        target_cfg = auto_dir / "job.toml"
+        target_cfg.write_text("enabled = true\n", encoding="utf-8")
+
+        # Noise inside .codex/tmp and .codex/sessions must not interfere with own unlocked edit
+        for noise in (codex_dir / "tmp" / "run1", codex_dir / "sessions" / "s1"):
+            noise.mkdir(parents=True)
+            (noise / "LOCK.user.txt").write_text("owner: user\nremovable_by: user\n", encoding="utf-8")
+
+        own_payload = {
+            "session_id": "11111111aaaa",
+            "tool_name": "apply_patch",
+            "cwd": str(codex_dir),
+            "tool_input": {
+                "command": "*** Begin Patch\n*** Update File: automations/job.toml\n@@\n-enabled = true\n+enabled = false\n*** End Patch\n"
+            },
+        }
+        assert lock_guard.pretooluse(own_payload) is None
+
+        # Foreign actors, look-alikes, Unicode Kelvin/fullwidth, foreign session, and key:value injection -> all denied
+        hostile_locks = [
+            "owner: codex-cli@TESTHOST\ncreated: 2026-11-22T12:00:00Z\nexpires_after: 24h\n",
+            "owner: agy@TESTHOST\ncreated: 2026-11-22T12:00:00Z\nexpires_after: 24h\n",
+            "owner: codex@TESTHOST_LOOKALIKE\ncreated: 2026-11-22T12:00:00Z\nexpires_after: 24h\n",
+            "owner: codex@TEST\u212aOST\ncreated: 2026-11-22T12:00:00Z\nexpires_after: 24h\n",
+            "owner: codex@TESTHOST.99999999\ncreated: 2026-11-22T12:00:00Z\nexpires_after: 24h\n",
+            "owner: codex@TESTHOST.11111111\r\nowner: foreign@OTHERHOST\ncreated: invalid-ts\n",
+            "LOCK.user.agy@OTHERHOST\npurpose: header without colon\n",
+        ]
+        lock_file = auto_dir / "LOCK.txt"
+        for raw_lock in hostile_locks:
+            lock_file.write_bytes(raw_lock.encode("utf-8"))
+            verdict = lock_guard.pretooluse(own_payload)
+            assert verdict is not None and verdict["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert _check_dir(codex_dir, as_json=True, strict=False) == 1
+            capsys.readouterr()
+
+        # Own session lock allows own session, denies foreign session with different sid8
+        lock_file.write_text(
+            f"owner: codex@TESTHOST.11111111\ncreated: {lock_utils.created_utc_iso()}\nexpires_after: 24h\n",
+            encoding="utf-8",
+        )
+        assert lock_guard.pretooluse(own_payload) is None
+        foreign_session_payload = {**own_payload, "session_id": "22222222bbbb"}
+        verdict = lock_guard.pretooluse(foreign_session_payload)
+        assert verdict is not None and verdict["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+        # Missing / unparseable apply_patch target payload fails closed (exit code 2 on CLI)
+        bad_cli = subprocess.run(
+            [sys.executable, "-X", "utf8", str(Path(plugin_dir) / "lock_guard.py"), "pretooluse", "--actor", "codex"],
+            input=json.dumps({"session_id": "11111111aaaa", "tool_name": "apply_patch", "cwd": str(codex_dir), "tool_input": {}}),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+        )
+        assert bad_cli.returncode == 2
