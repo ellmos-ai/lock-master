@@ -79,7 +79,7 @@ def test_twin_file_link_does_not_hide_later_real_lock(tmp_path, capsys):
     clone.mkdir(parents=True)
     twin.mkdir(parents=True)
     pointer = {"schema": "ellmos-repo-pointer-v1", "repo_id": "ellmos-ai/demo-repo",
-               "local_locator": {"repo_name": "demo-repo", "windows_default": str(clone)}}
+               "local_locator": {"repo_name": "demo-repo", "canonical_path": str(clone)}}
     (twin / lock_utils.REPO_POINTER_NAME).write_text(json.dumps(pointer), encoding="utf-8")
     data = tmp_path / "data.db"
     data.write_bytes(b"twin metadata fixture")
@@ -288,7 +288,7 @@ def test_configured_limit_also_scans_real_twin_and_keeps_late_locks(
     for name in ["a", "b", "z"]:
         (twin / name).mkdir()
     pointer = {"schema": "ellmos-repo-pointer-v1", "repo_id": "ellmos-ai/demo-repo",
-               "local_locator": {"repo_name": "demo-repo", "windows_default": str(clone)}}
+               "local_locator": {"repo_name": "demo-repo", "canonical_path": str(clone)}}
     (twin / lock_utils.REPO_POINTER_NAME).write_text(json.dumps(pointer), encoding="utf-8")
     index = tmp_path / "twins.json"
     index.write_text(json.dumps(lock_utils.build_twin_index([twin])), encoding="utf-8")

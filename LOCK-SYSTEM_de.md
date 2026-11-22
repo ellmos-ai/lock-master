@@ -796,8 +796,12 @@ vorhandenen, deklarierten `REPO.pointer.json` — kein Namensraten:
 
 | Richtung | Weg |
 |---|---|
-| OneDrive -> Klon | `REPO.pointer.json` liegt im geprüften Verzeichnis (`local_locator.windows_default`) |
+| OneDrive -> Klon | `REPO.pointer.json` liegt im geprüften Verzeichnis; `local_locator.windows_default` gilt unter Windows, `local_locator.macos_default` unter macOS |
 | Klon -> OneDrive | `TWIN-INDEX.<HOST>.json`, den `lock_scan.py --write-cache` aus denselben Verzeichnissen mitschreibt, die es ohnehin durchläuft |
+
+Bestehende plattformneutrale Locator-Felder bleiben Rückfallwerte. Ein Pfad
+einer anderen Plattform wird nicht als lokaler Pfad verwendet; eine fehlende
+oder widersprüchliche Deklaration für die aktive Plattform bleibt unbestimmt.
 
 Konfiguriert wird das im Block `twin_resolution` in `lock_roots.json` (`clone_roots` +
 `index_path`); für `index_path` gilt `.../TWIN-INDEX.{host}.json` (alternativ
