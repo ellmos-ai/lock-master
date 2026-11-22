@@ -7,6 +7,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Twin resolution: portable macOS/Windows repo locator (#52, T-20261112-664316950)
+
+- Platform-specific `local_locator` resolution in `pure-locking/lock_utils.py` (`windows_default` on Windows,
+  `macos_default` on macOS, retaining platform-neutral fallback fields while rejecting locators for foreign platforms as
+  unresolved rather than treating them as local paths).
+- **Mac rollout requirement:** Hosts running on macOS whose `REPO.pointer.json` currently declares only
+  `local_locator.windows_default` must have `local_locator.macos_default` (or `canonical_path`) added before rollout;
+  otherwise twin resolution fails closed as unresolved.
+
 ### Watcher: run from a checkout, host overlay, scan protection (T-20261115-606489693)
 
 - Run the daemon from a git checkout instead of a hand-maintained copy: `LOCK_MASTER_WATCHER_CACHE_DIR` moves the
