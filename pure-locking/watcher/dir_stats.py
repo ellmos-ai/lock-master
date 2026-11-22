@@ -120,6 +120,7 @@ def scan_room(abs_path: str, skipped_dirs: Iterable[str] | None = None,
 def scan_all_rooms(rooms: list[dict], skipped_dirs: Iterable[str] | None = None,
                    timeout_per_room: float = 30.0) -> dict[str, dict]:
     """Scannt alle Räume und gibt ein Dict room_key → stats zurück."""
+    materialized_skips = tuple(skipped_dirs) if skipped_dirs is not None else None
     results = {}
     for room in rooms:
         key = room.get('key', '')
@@ -127,7 +128,7 @@ def scan_all_rooms(rooms: list[dict], skipped_dirs: Iterable[str] | None = None,
         if not abs_path or not os.path.isdir(abs_path):
             continue
         try:
-            results[key] = scan_room(abs_path, skipped_dirs, timeout_per_room)
+            results[key] = scan_room(abs_path, materialized_skips, timeout_per_room)
         except Exception:
             continue
     return results

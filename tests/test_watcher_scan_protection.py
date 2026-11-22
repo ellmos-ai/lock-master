@@ -317,3 +317,19 @@ def test_dir_stats_scan_room_applies_glob_skips_case_insensitively(tmp_path):
     assert stats["folder_count"] == 1
     assert stats["file_count"] == 1
     assert stats["type_code"] == 1
+
+
+def test_dir_stats_scan_all_rooms_materializes_generator_skips(tmp_path):
+    r1 = tmp_path / "r1"
+    r2 = tmp_path / "r2"
+    for r in (r1, r2):
+        (r / "src").mkdir(parents=True)
+        (r / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (r / ".pytest_tmp_a").mkdir()
+        (r / ".pytest_tmp_a" / "junk.py").write_text("y = 2\n", encoding="utf-8")
+
+    rooms = [{"key": "r1", "abs_path": str(r1)}, {"key": "r2", "abs_path": str(r2)}]
+    gen = (p for p in (".pytest_tmp*",))
+    out = dir_stats.scan_all_rooms(rooms, gen)
+    assert out["r1"]["file_count"] == 1
+    assert out["r2"]["file_count"] == 1
