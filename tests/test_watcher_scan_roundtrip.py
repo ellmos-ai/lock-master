@@ -14,13 +14,18 @@ und prüft die Abnahme aus dem Ticket:
   - nach Löschen der Datei verschwindet er nach dem nächsten Scan wieder.
 """
 
+import atexit
+import shutil
 import os
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-os.environ.setdefault("LOCK_MASTER_WATCHER_DATA", tempfile.mkdtemp(prefix="lockmaster-watcher-scan-roundtrip-"))
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _WATCHER_TMP = tempfile.mkdtemp(prefix="lockmaster-watcher-scan-roundtrip-")
+    atexit.register(shutil.rmtree, _WATCHER_TMP, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _WATCHER_TMP
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 sys.path.insert(0, str(ROOT / "pure-locking"))
 sys.path.insert(0, str(ROOT))

@@ -5,9 +5,11 @@
 """
 from __future__ import annotations
 
+import atexit
 import http.client
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -18,10 +20,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WATCHER = ROOT / "pure-locking" / "watcher"
-os.environ.setdefault(
-    "LOCK_MASTER_WATCHER_DATA",
-    str(Path(tempfile.mkdtemp(prefix="lockmaster-fork-features-"))),
-)
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _WATCHER_TMP = tempfile.mkdtemp(prefix="lockmaster-fork-features-")
+    atexit.register(shutil.rmtree, _WATCHER_TMP, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _WATCHER_TMP
 sys.path.insert(0, str(WATCHER))
 
 import cache_writer  # noqa: E402
@@ -124,7 +126,7 @@ def _serve(monkeypatch, tmp_path, project: Path, modules: dict):
     monkeypatch.setattr(web_server.config, "DB_PATH", tmp_path / "watcher.db")
     monkeypatch.setattr(web_server.rooms, "is_path_in_roots",
                         lambda p: os.path.normpath(p).lower().startswith(str(project).lower()))
-    monkeypatch.setattr(web_server, "_ticket_master_module", lambda name: modules.get(name))
+    monkeypatch.setattr(web_server, "_optional_module", lambda name, env: modules.get(name))
     server = web_server.WatcherServer(0)
     port = server.server_port
     thread = threading.Thread(target=server.serve_forever, daemon=True)

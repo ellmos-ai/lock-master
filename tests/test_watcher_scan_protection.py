@@ -6,6 +6,8 @@ scan, and a visible warning (daemon status, API state, UI text).
 """
 from __future__ import annotations
 
+import atexit
+import shutil
 import os
 import sys
 import tempfile
@@ -14,7 +16,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-os.environ.setdefault("LOCK_MASTER_WATCHER_DATA", tempfile.mkdtemp(prefix="lockmaster-scan-protection-"))
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _WATCHER_TMP = tempfile.mkdtemp(prefix="lockmaster-scan-protection-")
+    atexit.register(shutil.rmtree, _WATCHER_TMP, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _WATCHER_TMP
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 
 import config  # noqa: E402

@@ -8,6 +8,8 @@ the very first scan), and the locks table CHECK constraint rejected the
 
 from __future__ import annotations
 
+import atexit
+import shutil
 import os
 import sqlite3
 import sys
@@ -18,10 +20,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 # The watcher keeps runtime data outside the repo; point it at a temp dir
 # BEFORE importing watcher modules (config creates the dir on import).
-os.environ.setdefault(
-    "LOCK_MASTER_WATCHER_DATA",
-    str(Path(tempfile.mkdtemp(prefix="lockmaster-test-")))
-)
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _WATCHER_TMP = tempfile.mkdtemp(prefix="lockmaster-test-")
+    atexit.register(shutil.rmtree, _WATCHER_TMP, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _WATCHER_TMP
 sys.path.insert(0, str(ROOT / "pure-locking" / "watcher"))
 
 import lock_utils  # noqa: E402

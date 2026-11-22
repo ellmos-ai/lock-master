@@ -10,6 +10,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import atexit
+import shutil
 import os
 import subprocess
 import sys
@@ -23,10 +25,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 WATCHER = ROOT / "pure-locking" / "watcher"
-os.environ.setdefault(
-    "LOCK_MASTER_WATCHER_DATA",
-    str(Path(tempfile.mkdtemp(prefix="lockmaster-resilience-"))),
-)
+if "LOCK_MASTER_WATCHER_DATA" not in os.environ:
+    _WATCHER_TMP = tempfile.mkdtemp(prefix="lockmaster-resilience-")
+    atexit.register(shutil.rmtree, _WATCHER_TMP, True)
+    os.environ["LOCK_MASTER_WATCHER_DATA"] = _WATCHER_TMP
 sys.path.insert(0, str(WATCHER))
 
 import config  # noqa: E402

@@ -107,3 +107,44 @@ def test_onedrive_basetemp_guard_protects_cloud_storage(tmp_path: Path):
     conftest.pytest_configure(od_config)
     assert "onedrive" not in str(od_config.option.basetemp).lower()
     assert "cloudstorage" not in str(od_config.option.basetemp).lower()
+
+
+def test_watcher_and_core_imports_do_not_leak_mkdtemp_into_tempdir(tmp_path: Path):
+    """Regression for T-20261116-818605502: importing watcher/core tests must not leave
+    orphaned lockmaster-* directories inside TEMP / .codex/tmp."""
+    import os
+    import subprocess
+    import sys
+
+    fake_codex_tmp = tmp_path / ".codex" / "tmp"
+    fake_codex_tmp.mkdir(parents=True)
+    env = os.environ.copy()
+    env.pop("LOCK_MASTER_WATCHER_DATA", None)
+    for var in ("TMP", "TEMP", "TMPDIR"):
+        env[var] = str(fake_codex_tmp)
+    env["PYTHONPATH"] = str(ROOT)
+
+    code = (
+        "import importlib\n"
+        "for mod in (\n"
+        "    'tests.test_core_bulk_lock',\n"
+        "    'tests.test_core_permissions',\n"
+        "    'tests.test_core_prune_user_locks',\n"
+        "    'tests.test_core_user_locks',\n"
+        "    'tests.test_watcher_fork_features',\n"
+        "    'tests.test_watcher_hardening_followup',\n"
+        "    'tests.test_watcher_scheduling',\n"
+        "):\n"
+        "    importlib.import_module(mod)\n"
+    )
+    res = subprocess.run(
+        [sys.executable, "-X", "utf8", "-c", code],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert res.returncode == 0, res.stderr
+    leaked = list(fake_codex_tmp.iterdir())
+    assert leaked == [], f"Orphaned temp entries leaked into .codex/tmp: {leaked}"
