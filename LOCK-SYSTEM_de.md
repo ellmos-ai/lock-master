@@ -853,7 +853,7 @@ PYTHONIOENCODING=utf-8 python C:\Users\User\OneDrive\_scripts\lock_scan.py --wri
 ```
 Schreibt zwei auto-generierte Caches pro Host: systemweit `_scripts/LOCK-CACHE.<HOST>.md` (alle Roots) und nur Software `.SOFTWARE/LOCK-CACHE.<HOST>.md` (Präfix-Filter auf `.SOFTWARE`). Cache-Pfade in `lock_roots.json` nutzen `%COMPUTERNAME%` bzw. `{host}`; geschrieben wird nur, wenn sich die Lock-Menge ändert (Ablauf als absoluter Zeitpunkt, kein Countdown), sonst höchstens alle 30 min; `TWIN-INDEX.<HOST>.json` ebenfalls nur bei inhaltlicher Änderung. Beide sind abgeleitete Artefakte (nicht manuell editieren, in `.gitignore`); maßgeblich bleiben die `LOCK*.txt` selbst.
 
-**Scan-Begrenzung (Performance):** `lock_roots.json` steuert `default_max_depth` (Default 4), `shallow_depth` (Default 2, für Roots mit `"shallow": true` wie `.WISSEN`) und `skip_dirs` (übersprungene Verzeichnisse inkl. Unterbaum, z. B. `node_modules`, `.venv`, `.git`, `build`, `releases`).
+**Scan-Begrenzung (Performance):** `lock_roots.json` steuert `default_max_depth` (Default 4), `shallow_depth` (Default 2, für Roots mit `"shallow": true` wie `.WISSEN`), optionales `"max_depth"` je Root (nicht-negative Ganzzahl, überschreibt `shallow`/`default_max_depth`, z. B. `"max_depth": 1` für Klon-Wurzeln mit Locks nur am Repo-Root) und `skip_dirs` (übersprungene Verzeichnisse inkl. Unterbaum; exakte Namen oder Glob-Muster wie `node_modules`, `.venv`, `.git`, `.pytest_temp`, `.pytest_tmp*`, `build`, `releases`).
 
 ---
 

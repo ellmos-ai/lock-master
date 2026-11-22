@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import time
+from collections.abc import Iterable
 from datetime import datetime
 
 
@@ -44,11 +46,27 @@ def classify(ext: str) -> str:
     return 'other'
 
 
-def scan_room(abs_path: str, skipped_dirs: set[str] | None = None,
+def _split_skips(skipped_dirs: Iterable[str] | None) -> tuple[set[str], tuple[str, ...]]:
+    """Split configured skip entries into case-folded literals and glob patterns."""
+    if not skipped_dirs:
+        return set(), ()
+    folded = [str(entry).casefold() for entry in skipped_dirs]
+    literals = {entry for entry in folded if not any(ch in entry for ch in "*?[")}
+    globs = tuple(entry for entry in folded if any(ch in entry for ch in "*?["))
+    return literals, globs
+
+
+def _is_skipped_dir(name: str, literal_skips: set[str], glob_skips: tuple[str, ...]) -> bool:
+    name_low = name.casefold()
+    if name_low in literal_skips:
+        return True
+    return bool(glob_skips and any(fnmatch.fnmatchcase(name_low, pat) for pat in glob_skips))
+
+
+def scan_room(abs_path: str, skipped_dirs: Iterable[str] | None = None,
               timeout: float = 30.0) -> dict:
     """Scannt ein Verzeichnis rekursiv via os.scandir und liefert Statistiken."""
-    if skipped_dirs is None:
-        skipped_dirs = set()
+    literal_skips, glob_skips = _split_skips(skipped_dirs)
 
     result = {
         'file_count': 0,
@@ -76,7 +94,7 @@ def scan_room(abs_path: str, skipped_dirs: set[str] | None = None,
                         break
                     try:
                         if entry.is_dir(follow_symlinks=False):
-                            if entry.name not in skipped_dirs:
+                            if not _is_skipped_dir(entry.name, literal_skips, glob_skips):
                                 result['folder_count'] += 1
                                 stack.append(entry.path)
                         elif entry.is_file(follow_symlinks=False):
@@ -99,9 +117,10 @@ def scan_room(abs_path: str, skipped_dirs: set[str] | None = None,
     return result
 
 
-def scan_all_rooms(rooms: list[dict], skipped_dirs: set[str] | None = None,
+def scan_all_rooms(rooms: list[dict], skipped_dirs: Iterable[str] | None = None,
                    timeout_per_room: float = 30.0) -> dict[str, dict]:
     """Scannt alle Räume und gibt ein Dict room_key → stats zurück."""
+    materialized_skips = tuple(skipped_dirs) if skipped_dirs is not None else None
     results = {}
     for room in rooms:
         key = room.get('key', '')
@@ -109,7 +128,7 @@ def scan_all_rooms(rooms: list[dict], skipped_dirs: set[str] | None = None,
         if not abs_path or not os.path.isdir(abs_path):
             continue
         try:
-            results[key] = scan_room(abs_path, skipped_dirs, timeout_per_room)
+            results[key] = scan_room(abs_path, materialized_skips, timeout_per_room)
         except Exception:
             continue
     return results

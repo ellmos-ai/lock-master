@@ -816,23 +816,31 @@ def find_lock_files(project_dir: Path, include_legacy: bool = True):
     """Find all lock files in a project root directory.
     Returns: list of (name, scope, is_legacy)."""
     results = []
-    # Enumerate real entry names: literal globs on Windows Python 3.10/3.11
-    # can construct the returned path from the pattern's case instead.
-    for hit in sorted(project_dir.glob("*")):
-        scope = scope_from_name(hit.name)
-        is_legacy_name = include_legacy and hit.name in LEGACY_LOCK_NAMES
-        if scope is None and not is_legacy_name:
-            continue
-        try:
-            is_file = hit.is_file()
-        except OSError:
-            is_file = True
-        if not is_file:
-            continue
-        if scope is not None:
-            results.append((hit.name, scope, False))
-        elif is_legacy_name:
-            results.append((hit.name, "project", True))
+    # Enumerate real entry names via os.scandir: skips building/sorting Path
+    # objects for non-lock entries and avoids Windows Python 3.10/3.11
+    # literal-glob casing artifacts.
+    try:
+        with os.scandir(project_dir) as it:
+            for entry in it:
+                name = entry.name
+                is_legacy_name = include_legacy and name in LEGACY_LOCK_NAMES
+                if not ((len(name) >= 8 and name[:4].lower() == "lock") or is_legacy_name):
+                    continue
+                scope = scope_from_name(name)
+                if scope is None and not is_legacy_name:
+                    continue
+                try:
+                    is_file = entry.is_file()
+                except OSError:
+                    is_file = True
+                if not is_file:
+                    continue
+                if scope is not None:
+                    results.append((name, scope, False))
+                elif is_legacy_name:
+                    results.append((name, "project", True))
+    except OSError:
+        return []
     return sorted(set(results))
 
 
